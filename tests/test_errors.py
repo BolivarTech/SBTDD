@@ -104,6 +104,71 @@ def test_non_matching_subclass_not_caught():
             pytest.fail("DriftError catch must not intercept MAGIGateError")
 
 
+def test_exit_codes_mapping_covers_all_subclasses():
+    """EXIT_CODES must map every SBTDDError subclass to its exit code.
+
+    Per MAGI Loop 2 Finding 7: codify the exception -> exit code
+    mapping in errors.py so dispatchers (run_sbtdd.py, *_cmd.py) have
+    a single source of truth aligned with spec sec.S.11.1 taxonomy.
+    """
+    from errors import (
+        EXIT_CODES,
+        CommitError,
+        DependencyError,
+        DriftError,
+        MAGIGateError,
+        PreconditionError,
+        QuotaExhaustedError,
+        StateFileError,
+        ValidationError,
+    )
+
+    expected_classes = {
+        ValidationError,
+        StateFileError,
+        DriftError,
+        DependencyError,
+        PreconditionError,
+        MAGIGateError,
+        QuotaExhaustedError,
+        CommitError,
+    }
+    assert set(EXIT_CODES.keys()) == expected_classes
+
+
+def test_exit_codes_match_canonical_taxonomy():
+    """Canonical sec.S.11.1 exit code mapping is enforced."""
+    from errors import (
+        EXIT_CODES,
+        CommitError,
+        DependencyError,
+        DriftError,
+        MAGIGateError,
+        PreconditionError,
+        QuotaExhaustedError,
+        StateFileError,
+        ValidationError,
+    )
+
+    # Canonical per sec.S.11.1 + CLAUDE.md "Key Design Decisions":
+    assert EXIT_CODES[ValidationError] == 1
+    assert EXIT_CODES[StateFileError] == 1
+    assert EXIT_CODES[CommitError] == 1
+    assert EXIT_CODES[DependencyError] == 2
+    assert EXIT_CODES[PreconditionError] == 2
+    assert EXIT_CODES[DriftError] == 3
+    assert EXIT_CODES[MAGIGateError] == 8
+    assert EXIT_CODES[QuotaExhaustedError] == 11
+
+
+def test_exit_codes_is_read_only():
+    """EXIT_CODES is MappingProxyType -- mutation must raise TypeError."""
+    from errors import EXIT_CODES, ValidationError
+
+    with pytest.raises(TypeError):
+        EXIT_CODES[ValidationError] = 99  # type: ignore[index]
+
+
 def test_mro_is_flat_single_inheritance():
     """All subclasses inherit directly from SBTDDError (no diamond)."""
     from errors import (
