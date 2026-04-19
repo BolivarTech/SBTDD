@@ -174,21 +174,41 @@ def detect_drift(
     # Parse plan checkbox for the active task
     plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
     plan_task_state = (
-        _extract_task_checkbox(plan_text, current_task_id) if current_task_id else "[ ]"
+        _all_task_steps_complete(plan_text, current_task_id) if current_task_id else "[ ]"
     )
 
     return _evaluate_drift(current_phase, last_commit_prefix, plan_task_state)
 
 
-def _extract_task_checkbox(plan_text: str, task_id: str) -> str:
-    """Extract the checkbox state of the task matching `### Task <id>:`."""
+def _all_task_steps_complete(plan_text: str, task_id: str) -> str:
+    """Return "[x]" if every step in the task section is checked, else "[ ]".
+
+    Heuristic (renamed from ``_extract_task_checkbox`` per MAGI Loop 2
+    Finding 4 for honesty): plan files written by ``/writing-plans``
+    decompose each task into multiple ``- [ ]`` step checkboxes. The
+    plan is not expected to contain a single task-level checkbox; the
+    close-task subcommand flips all step checkboxes to ``- [x]`` when
+    the task's refactor phase closes. This function therefore returns
+    ``"[x]"`` only when ALL step checkboxes in the task section have
+    been flipped -- i.e. the whole task is structurally complete.
+
+    Args:
+        plan_text: Full text of planning/claude-plan-tdd.md.
+        task_id: Task identifier matching ``### Task <id>:``.
+
+    Returns:
+        "[x]" if all step checkboxes in the task section are checked;
+        "[ ]" otherwise (including the task-not-found case -- conservative
+        default to avoid false "task complete" reports).
+    """
     task_header = re.compile(rf"^### Task {re.escape(task_id)}:", re.MULTILINE)
     match = task_header.search(plan_text)
     if not match:
         return "[ ]"
-    # Find the next `- [x]` or `- [ ]` in the task block (simplest heuristic:
-    # return [x] only if ALL checkboxes in the task section are [x]).
-    section_end = task_header.search(plan_text, match.end())
+    # Use a generic next-task-header pattern to find the section boundary;
+    # the specific task_header regex would only re-match the SAME task id.
+    any_task_header = re.compile(r"^### Task \S+?:", re.MULTILINE)
+    section_end = any_task_header.search(plan_text, match.end())
     end_pos = section_end.start() if section_end else len(plan_text)
     section = plan_text[match.end() : end_pos]
     if "- [ ]" in section:
