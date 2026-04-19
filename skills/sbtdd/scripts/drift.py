@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
+
+import subprocess_utils
 
 
 @dataclass(frozen=True)
@@ -162,14 +163,13 @@ def detect_drift(
     current_phase = data["current_phase"]
     current_task_id = data.get("current_task_id")
 
-    # Parse last commit prefix from git log HEAD
-    result = subprocess.run(
+    # Parse last commit prefix from git log HEAD; route through
+    # subprocess_utils for NF5 consistency (timeout + Windows kill-tree,
+    # MAGI Loop 2 Finding 8).
+    result = subprocess_utils.run_with_timeout(
         ["git", "log", "-1", "--format=%s"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
         timeout=10,
-        check=False,
+        cwd=str(repo_root),
     )
     subject = result.stdout.strip()
     match = re.match(r"^([a-z]+):", subject)
