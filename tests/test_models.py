@@ -28,3 +28,33 @@ def test_commit_prefix_map_has_required_keys():
     assert COMMIT_PREFIX_MAP["green_fix"] == "fix"
     assert COMMIT_PREFIX_MAP["refactor"] == "refactor"
     assert COMMIT_PREFIX_MAP["task_close"] == "chore"
+
+
+def test_verdict_rank_ordering():
+    from models import VERDICT_RANK
+
+    assert VERDICT_RANK["STRONG_NO_GO"] < VERDICT_RANK["HOLD"]
+    assert VERDICT_RANK["HOLD"] < VERDICT_RANK["HOLD_TIE"]
+    assert VERDICT_RANK["HOLD_TIE"] < VERDICT_RANK["GO_WITH_CAVEATS"]
+    assert VERDICT_RANK["GO_WITH_CAVEATS"] < VERDICT_RANK["GO"]
+    assert VERDICT_RANK["GO"] < VERDICT_RANK["STRONG_GO"]
+
+
+def test_verdict_meets_threshold_positive():
+    from models import verdict_meets_threshold
+
+    assert verdict_meets_threshold("GO", "GO_WITH_CAVEATS") is True
+    assert verdict_meets_threshold("GO_WITH_CAVEATS", "GO_WITH_CAVEATS") is True
+
+
+def test_verdict_meets_threshold_negative():
+    from models import verdict_meets_threshold
+
+    assert verdict_meets_threshold("HOLD", "GO_WITH_CAVEATS") is False
+    assert verdict_meets_threshold("STRONG_NO_GO", "GO") is False
+
+
+def test_verdict_rank_is_mapping_proxy():
+    from models import VERDICT_RANK
+
+    assert isinstance(VERDICT_RANK, MappingProxyType)

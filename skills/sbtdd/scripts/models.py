@@ -24,3 +24,33 @@ _COMMIT_PREFIX_MAP_MUTABLE: dict[str, str] = {
 
 #: Read-only TDD phase → git commit prefix mapping (sec.M.5).
 COMMIT_PREFIX_MAP: Mapping[str, str] = MappingProxyType(_COMMIT_PREFIX_MAP_MUTABLE)
+
+_VERDICT_RANK_MUTABLE: dict[str, int] = {
+    "STRONG_NO_GO": 0,
+    "HOLD": 1,
+    "HOLD_TIE": 2,
+    "GO_WITH_CAVEATS": 3,
+    "GO": 4,
+    "STRONG_GO": 5,
+}
+
+#: Read-only MAGI verdict label → integer rank mapping (sec.S.11.1 + CLAUDE.md crossfile).
+VERDICT_RANK: Mapping[str, int] = MappingProxyType(_VERDICT_RANK_MUTABLE)
+
+
+def verdict_meets_threshold(verdict: str, threshold: str) -> bool:
+    """Return True if ``verdict`` is at least as strong as ``threshold``.
+
+    Both arguments must be keys of :data:`VERDICT_RANK`.
+
+    Args:
+        verdict: MAGI verdict label produced by the consensus synthesis.
+        threshold: Minimum acceptable verdict label from plugin.local.md.
+
+    Returns:
+        True if ``VERDICT_RANK[verdict] >= VERDICT_RANK[threshold]``.
+
+    Raises:
+        KeyError: If either argument is not a known verdict label.
+    """
+    return VERDICT_RANK[verdict] >= VERDICT_RANK[threshold]
