@@ -11,8 +11,20 @@ an instance; any schema violation raises ValidationError.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
+
+import yaml  # PyYAML — authorized by CLAUDE.md ("runtime dependencies allowed
+# where unavoidable (config.py parses YAML frontmatter …
+# acceptable since it runs only at session start and init)").
+# Per MAGI Checkpoint 2 iter 1 (balthasar): replaces the brittle
+# custom parser of the draft plan.
+
+from errors import ValidationError
+
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -34,3 +46,41 @@ class PluginConfig:
     auto_verification_retries: int
     tdd_guard_enabled: bool
     worktree_policy: Literal["optional", "required"]
+
+
+def load_plugin_local(path: Path | str) -> PluginConfig:
+    """Parse .claude/plugin.local.md and validate against sec.S.4.2.
+
+    Args:
+        path: Path to plugin.local.md.
+
+    Returns:
+        PluginConfig instance.
+
+    Raises:
+        ValidationError: If file missing, malformed frontmatter, or any
+        schema constraint violated.
+    """
+    p = Path(path)
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValidationError(f"plugin.local.md not found: {p}") from exc
+    match = _FRONTMATTER_RE.match(raw)
+    if not match:
+        raise ValidationError(f"no YAML frontmatter in {p}")
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as exc:
+        raise ValidationError(f"invalid YAML frontmatter in {p}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValidationError(
+            f"YAML frontmatter in {p} must be a mapping, got {type(data).__name__}"
+        )
+    # Convert verification_commands list → tuple for immutability.
+    if isinstance(data.get("verification_commands"), list):
+        data["verification_commands"] = tuple(data["verification_commands"])
+    try:
+        return PluginConfig(**data)
+    except TypeError as exc:
+        raise ValidationError(f"schema mismatch in {p}: {exc}") from exc
