@@ -11,8 +11,9 @@ load() validates JSON + schema and raises StateFileError on any issue.
 from __future__ import annotations
 
 import json
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -126,3 +127,34 @@ def load(path: Path | str) -> SessionState:
         return SessionState(**data)
     except TypeError as exc:
         raise StateFileError(f"state file schema mismatch: {exc}") from exc
+
+
+def save(state: SessionState, path: Path | str) -> None:
+    """Write SessionState to disk atomically via tmp-file + os.replace.
+
+    Per MAGI Checkpoint 2 iter 1 (melchior): if `os.replace` raises
+    (permission denied, cross-device rename, read-only target), the tmp
+    file is cleaned up before re-raising so no stray `*.tmp.<pid>` files
+    leak onto disk.
+
+    Args:
+        state: SessionState to persist.
+        path: Destination path. Parent directory must exist.
+
+    Raises:
+        OSError / FileNotFoundError: If the parent directory does not
+        exist or the write fails. No partial file and no tmp left behind.
+    """
+    p = Path(path)
+    tmp = p.with_suffix(p.suffix + f".tmp.{os.getpid()}")
+    data = asdict(state)
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        os.replace(tmp, p)  # atomic on POSIX and Windows
+    except OSError:
+        # Cleanup tmp before re-raising so nothing leaks on failure.
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise

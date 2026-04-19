@@ -157,3 +157,74 @@ def test_load_wraps_typeerror_as_state_file_error(tmp_path):
         pytest.fail(
             "load must wrap TypeError as StateFileError (MAGI Checkpoint 2 iter 1 caspar fix)"
         )
+
+
+def test_save_writes_and_reloads(tmp_path):
+    from state_file import SessionState, save, load
+
+    state = SessionState(
+        plan_path="planning/claude-plan-tdd.md",
+        current_task_id="1",
+        current_task_title="First",
+        current_phase="red",
+        phase_started_at_commit="abc1234",
+        last_verification_at=None,
+        last_verification_result=None,
+        plan_approved_at="2026-04-19T10:00:00Z",
+    )
+    target = tmp_path / "session-state.json"
+    save(state, target)
+    assert target.exists()
+    reloaded = load(target)
+    assert reloaded == state
+
+
+def test_save_is_atomic_no_partial_on_error(tmp_path, monkeypatch):
+    """If os.replace raises, target should not exist (atomicity)."""
+    from state_file import SessionState, save
+
+    state = SessionState(
+        plan_path="p",
+        current_task_id=None,
+        current_task_title=None,
+        current_phase="done",
+        phase_started_at_commit="abc1234",
+        last_verification_at=None,
+        last_verification_result=None,
+        plan_approved_at=None,
+    )
+    target = tmp_path / "subdir" / "state.json"
+    # subdir does not exist; save should raise, target should not exist
+    with pytest.raises((FileNotFoundError, OSError)):
+        save(state, target)
+    assert not target.exists()
+
+
+def test_save_cleans_up_tmp_on_os_replace_failure(tmp_path, monkeypatch):
+    """If os.replace raises, the .tmp file must not be left behind (MAGI iter 1 melchior)."""
+    from state_file import SessionState, save
+    import os as _os
+
+    state = SessionState(
+        plan_path="p",
+        current_task_id=None,
+        current_task_title=None,
+        current_phase="done",
+        phase_started_at_commit="abc1234",
+        last_verification_at=None,
+        last_verification_result=None,
+        plan_approved_at=None,
+    )
+    target = tmp_path / "state.json"
+
+    def failing_replace(src, dst):
+        raise PermissionError("synthetic failure")
+
+    monkeypatch.setattr(_os, "replace", failing_replace)
+
+    with pytest.raises(PermissionError):
+        save(state, target)
+
+    # No .tmp file should remain anywhere under tmp_path.
+    leaked = list(tmp_path.glob("*.tmp.*"))
+    assert leaked == [], f"tmp files leaked: {leaked}"
