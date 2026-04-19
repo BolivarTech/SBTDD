@@ -54,3 +54,17 @@ def verdict_meets_threshold(verdict: str, threshold: str) -> bool:
         KeyError: If either argument is not a known verdict label.
     """
     return VERDICT_RANK[verdict] >= VERDICT_RANK[threshold]
+
+
+#: Ordered tuple of all valid subcommand names (sec.S.2.2 inventario).
+VALID_SUBCOMMANDS: tuple[str, ...] = (
+    "init",
+    "spec",
+    "close-phase",
+    "close-task",
+    "status",
+    "pre-merge",
+    "finalize",
+    "auto",
+    "resume",
+)

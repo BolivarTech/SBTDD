@@ -58,3 +58,39 @@ def test_verdict_rank_is_mapping_proxy():
     from models import VERDICT_RANK
 
     assert isinstance(VERDICT_RANK, MappingProxyType)
+
+
+def test_valid_subcommands_is_tuple():
+    from models import VALID_SUBCOMMANDS
+
+    assert isinstance(VALID_SUBCOMMANDS, tuple)
+
+
+def test_valid_subcommands_has_nine():
+    from models import VALID_SUBCOMMANDS
+
+    assert len(VALID_SUBCOMMANDS) == 9
+
+
+def test_valid_subcommands_contents():
+    from models import VALID_SUBCOMMANDS
+
+    expected = (
+        "init",
+        "spec",
+        "close-phase",
+        "close-task",
+        "status",
+        "pre-merge",
+        "finalize",
+        "auto",
+        "resume",
+    )
+    assert VALID_SUBCOMMANDS == expected
+
+
+def test_valid_subcommands_rejects_mutation():
+    from models import VALID_SUBCOMMANDS
+
+    with pytest.raises((TypeError, AttributeError)):
+        VALID_SUBCOMMANDS[0] = "hacked"  # type: ignore[index]
