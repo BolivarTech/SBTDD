@@ -76,7 +76,7 @@ El proyecto ya tiene `pyproject.toml`, `Makefile`, `conftest.py` (con sys.path i
 - Modify: `pyproject.toml` (agregar `pyyaml>=6.0` a `[project.optional-dependencies] dev` si no esta + agregar `pythonpath` en `[tool.pytest.ini_options]` para redundancia)
 - Verify (read-only): `Makefile`, `conftest.py`, `.claude/settings.json`, `.gitignore`
 
-- [ ] **Step 1: Audit existing infra**
+- [x] **Step 1: Audit existing infra**
 
 Run:
 
@@ -91,7 +91,7 @@ Nota: `ruff` se invoca como binario directo (no via `-m`), a diferencia de pytes
 
 Expected: `OK` + all 3 tools reporting versions. Si algun archivo falta, detener y abortar — esto es precondicion dura de Milestone A.
 
-- [ ] **Step 2: Verify conftest.py has sys.path injection**
+- [x] **Step 2: Verify conftest.py has sys.path injection**
 
 Run:
 
@@ -102,7 +102,7 @@ grep -q 'skills.*sbtdd.*scripts' conftest.py && echo OK_PATH_REFERENCE
 
 Expected: `OK_SYSPATH` + `OK_PATH_REFERENCE`. Confirma que pytest podra importar `from models import X` despues de Task 1.
 
-- [ ] **Step 3: Verify Makefile targets**
+- [x] **Step 3: Verify Makefile targets**
 
 Run:
 
@@ -120,7 +120,7 @@ typecheck:
 verify: test lint format typecheck
 ```
 
-- [ ] **Step 4: Add PyYAML + pytest pythonpath to pyproject.toml**
+- [x] **Step 4: Add PyYAML + pytest pythonpath to pyproject.toml**
 
 MAGI Checkpoint 2 iter 1 findings: (a) custom YAML parser en Task 17 es brittle y yak-shaving dado que `CLAUDE.md` autoriza PyYAML para `config.py`; (b) redundancia pytest `pythonpath` refuerza `conftest.py` sys.path injection.
 
@@ -150,14 +150,14 @@ python -m pip install 'pyyaml>=6.0' 'types-pyyaml>=6.0'
 python -c "import yaml; print(yaml.__version__)"   # confirm PyYAML >= 6.0
 ```
 
-- [ ] **Step 5: Run make verify on pristine project (sanity baseline)**
+- [x] **Step 5: Run make verify on pristine project (sanity baseline)**
 
 Run: `make verify` (o los 4 comandos manuales).
 Expected: PASS con 0 tests (no hay tests aun — se llega al 0-test baseline limpio porque solo corre pytest + ruff + mypy sobre el tooling existente y `tests/` esta vacio).
 
 Si falla, detener y arreglar infra antes de continuar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml
@@ -178,7 +178,7 @@ Commit prefix `chore:` porque es bookkeeping de configuracion (sec.M.5 row 4), n
 
 Task 0 aseguro la infra. Este task solo scaffolds los package markers para que `from models import X` funcione en Task 2. NO hay test aqui — es un scaffold puro (chore commit).
 
-- [ ] **Step 1: Create scripts package directory + __init__.py**
+- [x] **Step 1: Create scripts package directory + __init__.py**
 
 Run:
 
@@ -204,7 +204,7 @@ Create `skills/sbtdd/scripts/reporters/__init__.py`:
 """TDD-Guard reporters (stack-specific)."""
 ```
 
-- [ ] **Step 2: Verify package is importable via conftest.py sys.path injection**
+- [x] **Step 2: Verify package is importable via conftest.py sys.path injection**
 
 Run:
 
@@ -215,7 +215,7 @@ python -m pytest --collect-only tests/ 2>&1 | head -5   # should show 0 tests, n
 
 Expected: `python -m pytest --collect-only` runs without errors (no tests yet, but no import failures either).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/__init__.py skills/sbtdd/scripts/reporters/__init__.py
@@ -232,7 +232,7 @@ Commit prefix `chore:` porque son package markers de scaffolding (sec.M.5 row 4)
 - Create: `skills/sbtdd/scripts/models.py`
 - Modify: `tests/test_models.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_models.py (append)
@@ -257,12 +257,12 @@ def test_commit_prefix_map_has_required_keys():
     assert COMMIT_PREFIX_MAP["task_close"] == "chore"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_models.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'models'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/models.py`:
 
@@ -295,12 +295,12 @@ _COMMIT_PREFIX_MAP_MUTABLE: dict[str, str] = {
 COMMIT_PREFIX_MAP: Mapping[str, str] = MappingProxyType(_COMMIT_PREFIX_MAP_MUTABLE)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_models.py -v`
 Expected: PASS — 4 tests (incluye el de package_importable).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/models.py tests/test_models.py
@@ -315,7 +315,7 @@ git commit -m "test: add COMMIT_PREFIX_MAP with immutability guard"
 - Modify: `skills/sbtdd/scripts/models.py`
 - Modify: `tests/test_models.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_models.py (append)
@@ -343,12 +343,12 @@ def test_verdict_rank_is_mapping_proxy():
     assert isinstance(VERDICT_RANK, MappingProxyType)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_models.py -v`
 Expected: FAIL con `ImportError: cannot import name 'VERDICT_RANK'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/models.py`:
 
@@ -382,12 +382,12 @@ def verdict_meets_threshold(verdict: str, threshold: str) -> bool:
     return VERDICT_RANK[verdict] >= VERDICT_RANK[threshold]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_models.py -v`
 Expected: PASS — 8 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/models.py tests/test_models.py
@@ -402,7 +402,7 @@ git commit -m "test: add VERDICT_RANK and verdict_meets_threshold helper"
 - Modify: `skills/sbtdd/scripts/models.py`
 - Modify: `tests/test_models.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_models.py (append)
@@ -427,12 +427,12 @@ def test_valid_subcommands_rejects_mutation():
         VALID_SUBCOMMANDS[0] = "hacked"  # type: ignore[index]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_models.py -v`
 Expected: FAIL con `ImportError: cannot import name 'VALID_SUBCOMMANDS'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/models.py`:
 
@@ -451,12 +451,12 @@ VALID_SUBCOMMANDS: tuple[str, ...] = (
 )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_models.py -v`
 Expected: PASS — 12 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/models.py tests/test_models.py
@@ -471,7 +471,7 @@ git commit -m "test: add VALID_SUBCOMMANDS tuple with immutability"
 - Create: `skills/sbtdd/scripts/errors.py`
 - Create: `tests/test_errors.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_errors.py
@@ -493,12 +493,12 @@ def test_validation_error_caught_by_sbtdd_error():
         raise ValidationError("schema invalid")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'errors'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/errors.py`:
 
@@ -525,12 +525,12 @@ class ValidationError(SBTDDError):
     """Schema or input validation failed (exit 1, USER_ERROR)."""
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/errors.py tests/test_errors.py
@@ -545,7 +545,7 @@ git commit -m "test: add SBTDDError base and ValidationError subclass"
 - Modify: `skills/sbtdd/scripts/errors.py`
 - Modify: `tests/test_errors.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_errors.py (append)
@@ -568,12 +568,12 @@ def test_dependency_error_derives_from_sbtdd():
         raise DependencyError("tdd-guard not in PATH")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: FAIL con `ImportError: cannot import name 'StateFileError'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/errors.py`:
 
@@ -590,12 +590,12 @@ class DependencyError(SBTDDError):
     """Required dependency missing or non-operational — exit 2."""
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: PASS — 6 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/errors.py tests/test_errors.py
@@ -610,7 +610,7 @@ git commit -m "test: add StateFileError, DriftError, DependencyError"
 - Modify: `skills/sbtdd/scripts/errors.py`
 - Modify: `tests/test_errors.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_errors.py (append)
@@ -635,12 +635,12 @@ def test_all_seven_subclasses_exist():
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: FAIL con `ImportError: cannot import name 'PreconditionError'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/errors.py`:
 
@@ -657,12 +657,12 @@ class QuotaExhaustedError(SBTDDError):
     """Anthropic API quota exhausted (rate limit / session / credit) — exit 11."""
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: PASS — 10 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/errors.py tests/test_errors.py
@@ -676,7 +676,7 @@ git commit -m "test: add PreconditionError, MAGIGateError, QuotaExhaustedError"
 **Files:**
 - Modify: `tests/test_errors.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_errors.py (append)
@@ -701,14 +701,14 @@ def test_mro_is_flat_single_inheritance():
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"
 ```
 
-- [ ] **Step 2: Run tests — coverage additions over existing errors.py**
+- [x] **Step 2: Run tests — coverage additions over existing errors.py**
 
 Run: `python -m pytest tests/test_errors.py -v`
 Expected: PASS — 12 tests (8 previos + 4 nuevos).
 
 Nota: este task agrega **coverage de los invariantes ya satisfechos** por Tasks 5-7. Los nuevos tests pasan en primera corrida porque la implementacion ya los cumple. Per sec.M.5: `test:` prefix se aplica a **agregar tests** (no importa si pasan first-run o requirieron Red-Green); `refactor:` solo a cambios en codigo de produccion sin alterar comportamiento. Ver tambien CLAUDE.local.md sec.3 "Reglas por fase" — este task NO es una fase Refactor del ciclo TDD, es una ampliacion de cobertura de tests.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_errors.py
@@ -727,7 +727,7 @@ Commit prefix `test:` per sec.M.5 row 1 (adding tests, regardless of first-run p
 - Create: `skills/sbtdd/scripts/state_file.py`
 - Create: `tests/test_state_file.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_state_file.py
@@ -759,12 +759,12 @@ def test_session_state_has_eight_fields():
     assert set(fields) == expected
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'state_file'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/state_file.py`:
 
@@ -798,12 +798,12 @@ class SessionState:
     plan_approved_at: str | None
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/state_file.py tests/test_state_file.py
@@ -818,7 +818,7 @@ git commit -m "test: add SessionState frozen dataclass with 8 fields"
 - Modify: `skills/sbtdd/scripts/state_file.py`
 - Modify: `tests/test_state_file.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_state_file.py (append)
@@ -862,12 +862,12 @@ def test_validate_accepts_valid_data():
     validate_schema(data)  # no raise
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: FAIL con `ImportError: cannot import name 'validate_schema'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/state_file.py`:
 
@@ -912,12 +912,12 @@ def validate_schema(data: dict[str, Any]) -> None:
         )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: PASS — 5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/state_file.py tests/test_state_file.py
@@ -935,7 +935,7 @@ git commit -m "test: add validate_schema with enum/required-field checks"
 - Create: `tests/fixtures/state-files/invalid-phase.json`
 - Create: `tests/fixtures/state-files/malformed.json`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_state_file.py (append)
@@ -998,12 +998,12 @@ Create fixtures:
 {this is not valid json
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: FAIL con `ImportError: cannot import name 'load'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append a `skills/sbtdd/scripts/state_file.py` una extension al `validate_schema` y la funcion `load`:
 
@@ -1129,12 +1129,12 @@ def test_load_wraps_typeerror_as_state_file_error(tmp_path):
         pytest.fail("load must wrap TypeError as StateFileError (MAGI Checkpoint 2 iter 1 caspar fix)")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: PASS — 10 tests (8 previos + 2 MAGI Checkpoint 2 additions).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/state_file.py tests/test_state_file.py tests/fixtures/state-files/
@@ -1149,7 +1149,7 @@ git commit -m "test: add state_file.load with JSON validation, ISO 8601 timestam
 - Modify: `skills/sbtdd/scripts/state_file.py`
 - Modify: `tests/test_state_file.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_state_file.py (append)
@@ -1188,12 +1188,12 @@ def test_save_is_atomic_no_partial_on_error(tmp_path, monkeypatch):
     assert not target.exists()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: FAIL con `ImportError: cannot import name 'save'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/state_file.py`:
 
@@ -1262,12 +1262,12 @@ def test_save_cleans_up_tmp_on_os_replace_failure(tmp_path, monkeypatch):
     assert leaked == [], f"tmp files leaked: {leaked}"
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_state_file.py -v`
 Expected: PASS — 10 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/state_file.py tests/test_state_file.py
@@ -1282,7 +1282,7 @@ git commit -m "test: add state_file.save with atomic write via os.replace"
 - Create: `skills/sbtdd/scripts/drift.py`
 - Create: `tests/test_drift.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_drift.py
@@ -1306,12 +1306,12 @@ def test_drift_report_fields():
     assert fields == {"state_value", "git_value", "plan_value", "reason"}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_drift.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'drift'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/drift.py`:
 
@@ -1342,12 +1342,12 @@ class DriftReport:
     reason: str
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_drift.py -v`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/drift.py tests/test_drift.py
@@ -1364,7 +1364,7 @@ git commit -m "test: add DriftReport frozen dataclass"
 
 Per MAGI Checkpoint 2 iter 1 (Scenario 4 spec-behavior.md sec.4.2 + CLAUDE.md sec.2.1): `current_phase="green"` + HEAD commit `refactor:` es el ejemplo canonico de drift. La regla general: **cualquier close-prefix de la fase actual o de una fase posterior con state no avanzado = drift** (phase-ordering inversion).
 
-- [ ] **Step 1: Write failing test (Scenario 4 + phase-ordering variants)**
+- [x] **Step 1: Write failing test (Scenario 4 + phase-ordering variants)**
 
 ```python
 # tests/test_drift.py (append)
@@ -1464,12 +1464,12 @@ def test_detect_drift_done_phase_returns_none():
     assert report is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_drift.py -v`
 Expected: FAIL con `ImportError: cannot import name '_evaluate_drift'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/drift.py`:
 
@@ -1548,12 +1548,12 @@ from types import MappingProxyType
 from typing import Mapping
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_drift.py -v`
 Expected: PASS — 9 tests (8 nuevos + 1 previo).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/drift.py tests/test_drift.py
@@ -1570,7 +1570,7 @@ git commit -m "test: add _evaluate_drift pure function with phase-ordering inver
 
 Este task (a) agrega la deteccion de plan-checkbox drift en `_evaluate_drift`, y (b) expone el I/O wrapper `detect_drift(state_file_path, plan_path, repo_root)` que coincide con la firma del spec-behavior.md sec.4.2 Escenario 4. `_evaluate_drift` queda como funcion pura, testeable en aislamiento; `detect_drift` la usa tras leer los tres sources canonicos.
 
-- [ ] **Step 1: Write failing test (plan-checkbox + I/O wrapper)**
+- [x] **Step 1: Write failing test (plan-checkbox + I/O wrapper)**
 
 ```python
 # tests/test_drift.py (append)
@@ -1666,12 +1666,12 @@ def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypa
     ) is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_drift.py -v`
 Expected: FAIL — plan-checkbox case returns None (no check yet); `detect_drift` I/O wrapper not defined.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Update `_evaluate_drift` in `skills/sbtdd/scripts/drift.py` — add plan check BEFORE the phase/prefix check:
 
@@ -1794,12 +1794,12 @@ def _extract_task_checkbox(plan_text: str, task_id: str) -> str:
     return "[ ]"
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_drift.py -v`
 Expected: PASS — 12 tests (9 pure + 3 I/O wrapper).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/drift.py tests/test_drift.py
@@ -1818,7 +1818,7 @@ Commit prefix `feat:` — este task agrega la API publica `detect_drift` (nuevo 
 - Create: `skills/sbtdd/scripts/config.py`
 - Create: `tests/test_config.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_config.py
@@ -1862,12 +1862,12 @@ def test_plugin_config_verification_commands_is_tuple():
     assert isinstance(cfg.verification_commands, tuple)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_config.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'config'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/config.py`:
 
@@ -1910,12 +1910,12 @@ class PluginConfig:
     worktree_policy: Literal["optional", "required"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_config.py -v`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/config.py tests/test_config.py
@@ -1931,7 +1931,7 @@ git commit -m "test: add PluginConfig frozen dataclass with strict Literal types
 - Modify: `tests/test_config.py`
 - Create: `tests/fixtures/plugin-locals/valid-python.md`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_config.py (append)
@@ -1985,12 +1985,12 @@ worktree_policy: "optional"
 # Test config for Python stack
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_config.py -v`
 Expected: FAIL con `ImportError: cannot import name 'load_plugin_local'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/config.py`:
 
@@ -2049,12 +2049,12 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
 
 **Nota sobre dependencias:** `pyyaml>=6.0` y `types-pyyaml>=6.0` fueron agregados a `pyproject.toml` en Task 0 (MAGI Checkpoint 2 iter 1 — balthasar). Si el usuario no corrio Task 0 todavia: `python -m pip install 'pyyaml>=6.0' 'types-pyyaml>=6.0'`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_config.py -v`
 Expected: PASS — 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/config.py tests/test_config.py tests/fixtures/plugin-locals/valid-python.md
@@ -2069,7 +2069,7 @@ git commit -m "test: add load_plugin_local with minimal YAML frontmatter parser"
 - Modify: `skills/sbtdd/scripts/config.py`
 - Modify: `tests/test_config.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_config.py (append)
@@ -2132,12 +2132,12 @@ worktree_policy: "optional"
     assert "auto_magi_max_iterations" in str(exc_info.value)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_config.py -v`
 Expected: FAIL — no validation for enums/thresholds yet.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append validation logic to `load_plugin_local` in `skills/sbtdd/scripts/config.py` — insert before the `PluginConfig(**data)` call:
 
@@ -2180,12 +2180,12 @@ Append validation logic to `load_plugin_local` in `skills/sbtdd/scripts/config.p
         raise ValidationError("verification_commands must be non-empty")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_config.py -v`
 Expected: PASS — 6 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/config.py tests/test_config.py
@@ -2200,7 +2200,7 @@ git commit -m "test: add semantic validation for stack/threshold/policy/iteratio
 - Create: `skills/sbtdd/scripts/templates.py`
 - Create: `tests/test_templates.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates.py
@@ -2223,12 +2223,12 @@ def test_expand_empty_context():
     assert expand(template, {}) == "no placeholders here"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_templates.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'templates'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/templates.py`:
 
@@ -2270,12 +2270,12 @@ def expand(template: str, context: Mapping[str, str]) -> str:
     return _PLACEHOLDER_RE.sub(_replace, template)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_templates.py -v`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/templates.py tests/test_templates.py
@@ -2289,7 +2289,7 @@ git commit -m "test: add templates.expand with unknown-placeholder pass-through"
 **Files:**
 - Modify: `tests/test_templates.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_templates.py (append)
@@ -2306,19 +2306,19 @@ def test_expand_placeholder_with_special_chars_in_value():
     assert result == "{Y}"  # not recursive; {Y} stays literal.
 ```
 
-- [ ] **Step 2: Run test to verify it fails/passes**
+- [x] **Step 2: Run test to verify it fails/passes**
 
 Run: `python -m pytest tests/test_templates.py -v`
 Expected: PASS — the existing `re.sub` implementation is single-pass and preserves whitespace. This task adds **test coverage** for invariants already held by Task 19; per sec.M.5 row 1, the commit uses `test:` prefix regardless of first-run outcome.
 
-- [ ] **Step 3: (no new impl needed)**
+- [x] **Step 3: (no new impl needed)**
 
-- [ ] **Step 4: Verify all tests pass**
+- [x] **Step 4: Verify all tests pass**
 
 Run: `python -m pytest tests/test_templates.py -v`
 Expected: PASS — 5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_templates.py
@@ -2333,7 +2333,7 @@ git commit -m "test: add edge-case coverage for templates.expand (multiple place
 - Create: `skills/sbtdd/scripts/hooks_installer.py`
 - Create: `tests/test_hooks_installer.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_hooks_installer.py
@@ -2354,12 +2354,12 @@ def test_read_missing_returns_empty_dict(tmp_path):
     assert read_existing(missing) == {}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_hooks_installer.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'hooks_installer'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/hooks_installer.py`:
 
@@ -2401,12 +2401,12 @@ def read_existing(path: Path | str) -> dict[str, Any]:
     return json.loads(p.read_text(encoding="utf-8"))
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_hooks_installer.py -v`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/hooks_installer.py tests/test_hooks_installer.py
@@ -2421,7 +2421,7 @@ git commit -m "test: add hooks_installer.read_existing for settings.json"
 - Modify: `skills/sbtdd/scripts/hooks_installer.py`
 - Modify: `tests/test_hooks_installer.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_hooks_installer.py (append)
@@ -2459,12 +2459,12 @@ def test_merge_preserves_user_hooks_and_adds_plugin(tmp_path):
     assert "SessionStart" in result["hooks"]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_hooks_installer.py -v`
 Expected: FAIL con `ImportError: cannot import name 'merge'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/hooks_installer.py`:
 
@@ -2502,12 +2502,12 @@ def merge(
     os.replace(tmp, target)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_hooks_installer.py -v`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/hooks_installer.py tests/test_hooks_installer.py
@@ -2521,7 +2521,7 @@ git commit -m "test: add hooks_installer.merge preserving user hooks"
 **Files:**
 - Modify: `tests/test_hooks_installer.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_hooks_installer.py (append)
@@ -2543,19 +2543,19 @@ def test_merge_is_idempotent(tmp_path):
     assert first == second
 ```
 
-- [ ] **Step 2: Run test to verify it fails/passes**
+- [x] **Step 2: Run test to verify it fails/passes**
 
 Run: `python -m pytest tests/test_hooks_installer.py::test_merge_is_idempotent -v`
 Expected: PASS (dedup via `if entry not in existing_list` already ensures idempotency). This task adds **test coverage** verifying existing behavior (Task 22); per sec.M.5 row 1, the commit uses `test:` prefix.
 
-- [ ] **Step 3: (no new impl needed)**
+- [x] **Step 3: (no new impl needed)**
 
-- [ ] **Step 4: Verify all tests pass**
+- [x] **Step 4: Verify all tests pass**
 
 Run: `python -m pytest tests/test_hooks_installer.py -v`
 Expected: PASS — 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_hooks_installer.py
@@ -2572,7 +2572,7 @@ git commit -m "test: add idempotency coverage for hooks_installer.merge"
 - Create: `skills/sbtdd/scripts/subprocess_utils.py`
 - Create: `tests/test_subprocess_utils.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_subprocess_utils.py
@@ -2592,12 +2592,12 @@ def test_run_with_timeout_rejects_shell_true():
     assert result.returncode == 3
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_subprocess_utils.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'subprocess_utils'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/subprocess_utils.py`:
 
@@ -2651,12 +2651,12 @@ def run_with_timeout(
     )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_subprocess_utils.py -v`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/subprocess_utils.py tests/test_subprocess_utils.py
@@ -2671,7 +2671,7 @@ git commit -m "test: add run_with_timeout enforcing shell=False"
 - Modify: `skills/sbtdd/scripts/subprocess_utils.py`
 - Modify: `tests/test_subprocess_utils.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_subprocess_utils.py (append)
@@ -2705,12 +2705,12 @@ def test_kill_tree_windows_calls_taskkill_before_proc_kill(monkeypatch):
     assert taskkill_idx < kill_idx, f"call order wrong: {call_order}"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_subprocess_utils.py -v`
 Expected: FAIL con `ImportError: cannot import name 'kill_tree'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/subprocess_utils.py`:
 
@@ -2749,12 +2749,12 @@ def kill_tree(proc: "subprocess.Popen[str]") -> None:
             proc.wait(timeout=5)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_subprocess_utils.py -v`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/subprocess_utils.py tests/test_subprocess_utils.py
@@ -2768,7 +2768,7 @@ git commit -m "test: add kill_tree Windows taskkill-before-kill order"
 **Files:**
 - Modify: `tests/test_subprocess_utils.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_subprocess_utils.py (append)
@@ -2798,19 +2798,19 @@ def test_kill_tree_posix_sends_sigterm_then_sigkill(monkeypatch):
     assert signals_sent == ["SIGTERM", "SIGKILL"]
 ```
 
-- [ ] **Step 2: Run test to verify it fails/passes**
+- [x] **Step 2: Run test to verify it fails/passes**
 
 Run: `python -m pytest tests/test_subprocess_utils.py::test_kill_tree_posix_sends_sigterm_then_sigkill -v`
 Expected: PASS (behavior already implemented in Task 25). Task adds **POSIX-specific test coverage** for `kill_tree`; per sec.M.5 row 1, the commit uses `test:` prefix.
 
-- [ ] **Step 3: (no new impl needed)**
+- [x] **Step 3: (no new impl needed)**
 
-- [ ] **Step 4: Verify all tests pass**
+- [x] **Step 4: Verify all tests pass**
 
 Run: `python -m pytest tests/test_subprocess_utils.py -v`
 Expected: PASS — 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_subprocess_utils.py
@@ -2825,7 +2825,7 @@ git commit -m "test: add POSIX kill_tree SIGTERM and SIGKILL fallback coverage"
 - Create: `skills/sbtdd/scripts/quota_detector.py`
 - Create: `tests/test_quota_detector.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_quota_detector.py
@@ -2848,12 +2848,12 @@ def test_quota_patterns_are_compiled_regex():
         assert isinstance(pattern, re.Pattern)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'quota_detector'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/quota_detector.py`:
 
@@ -2897,12 +2897,12 @@ _QUOTA_PATTERNS_MUTABLE: dict[str, re.Pattern[str]] = {
 QUOTA_PATTERNS: Mapping[str, re.Pattern[str]] = MappingProxyType(_QUOTA_PATTERNS_MUTABLE)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/quota_detector.py tests/test_quota_detector.py
@@ -2917,7 +2917,7 @@ git commit -m "test: add QUOTA_PATTERNS registry as MappingProxyType"
 - Modify: `skills/sbtdd/scripts/quota_detector.py`
 - Modify: `tests/test_quota_detector.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_quota_detector.py (append)
@@ -2941,12 +2941,12 @@ def test_quota_exhaustion_fields():
     assert fields == {"kind", "raw_message", "reset_time", "recoverable"}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: FAIL con `ImportError: cannot import name 'QuotaExhaustion'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/quota_detector.py`:
 
@@ -2964,12 +2964,12 @@ class QuotaExhaustion:
     recoverable: bool            # True for all current cases.
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: PASS — 5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/quota_detector.py tests/test_quota_detector.py
@@ -2989,7 +2989,7 @@ git commit -m "test: add QuotaExhaustion frozen dataclass"
 - Create: `tests/fixtures/quota-errors/server_throttle.txt`
 - Create: `tests/fixtures/quota-errors/no_quota_match.txt`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_quota_detector.py (append)
@@ -3064,12 +3064,12 @@ Error: file not found: /tmp/missing.txt
 Exit code: 1
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: FAIL con `ImportError: cannot import name 'detect'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/quota_detector.py`:
 
@@ -3096,12 +3096,12 @@ def detect(stderr: str) -> QuotaExhaustion | None:
     return None
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: PASS — 10 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/quota_detector.py tests/test_quota_detector.py tests/fixtures/quota-errors/
@@ -3115,7 +3115,7 @@ git commit -m "test: add quota_detector.detect with 4-pattern fixture suite"
 **Files:**
 - Modify: `tests/test_quota_detector.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_quota_detector.py (append)
@@ -3129,19 +3129,19 @@ def test_detect_unrelated_429_text_does_not_match():
     assert detect("HTTP 429 found in docs") is None
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: PASS (tests verify that the pattern is correctly specific). This task adds **test coverage** for the negative path already handled in Tasks 27-29; per sec.M.5 row 1, the commit uses `test:` prefix.
 
-- [ ] **Step 3: (no new impl needed)**
+- [x] **Step 3: (no new impl needed)**
 
-- [ ] **Step 4: Verify all tests pass**
+- [x] **Step 4: Verify all tests pass**
 
 Run: `python -m pytest tests/test_quota_detector.py -v`
 Expected: PASS — 12 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_quota_detector.py
@@ -3158,7 +3158,7 @@ git commit -m "test: add negative-case coverage for quota_detector.detect"
 - Create: `skills/sbtdd/scripts/commits.py`
 - Create: `tests/test_commits.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_commits.py
@@ -3176,12 +3176,12 @@ def test_validate_prefix_rejects_unknown():
         validate_prefix("wip")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: FAIL con `ModuleNotFoundError: No module named 'commits'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `skills/sbtdd/scripts/commits.py`:
 
@@ -3214,12 +3214,12 @@ def validate_prefix(prefix: str) -> None:
         )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/commits.py tests/test_commits.py
@@ -3236,7 +3236,7 @@ git commit -m "test: add validate_prefix enforcing sec.M.5 allowed prefixes"
 
 Per MAGI Checkpoint 2 iter 1 (melchior, Scenario 10 de spec-behavior.md sec.4.5): el validador debe rechazar `"feat: implementar parser"` (espanol). Se implementa con una denylist de palabras espanolas comunes en commits de codigo + deteccion de caracteres no-ASCII como heuristica adicional. Es una heuristica, no deteccion perfecta de ingles — pero cubre los casos canonicos del spec.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_commits.py (append)
@@ -3303,12 +3303,12 @@ def test_validate_message_accepts_technical_english_with_numbers():
     validate_message("fix: off-by-one in loop bound (issue #42)")  # no raise
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: FAIL con `ImportError: cannot import name 'validate_message'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/commits.py`:
 
@@ -3387,12 +3387,12 @@ def validate_message(message: str) -> None:
             )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: PASS — 11 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/commits.py tests/test_commits.py
@@ -3407,7 +3407,7 @@ git commit -m "test: add validate_message rejecting Co-Authored-By, AI refs, and
 - Modify: `skills/sbtdd/scripts/commits.py`
 - Modify: `tests/test_commits.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_commits.py (append)
@@ -3440,12 +3440,12 @@ def test_create_rejects_before_git_call(monkeypatch):
         create(prefix="wip", message="fine message", cwd=".")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: FAIL con `ImportError: cannot import name 'create'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `skills/sbtdd/scripts/commits.py`:
 
@@ -3484,12 +3484,12 @@ def create(prefix: str, message: str, cwd: str | None = None) -> str:
     return result.stdout
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: PASS — 8 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/commits.py tests/test_commits.py
@@ -3503,7 +3503,7 @@ git commit -m "test: add commits.create orchestrating validation + git commit"
 **Files:**
 - Modify: `tests/test_commits.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_commits.py (append)
@@ -3524,19 +3524,19 @@ def test_create_full_input_validation_chain(monkeypatch):
         create(prefix="feat", message="add Claude integration", cwd=".")
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+- [x] **Step 2: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: PASS (chain already works from Task 33). Task adds **test coverage** asserting the validation-chain order (prefix-fail short-circuits before message-validation); per sec.M.5 row 1, the commit uses `test:` prefix.
 
-- [ ] **Step 3: (no new impl needed)**
+- [x] **Step 3: (no new impl needed)**
 
-- [ ] **Step 4: Verify all tests pass**
+- [x] **Step 4: Verify all tests pass**
 
 Run: `python -m pytest tests/test_commits.py -v`
 Expected: PASS — 9 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_commits.py
@@ -3553,7 +3553,7 @@ git commit -m "test: add validation-chain short-circuit coverage for commits.cre
 - Create: `LICENSE`
 - Create: `LICENSE-APACHE`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_commits.py (append — convenient location)
@@ -3570,12 +3570,12 @@ def test_license_dual_in_pyproject():
     assert 'license = "MIT OR Apache-2.0"' in content
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_commits.py::test_license_files_exist tests/test_commits.py::test_license_dual_in_pyproject -v`
 Expected: FAIL — LICENSE files don't exist yet.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `LICENSE` (MIT):
 
@@ -3810,7 +3810,7 @@ Create `LICENSE-APACHE` — verbatim Apache License 2.0 text (per MAGI Checkpoin
 
 Save this text **byte-for-byte** to `LICENSE-APACHE`. To verify fidelity: `curl -fsSL https://www.apache.org/licenses/LICENSE-2.0.txt -o /tmp/apache-upstream.txt && diff /tmp/apache-upstream.txt LICENSE-APACHE` should show no output (body is identical; we add the Appendix with the 2026 Julian Bolivar copyright block which is the recommended application stanza, not part of the license body).
 
-- [ ] **Step 4: Run full make verify**
+- [x] **Step 4: Run full make verify**
 
 Run:
 
@@ -3823,7 +3823,7 @@ python -m mypy .
 
 Expected: All four pass cleanly. Full test count should be 60+ tests across 10 test files.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add LICENSE LICENSE-APACHE tests/test_commits.py
