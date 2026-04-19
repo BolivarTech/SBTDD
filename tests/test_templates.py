@@ -20,3 +20,19 @@ def test_expand_empty_context():
 
     template = "no placeholders here"
     assert expand(template, {}) == "no placeholders here"
+
+
+def test_expand_preserves_trailing_newline():
+    from templates import expand
+
+    template = "{X}\n"
+    assert expand(template, {"X": "a"}) == "a\n"
+
+
+def test_expand_placeholder_with_special_chars_in_value():
+    """Value containing braces should not be re-expanded (single pass)."""
+    from templates import expand
+
+    template = "{X}"
+    result = expand(template, {"X": "{Y}"})
+    assert result == "{Y}"  # not recursive; {Y} stays literal.
