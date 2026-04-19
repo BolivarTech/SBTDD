@@ -216,6 +216,44 @@ def test_detect_drift_io_wrapper_reads_three_sources(tmp_path, monkeypatch):
     assert report.git_value == "refactor"
 
 
+def test_all_task_steps_complete_returns_x_when_all_steps_checked():
+    """All step-level checkboxes [x] in the task section -> [x]."""
+    from drift import _all_task_steps_complete
+
+    plan = (
+        "### Task 1: parse headers\n"
+        "- [x] step 1\n"
+        "- [x] step 2\n"
+        "- [x] step 3\n"
+        "### Task 2: next\n"
+        "- [ ] step 1\n"
+    )
+    assert _all_task_steps_complete(plan, "1") == "[x]"
+
+
+def test_all_task_steps_complete_returns_open_when_any_step_unchecked():
+    """Even one [ ] step means the task is not complete."""
+    from drift import _all_task_steps_complete
+
+    plan = (
+        "### Task 1: parse headers\n"
+        "- [x] step 1\n"
+        "- [ ] step 2\n"
+        "- [x] step 3\n"
+        "### Task 2: next\n"
+        "- [ ] step 1\n"
+    )
+    assert _all_task_steps_complete(plan, "1") == "[ ]"
+
+
+def test_all_task_steps_complete_returns_open_when_task_missing():
+    """Task header not found -> default to [ ] (conservative)."""
+    from drift import _all_task_steps_complete
+
+    plan = "### Task 1: parse headers\n- [x] step 1\n"
+    assert _all_task_steps_complete(plan, "99") == "[ ]"
+
+
 def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypatch):
     import subprocess
     import json
