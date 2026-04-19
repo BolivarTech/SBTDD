@@ -13,6 +13,8 @@ All plugin commits go through this module so validation is centralized:
 
 from __future__ import annotations
 
+import re
+
 from errors import ValidationError
 
 _ALLOWED_PREFIXES: frozenset[str] = frozenset({"test", "feat", "fix", "refactor", "chore"})
@@ -24,3 +26,75 @@ def validate_prefix(prefix: str) -> None:
         raise ValidationError(
             f"commit prefix '{prefix}' not in {sorted(_ALLOWED_PREFIXES)} (sec.M.5)"
         )
+
+
+_FORBIDDEN_MESSAGE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"Co-Authored-By", re.IGNORECASE),
+    re.compile(r"\bClaude\b", re.IGNORECASE),
+    re.compile(r"\bAI\b"),
+    re.compile(r"\bassistant\b", re.IGNORECASE),
+)
+
+# Spanish denylist - Spanish-specific verbs and endings that do not appear
+# in English technical commit messages. Non-exhaustive but covers Scenario
+# 10 canonical case + high-frequency patterns that slip through.
+#
+# Tras MAGI Checkpoint 2 iter 2 (caspar): removidas palabras con alto riesgo
+# de falso-positivo en ingles:
+#   - `la`, `el`, `los`, `las`, `una`, `un` (demasiado comunes en siglas
+#     inglesas como "LA" time zone, "el" en nombres propios).
+#   - `para` solo (false positive en commit messages que mencionen
+#     "parallel", "parametric", etc. via partial matches aun con \b -
+#     mejor usar verbos Spanish-exclusive).
+#   - `funcion` sin tilde (false positive en "function" partial; mejor
+#     confiar en `parseador`/`agente` que son tokens uniquely-Spanish).
+# Trade-off: menos recall de espanol, mejor precision para english-clean.
+_SPANISH_DENYLIST: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bimplement(ar|acion|a|amos|e|en)\b", re.IGNORECASE),
+    re.compile(r"\barregl(ar|a|amos|e|en|ado)\b", re.IGNORECASE),
+    re.compile(r"\banadir\b", re.IGNORECASE),  # 'anadir' without tilde
+    re.compile(r"\bcorrig(ir|io|iendo|iendo)\b", re.IGNORECASE),
+    re.compile(r"\bagreg(ar|amos|ue|ando|ado)\b", re.IGNORECASE),
+    re.compile(r"\b(parseador|agente)\b", re.IGNORECASE),  # Spanish-unique tokens
+    re.compile(r"\b(nueva|nuevos|nuevas|ambos|ambas)\b", re.IGNORECASE),
+    re.compile(r"\bdel\b", re.IGNORECASE),  # Spanish-only contraction
+)
+
+# Non-ASCII letter range (excludes ASCII punctuation, digits, whitespace).
+_NON_ASCII_LETTERS = re.compile(r"[^\x00-\x7F]")
+
+
+def validate_message(message: str) -> None:
+    """Reject commit messages that violate INV-0 / INV-5..7.
+
+    Checks (in order):
+    1. Forbidden patterns: Co-Authored-By, Claude, AI, assistant.
+    2. Non-ASCII letters (strong signal of non-English).
+    3. Spanish denylist of common verbs and function words.
+
+    Args:
+        message: Full commit message (without prefix).
+
+    Raises:
+        ValidationError: If any check triggers.
+    """
+    for pattern in _FORBIDDEN_MESSAGE_PATTERNS:
+        match = pattern.search(message)
+        if match:
+            raise ValidationError(
+                f"commit message contains forbidden pattern '{match.group(0)}' "
+                f"(INV-7, ~/.claude/CLAUDE.md Git section)"
+            )
+    non_ascii = _NON_ASCII_LETTERS.search(message)
+    if non_ascii:
+        raise ValidationError(
+            f"commit message must be English - contains non-ASCII character "
+            f"{non_ascii.group(0)!r} at position {non_ascii.start()} (INV-6)"
+        )
+    for pattern in _SPANISH_DENYLIST:
+        match = pattern.search(message)
+        if match:
+            raise ValidationError(
+                f"commit message must be English - detected Spanish word "
+                f"'{match.group(0)}' (INV-6). Rewrite in English."
+            )
