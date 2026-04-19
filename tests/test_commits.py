@@ -141,6 +141,24 @@ def test_create_full_input_validation_chain(monkeypatch):
         create(prefix="feat", message="add Claude integration", cwd=".")
 
 
+def test_allowed_prefixes_is_derived_from_commit_prefix_map():
+    """DRY: _ALLOWED_PREFIXES must be sourced from models.COMMIT_PREFIX_MAP to prevent drift."""
+    import inspect
+
+    import commits
+    from commits import _ALLOWED_PREFIXES
+    from models import COMMIT_PREFIX_MAP
+
+    source = inspect.getsource(commits)
+    assert "COMMIT_PREFIX_MAP" in source, (
+        "_ALLOWED_PREFIXES must be derived from models.COMMIT_PREFIX_MAP "
+        "(DRY, sec.M.5 cross-file contract)"
+    )
+    assert _ALLOWED_PREFIXES == frozenset(COMMIT_PREFIX_MAP.values()), (
+        "_ALLOWED_PREFIXES must equal frozenset(COMMIT_PREFIX_MAP.values())"
+    )
+
+
 def test_license_files_exist():
     from pathlib import Path
 
