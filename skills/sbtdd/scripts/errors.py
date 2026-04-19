@@ -6,7 +6,10 @@
 
 All plugin exceptions derive from :class:`SBTDDError` so dispatchers can
 catch the whole hierarchy with a single except clause (sec.S.8.4). Each
-subclass maps to a specific exit code per sec.S.11.1 taxonomy.
+subclass maps to a specific exit code per sec.S.11.1 taxonomy; the
+canonical mapping is exposed programmatically as :data:`EXIT_CODES`
+(MAGI Loop 2 Finding 7 -- codifies what was previously only documented
+in CLAUDE.md + spec).
 """
 
 from __future__ import annotations
