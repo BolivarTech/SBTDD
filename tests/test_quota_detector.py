@@ -118,3 +118,39 @@ def test_detect_unrelated_429_text_does_not_match():
     from quota_detector import detect
 
     assert detect("HTTP 429 found in docs") is None
+
+
+def test_detect_session_limit_multi_word_reset_time():
+    """reset_time must capture multi-word values like '3:45pm tomorrow'.
+
+    Per MAGI Loop 2 Finding 9: the prior non-greedy ``(.+?)(?:\\s|$)``
+    truncated at the first whitespace, losing 'tomorrow'/'(UTC)' etc.
+    New pattern captures until end-of-line or a 2+ whitespace gap.
+    """
+    from quota_detector import detect
+
+    stderr = "You've hit your session limit - resets 3:45pm tomorrow\n"
+    result = detect(stderr)
+    assert result is not None
+    assert result.kind == "session_limit"
+    assert result.reset_time == "3:45pm tomorrow"
+
+
+def test_detect_session_limit_reset_time_with_timezone():
+    """reset_time with parenthesized timezone is preserved."""
+    from quota_detector import detect
+
+    stderr = "You've hit your weekly limit - resets 10:00 AM (UTC)\n"
+    result = detect(stderr)
+    assert result is not None
+    assert result.reset_time == "10:00 AM (UTC)"
+
+
+def test_detect_session_limit_reset_time_single_word_still_works():
+    """Single-word reset values like '3:45pm' keep working (no regression)."""
+    from quota_detector import detect
+
+    stderr = "You've hit your Opus limit - resets 3:45pm\n"
+    result = detect(stderr)
+    assert result is not None
+    assert result.reset_time == "3:45pm"
