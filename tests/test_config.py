@@ -72,3 +72,66 @@ def test_load_missing_file():
 
     with pytest.raises(ValidationError):
         load_plugin_local(Path("/nonexistent/path.md"))
+
+
+def test_validate_rejects_invalid_stack(tmp_path):
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    content = """---
+stack: ruby
+author: "Test"
+error_type: null
+verification_commands:
+  - "pytest"
+plan_path: "p"
+plan_org_path: "p"
+spec_base_path: "s"
+spec_path: "s"
+state_file_path: ".claude/s.json"
+magi_threshold: "GO_WITH_CAVEATS"
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 1
+tdd_guard_enabled: true
+worktree_policy: "optional"
+---
+"""
+    f = tmp_path / "bad.md"
+    f.write_text(content)
+    with pytest.raises(ValidationError) as exc_info:
+        load_plugin_local(f)
+    assert "stack" in str(exc_info.value)
+
+
+def test_validate_rejects_auto_magi_less_than_base():
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    # auto_magi_max_iterations must be >= magi_max_iterations (sec.S.4.3)
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        f.write("""---
+stack: python
+author: "T"
+error_type: null
+verification_commands:
+  - "pytest"
+plan_path: "p"
+plan_org_path: "p"
+spec_base_path: "s"
+spec_path: "s"
+state_file_path: ".claude/s.json"
+magi_threshold: "GO_WITH_CAVEATS"
+magi_max_iterations: 5
+auto_magi_max_iterations: 3
+auto_verification_retries: 1
+tdd_guard_enabled: true
+worktree_policy: "optional"
+---
+""")
+        path = f.name
+    with pytest.raises(ValidationError) as exc_info:
+        load_plugin_local(path)
+    assert "auto_magi_max_iterations" in str(exc_info.value)

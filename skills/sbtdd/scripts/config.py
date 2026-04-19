@@ -80,6 +80,35 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     # Convert verification_commands list → tuple for immutability.
     if isinstance(data.get("verification_commands"), list):
         data["verification_commands"] = tuple(data["verification_commands"])
+    # Semantic validation beyond type-checking (sec.S.4.3).
+    valid_stacks = {"rust", "python", "cpp"}
+    if data.get("stack") not in valid_stacks:
+        raise ValidationError(f"stack='{data.get('stack')}' not in {sorted(valid_stacks)}")
+    valid_thresholds = {"STRONG_GO", "GO", "GO_WITH_CAVEATS"}
+    if data.get("magi_threshold") not in valid_thresholds:
+        raise ValidationError(
+            f"magi_threshold='{data.get('magi_threshold')}' not in {sorted(valid_thresholds)}"
+        )
+    valid_policies = {"optional", "required"}
+    if data.get("worktree_policy") not in valid_policies:
+        raise ValidationError(
+            f"worktree_policy='{data.get('worktree_policy')}' not in {sorted(valid_policies)}"
+        )
+    mag = data.get("magi_max_iterations")
+    auto_mag = data.get("auto_magi_max_iterations")
+    if not isinstance(mag, int) or mag < 1:
+        raise ValidationError(f"magi_max_iterations must be int >= 1, got {mag!r}")
+    if not isinstance(auto_mag, int) or auto_mag < mag:
+        raise ValidationError(
+            f"auto_magi_max_iterations ({auto_mag}) must be int >= magi_max_iterations ({mag})"
+        )
+    retries = data.get("auto_verification_retries")
+    if not isinstance(retries, int) or retries < 0:
+        raise ValidationError(f"auto_verification_retries must be int >= 0, got {retries!r}")
+    if not isinstance(data.get("verification_commands"), tuple):
+        raise ValidationError("verification_commands must be a non-empty list")
+    if len(data["verification_commands"]) == 0:
+        raise ValidationError("verification_commands must be non-empty")
     try:
         return PluginConfig(**data)
     except TypeError as exc:
