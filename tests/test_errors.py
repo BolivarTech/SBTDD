@@ -48,3 +48,37 @@ def test_dependency_error_derives_from_sbtdd():
     assert issubclass(DependencyError, SBTDDError)
     with pytest.raises(SBTDDError):
         raise DependencyError("tdd-guard not in PATH")
+
+
+def test_precondition_error_derives_from_sbtdd():
+    from errors import PreconditionError, SBTDDError
+
+    assert issubclass(PreconditionError, SBTDDError)
+
+
+def test_magi_gate_error_derives_from_sbtdd():
+    from errors import MAGIGateError, SBTDDError
+
+    assert issubclass(MAGIGateError, SBTDDError)
+
+
+def test_quota_exhausted_error_derives_from_sbtdd():
+    from errors import QuotaExhaustedError, SBTDDError
+
+    assert issubclass(QuotaExhaustedError, SBTDDError)
+
+
+def test_all_seven_subclasses_exist():
+    import errors
+
+    expected = {
+        "ValidationError",
+        "StateFileError",
+        "DriftError",
+        "DependencyError",
+        "PreconditionError",
+        "MAGIGateError",
+        "QuotaExhaustedError",
+    }
+    actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
+    assert expected == actual, f"mismatch: expected {expected}, got {actual}"

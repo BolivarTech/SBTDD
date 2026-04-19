@@ -30,3 +30,15 @@ class DriftError(SBTDDError):
 
 class DependencyError(SBTDDError):
     """Required dependency missing or non-operational — exit 2."""
+
+
+class PreconditionError(SBTDDError):
+    """Subcommand precondition not satisfied — exit 2 (PRECONDITION_FAILED)."""
+
+
+class MAGIGateError(SBTDDError):
+    """MAGI verdict below threshold or STRONG_NO_GO — exit 8 (MAGI_GATE_BLOCKED)."""
+
+
+class QuotaExhaustedError(SBTDDError):
+    """Anthropic API quota exhausted (rate limit / session / credit) — exit 11."""
