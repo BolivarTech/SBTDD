@@ -7,6 +7,10 @@
 Each mutating subcommand invokes detect_drift() at entry; non-None
 result aborts with exit 3 (DRIFT_DETECTED). Silent reconciliation is
 forbidden by design - hiding drift hides protocol bugs.
+
+All git invocations go through :mod:`subprocess_utils` so the wrapper's
+timeout + Windows kill-tree discipline (sec.S.8.6 / NF5) applies
+uniformly across the codebase.
 """
 
 from __future__ import annotations
