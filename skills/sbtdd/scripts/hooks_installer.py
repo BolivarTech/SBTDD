@@ -64,4 +64,11 @@ def merge(
     target = Path(target_path)
     tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
     tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-    os.replace(tmp, target)
+    try:
+        os.replace(tmp, target)
+    except OSError:
+        # Clean up the partially-written tmp so the directory is left in
+        # a consistent state; re-raise so callers see the underlying
+        # failure (MAGI Loop 2 Finding 6; mirrors state_file.save).
+        tmp.unlink(missing_ok=True)
+        raise
