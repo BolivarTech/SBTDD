@@ -167,10 +167,66 @@ def test_evaluate_drift_plan_already_checked():
     assert "already [x]" in report.reason or "completed" in report.reason.lower()
 
 
+def test_detect_drift_routes_git_through_subprocess_utils(tmp_path, monkeypatch):
+    """detect_drift must use subprocess_utils.run_with_timeout for NF5 consistency.
+
+    Per MAGI Loop 2 Finding 8: the direct ``subprocess.run`` call on git
+    log bypasses the timeout + Windows kill-tree wrapper that all other
+    subprocess invocations go through. Route through subprocess_utils.
+    """
+    import json
+
+    from drift import detect_drift
+
+    state_path = tmp_path / ".claude" / "session-state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "plan_path": "planning/claude-plan-tdd.md",
+                "current_task_id": "1",
+                "current_task_title": "t",
+                "current_phase": "green",
+                "phase_started_at_commit": "deadbeef",
+                "last_verification_at": None,
+                "last_verification_result": None,
+                "plan_approved_at": "2026-04-19T10:00:00Z",
+            }
+        )
+    )
+    plan_path = tmp_path / "planning" / "claude-plan-tdd.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("### Task 1: do something\n- [ ] step 1\n")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class R:
+            returncode = 0
+            stdout = "refactor: do the refactor\n"
+            stderr = ""
+
+        return R()
+
+    import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    detect_drift(
+        state_file_path=state_path,
+        plan_path=plan_path,
+        repo_root=tmp_path,
+    )
+    git_calls = [c for c in calls if "git" in c]
+    assert len(git_calls) == 1, f"expected 1 git call via subprocess_utils, got {git_calls}"
+    assert "log" in git_calls[0]
+
+
 def test_detect_drift_io_wrapper_reads_three_sources(tmp_path, monkeypatch):
     """detect_drift reads state/plan/git itself -- spec-behavior.md sec.4.2 signature."""
-    import subprocess
     import json
+
     from drift import detect_drift, DriftReport
 
     # Seed synthetic state file (phase=green)
@@ -201,10 +257,13 @@ def test_detect_drift_io_wrapper_reads_three_sources(tmp_path, monkeypatch):
         class R:
             returncode = 0
             stdout = "refactor: do the refactor\n"
+            stderr = ""
 
         return R()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
 
     report = detect_drift(
         state_file_path=state_path,
@@ -255,8 +314,8 @@ def test_all_task_steps_complete_returns_open_when_task_missing():
 
 
 def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypatch):
-    import subprocess
     import json
+
     from drift import detect_drift
 
     state_path = tmp_path / ".claude" / "session-state.json"
@@ -284,10 +343,13 @@ def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypa
         class R:
             returncode = 0
             stdout = "chore: mark task 0 complete\n"
+            stderr = ""
 
         return R()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
 
     assert (
         detect_drift(
