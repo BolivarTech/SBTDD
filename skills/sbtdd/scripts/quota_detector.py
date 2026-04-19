@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-19
+"""Detection of Anthropic API quota exhaustion (sec.S.11.4).
+
+The plugin invokes skills (superpowers, magi) that internally run
+claude -p against the Anthropic API. When the API hits rate limits or
+subscription/credit limits, the skill's stderr contains distinctive
+messages. This module regex-matches those patterns and returns a
+typed QuotaExhaustion result; the dispatcher raises QuotaExhaustedError
+and exits with code 11.
+
+Patterns are brittle (Anthropic can change the text). Centralizing them
+here makes updates a one-file change.
+"""
+
+from __future__ import annotations
+
+import re
+from types import MappingProxyType
+from typing import Mapping
+
+_QUOTA_PATTERNS_MUTABLE: dict[str, re.Pattern[str]] = {
+    "rate_limit_429": re.compile(r"Request rejected \(429\)"),
+    # Per MAGI Checkpoint 2 iter 1 (caspar): accept alternative separators
+    # (middle-dot U+00B7, ASCII hyphen, en-dash, em-dash, colon) because
+    # Anthropic may tweak copy. Also allow surrounding whitespace.
+    "session_limit": re.compile(
+        r"You've hit your (session|weekly|Opus) limit\s*[·\-–—:]\s*resets (.+?)(?:\s|$)"
+    ),
+    "credit_exhausted": re.compile(r"Credit balance is too low"),
+    "server_throttle": re.compile(r"Server is temporarily limiting requests"),
+}
+
+#: Read-only registry of quota exhaustion regex patterns.
+QUOTA_PATTERNS: Mapping[str, re.Pattern[str]] = MappingProxyType(_QUOTA_PATTERNS_MUTABLE)
