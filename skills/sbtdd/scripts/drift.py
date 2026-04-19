@@ -33,6 +33,10 @@ class DriftReport:
 #: TDD phase ordering for phase-inversion drift detection.
 _PHASE_ORDER: tuple[str, ...] = ("red", "green", "refactor")
 
+#: Generic task-header pattern for section-boundary detection (matches any
+#: ``### Task <id>:``, used to locate the NEXT task after a specific match).
+_ANY_TASK_HEADER: re.Pattern[str] = re.compile(r"^### Task \S+?:", re.MULTILINE)
+
 #: Map of phase -> set of close-commit prefixes that the close of that phase emits.
 _PHASE_CLOSE_PREFIXES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
@@ -207,8 +211,7 @@ def _all_task_steps_complete(plan_text: str, task_id: str) -> str:
         return "[ ]"
     # Use a generic next-task-header pattern to find the section boundary;
     # the specific task_header regex would only re-match the SAME task id.
-    any_task_header = re.compile(r"^### Task \S+?:", re.MULTILINE)
-    section_end = any_task_header.search(plan_text, match.end())
+    section_end = _ANY_TASK_HEADER.search(plan_text, match.end())
     end_pos = section_end.start() if section_end else len(plan_text)
     section = plan_text[match.end() : end_pos]
     if "- [ ]" in section:
