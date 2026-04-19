@@ -82,6 +82,19 @@ def test_validate_message_accepts_clean_english():
     validate_message("add parser for empty input edge case")  # no raise
 
 
+def test_validate_message_accepts_english_del_keyword():
+    """Regression: 'del' is a valid English keyword (Python builtin, shell 'del').
+
+    The prior Spanish denylist treated 'del' as Spanish, falsely rejecting
+    legitimate English commits like 'del obsolete cache entries'. Remove that
+    entry from the denylist (MAGI Loop 2 Finding 1).
+    """
+    from commits import validate_message
+
+    validate_message("fix: del obsolete cache entries after TTL")  # no raise
+    validate_message("refactor: del loop variable after use")  # no raise
+
+
 def test_validate_message_accepts_technical_english_with_numbers():
     from commits import validate_message
 
