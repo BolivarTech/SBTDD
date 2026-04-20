@@ -29,6 +29,7 @@ from typing import Callable, MutableMapping
 import close_phase_cmd
 import close_task_cmd
 import init_cmd
+import pre_merge_cmd
 import spec_cmd
 import status_cmd
 from errors import EXIT_CODES, SBTDDError, ValidationError
@@ -64,7 +65,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "close-phase": close_phase_cmd.main,
     "close-task": close_task_cmd.main,
     "status": status_cmd.main,
-    "pre-merge": _default_handler_factory("pre-merge"),
+    "pre-merge": pre_merge_cmd.main,
     "finalize": _default_handler_factory("finalize"),
     "auto": _default_handler_factory("auto"),
     "resume": _default_handler_factory("resume"),
