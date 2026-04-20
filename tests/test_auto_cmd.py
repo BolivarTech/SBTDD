@@ -663,3 +663,129 @@ def test_auto_phase3_aborts_on_strong_no_go(
     ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
     with pytest.raises(MAGIGateError):
         auto_cmd._phase3_pre_merge(ns, cfg)
+
+
+# ---------------------------------------------------------------------------
+# Task 30 -- Phase 4 checklist + Phase 5 report with auto-run.json trail.
+# ---------------------------------------------------------------------------
+
+
+def _seed_magi_verdict(
+    tmp_path: Path,
+    *,
+    verdict: str = "GO",
+    degraded: bool = False,
+    timestamp: str = "2026-04-21T00:00:00Z",
+) -> Path:
+    """Write a magi-verdict.json artifact."""
+    import json as _json
+
+    path = tmp_path / ".claude" / "magi-verdict.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "timestamp": timestamp,
+        "verdict": verdict,
+        "degraded": degraded,
+        "conditions": [],
+        "findings": [],
+    }
+    path.write_text(_json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _seed_spec_files(tmp_path: Path) -> None:
+    """Write minimal sbtdd/spec-behavior.md so the checklist item passes."""
+    spec_dir = tmp_path / "sbtdd"
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    (spec_dir / "spec-behavior.md").write_text("# behavior\n", encoding="utf-8")
+
+
+def _seed_checklist_clean_env(
+    tmp_path: Path, *, verdict: str = "GO", degraded: bool = False
+) -> None:
+    """Seed a fully clean environment for Phase 4 checklist tests."""
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _seed_spec_files(tmp_path)
+    planning = tmp_path / "planning"
+    planning.mkdir(parents=True, exist_ok=True)
+    (planning / "claude-plan-tdd.md").write_text(
+        "# Plan\n\n### Task 1: done\n- [x] step\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".claude/\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", ".gitignore", "sbtdd", "planning"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "chore: seed spec and plan"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    _seed_state(tmp_path, current_phase="done")
+    _seed_magi_verdict(tmp_path, verdict=verdict, degraded=degraded)
+
+
+def test_auto_phase4_runs_checklist_but_does_not_invoke_finishing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INV-25: auto Phase 4 checklist runs, but /finishing-...-branch NOT invoked."""
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from state_file import load as load_state
+
+    _seed_checklist_clean_env(tmp_path, verdict="GO", degraded=False)
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", lambda **kw: None)
+
+    finishing_calls = {"n": 0}
+
+    def should_not_run(**kw: object) -> None:
+        finishing_calls["n"] += 1
+
+    monkeypatch.setattr(superpowers_dispatch, "finishing_a_development_branch", should_not_run)
+
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+    auto_cmd._phase4_checklist(tmp_path, state, cfg)
+    assert finishing_calls["n"] == 0
+
+
+def test_auto_phase4_aborts_on_degraded_verdict_exit_9(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """degraded=true verdict -> ChecklistError (exit 9)."""
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from errors import ChecklistError
+    from state_file import load as load_state
+
+    _seed_checklist_clean_env(tmp_path, verdict="GO", degraded=True)
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", lambda **kw: None)
+
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+    with pytest.raises(ChecklistError):
+        auto_cmd._phase4_checklist(tmp_path, state, cfg)
+
+
+def test_auto_phase5_writes_auto_run_json(tmp_path: Path) -> None:
+    """.claude/auto-run.json contains timestamps + verdict."""
+    import json as _json
+
+    import auto_cmd
+
+    (tmp_path / ".claude").mkdir(parents=True, exist_ok=True)
+    verdict = _make_verdict("GO", degraded=False)
+    started = "2026-04-21T00:00:00Z"
+    auto_cmd._phase5_report(tmp_path, started, verdict)  # type: ignore[arg-type]
+    data = _json.loads((tmp_path / ".claude" / "auto-run.json").read_text(encoding="utf-8"))
+    assert data["auto_started_at"] == started
+    assert "auto_finished_at" in data
+    assert data["verdict"] == "GO"
+    assert data["degraded"] is False

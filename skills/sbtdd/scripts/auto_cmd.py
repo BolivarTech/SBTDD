@@ -32,6 +32,7 @@ preview works even when git / tdd-guard / plugins are unavailable.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,7 @@ from config import PluginConfig, load_plugin_local
 from dependency_check import check_environment
 from drift import detect_drift
 from errors import (
+    ChecklistError,
     DependencyError,
     DriftError,
     PreconditionError,
@@ -335,6 +337,70 @@ def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     return verdict
 
 
+def _phase4_checklist(root: Path, state: SessionState, cfg: PluginConfig) -> None:
+    """Run Phase 4 -- sec.M.7 checklist validation (reuses finalize logic).
+
+    Delegates the checklist construction to :func:`finalize_cmd._checklist`
+    so the 9-item contract stays single-sourced. The key behavioral
+    difference vs interactive ``/sbtdd finalize`` is that auto does NOT
+    invoke ``/finishing-a-development-branch`` after a pass (INV-25): the
+    branch is left clean for the user to merge / PR manually.
+
+    Args:
+        root: Project root directory.
+        state: Final :class:`SessionState` (expected
+            ``current_phase='done'``).
+        cfg: Plugin configuration.
+
+    Raises:
+        ChecklistError: Any sec.M.7 item failed -- includes a detailed
+            one-line-per-failure list in the message (exit 9).
+    """
+    import finalize_cmd
+
+    magi_verdict_path = root / ".claude" / "magi-verdict.json"
+    items = finalize_cmd._checklist(root, state, magi_verdict_path, cfg)
+    failures = [(n, d) for (n, ok, d) in items if not ok]
+    if failures:
+        raise ChecklistError(
+            f"auto Phase 4 checklist FAILED ({len(failures)} items): "
+            + "; ".join(f"{n} - {d}" for n, d in failures)
+        )
+
+
+def _phase5_report(root: Path, started: str, verdict: object) -> None:
+    """Run Phase 5 -- write ``.claude/auto-run.json`` audit trail (INV-26).
+
+    The audit file captures the full lifespan (start -> finish) plus the
+    gating MAGI verdict + degraded flag so operators can reconstruct the
+    run post-hoc. Also emits a human-readable summary to stdout.
+
+    Args:
+        root: Project root directory.
+        started: ISO 8601 timestamp of ``main`` entry (from Phase 1).
+        verdict: :class:`magi_dispatch.MAGIVerdict` or ``None`` if the
+            run aborted before Phase 3 completed (never expected in the
+            happy path).
+    """
+    auto_run = root / ".claude" / "auto-run.json"
+    auto_run.parent.mkdir(parents=True, exist_ok=True)
+    finished = _now_iso()
+    data = {
+        "auto_started_at": started,
+        "auto_finished_at": finished,
+        "verdict": getattr(verdict, "verdict", None),
+        "degraded": getattr(verdict, "degraded", None),
+    }
+    auto_run.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    sys.stdout.write(
+        "/sbtdd auto: DONE.\n"
+        f"Started:  {started}\n"
+        f"Finished: {finished}\n"
+        f"MAGI:     {data['verdict']} (degraded={data['degraded']})\n"
+        "Branch status: clean, ready for merge/PR.\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd auto (shoot-and-forget full-cycle)."""
     parser = _build_parser()
@@ -347,9 +413,15 @@ def main(argv: list[str] | None = None) -> int:
         _print_dry_run_preview(ns)
         return 0
     state, cfg = _phase1_preflight(ns)
+    started = _now_iso()
+    auto_run = ns.project_root / ".claude" / "auto-run.json"
+    auto_run.parent.mkdir(parents=True, exist_ok=True)
+    auto_run.write_text(json.dumps({"auto_started_at": started}, indent=2), encoding="utf-8")
     if state.current_phase != "done":
         state = _phase2_task_loop(ns, state, cfg)
-    _phase3_pre_merge(ns, cfg)
+    verdict = _phase3_pre_merge(ns, cfg)
+    _phase4_checklist(ns.project_root, state, cfg)
+    _phase5_report(ns.project_root, started, verdict)
     return 0
 
 
