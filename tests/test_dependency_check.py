@@ -464,18 +464,28 @@ def test_check_stack_toolchain_rust_clippy_subcommand_failure_detected(monkeypat
 def test_check_stack_toolchain_rust_clippy_subcommand_success(monkeypatch):
     """When cargo clippy --version / cargo fmt --version succeed, status is OK."""
     from dependency_check import check_stack_toolchain
+    from types import SimpleNamespace
 
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    class OKProc:
-        returncode = 0
-        stdout = "clippy 0.1.77\n"
-        stderr = ""
+    # Plan D Task 6: Rust shims are now regex-validated, so each binary
+    # must produce the output its own regex accepts (``clippy ...`` for
+    # cargo-clippy, ``rustfmt ...`` for cargo-fmt, etc.). A single fixed
+    # stdout is no longer sufficient.
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        if cmd[:2] == ["cargo", "clippy"]:
+            stdout = "clippy 0.1.77\n"
+        elif cmd[:2] == ["cargo", "fmt"]:
+            stdout = "rustfmt 1.7.0-stable\n"
+        elif cmd[0] == "cargo-nextest":
+            stdout = "cargo-nextest-nextest 0.9.70\n"
+        elif cmd[0] == "cargo-audit":
+            stdout = "cargo-audit-audit 0.20.0\n"
+        else:
+            stdout = f"{cmd[0]} 1.0.0\n"
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
-    monkeypatch.setattr(
-        "subprocess_utils.run_with_timeout",
-        lambda cmd, timeout, capture=True, cwd=None: OKProc(),
-    )
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
     checks = check_stack_toolchain("rust")
     clippy = [c for c in checks if "clippy" in c.name]
     fmt = [c for c in checks if "fmt" in c.name]

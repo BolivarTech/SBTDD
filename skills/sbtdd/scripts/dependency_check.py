@@ -405,6 +405,21 @@ _CARGO_SUBCOMMAND_SHIMS: Mapping[str, str] = MappingProxyType(
 )
 
 
+#: Per-binary expected output prefixes for Rust toolchain shims. When
+#: the binary is on this list, ``_check_binary`` additionally asserts
+#: stdout matches the corresponding regex -- catches shims that return
+#: exit 0 with garbage output (e.g. broken PATH entry shadowing a real
+#: binary, or a placeholder script installed during incomplete setup).
+_RUST_VERSION_REGEXES: Mapping[str, _re.Pattern[str]] = MappingProxyType(
+    {
+        "cargo-clippy": _re.compile(r"^clippy\s+\d+\.\d+"),
+        "cargo-fmt": _re.compile(r"^rustfmt\s+\d+\.\d+"),
+        "cargo-nextest": _re.compile(r"^cargo-nextest[-\w]*\s+\d+\.\d+"),
+        "cargo-audit": _re.compile(r"^cargo-audit[-\w]*\s+\d+\.\d+"),
+    }
+)
+
+
 def _check_binary(binary: str, display: str) -> DependencyCheck:
     """Check that ``binary`` is in PATH and ``{binary} --version`` exits 0.
 
@@ -446,6 +461,17 @@ def _check_binary(binary: str, display: str) -> DependencyCheck:
             remediation=f"Reinstall {binary}",
         )
     combined = (result.stdout or result.stderr).strip()
+    expected_re = _RUST_VERSION_REGEXES.get(binary)
+    if expected_re is not None and not expected_re.match(combined):
+        return DependencyCheck(
+            name=display,
+            status="BROKEN",
+            detail=(
+                f"{label} --version emitted unexpected format (parse failed): "
+                f"{combined.splitlines()[0] if combined else '(empty)'}"
+            ),
+            remediation=f"Reinstall {binary} (its `--version` output looks malformed)",
+        )
     detail = combined.splitlines()[0] if combined else f"{binary} present"
     return DependencyCheck(
         name=display,
