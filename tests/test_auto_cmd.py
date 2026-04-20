@@ -378,6 +378,48 @@ def test_auto_phase2_aborts_after_exhausting_retries_exit_6(
     assert EXIT_CODES[VerificationIrremediableError] == 6
 
 
+def test_auto_run_verification_does_not_mask_quota_exhausted_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MAGI Loop 2 iter 1 Finding 2: QuotaExhaustedError must propagate unchanged.
+
+    The retry wrapper previously caught bare ``Exception`` and re-raised as
+    ``VerificationIrremediableError`` (exit 6). Quota exhaustion must skip
+    the retry/wrap logic entirely so the dispatcher maps it to exit 11.
+    """
+    import auto_cmd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, QuotaExhaustedError, VerificationIrremediableError
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+
+    attempts = {"n": 0, "debug_calls": 0}
+
+    def quota_fail(**kw: object) -> None:
+        attempts["n"] += 1
+        raise QuotaExhaustedError("session_limit: test")
+
+    def debug_spy(**kw: object) -> None:
+        attempts["debug_calls"] += 1
+
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", quota_fail)
+    monkeypatch.setattr(superpowers_dispatch, "systematic_debugging", debug_spy, raising=False)
+
+    # Quota must propagate as QuotaExhaustedError on the FIRST attempt --
+    # not wrapped as VerificationIrremediableError after budget exhaustion.
+    with pytest.raises(QuotaExhaustedError):
+        auto_cmd._run_verification_with_retries(tmp_path, retries=3)
+    # Only ONE attempt was consumed; retry budget untouched because quota
+    # is not a legitimate retryable failure.
+    assert attempts["n"] == 1
+    # systematic-debugging MUST NOT be invoked for quota exhaustion -- the
+    # error is about API limits, not flaky verification.
+    assert attempts["debug_calls"] == 0
+    # Sanity: exit-code mapping keeps 11 for quota vs 6 for irremediable.
+    assert EXIT_CODES[QuotaExhaustedError] == 11
+    assert EXIT_CODES[VerificationIrremediableError] == 6
+
+
 def test_auto_phase2_sequential_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """3-task plan; tasks processed in order 1, 2, 3."""
     import auto_cmd
