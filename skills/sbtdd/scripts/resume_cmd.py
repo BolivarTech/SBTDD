@@ -135,6 +135,80 @@ def _recheck_environment(root: Path) -> None:
         )
 
 
+def _decide_delegation(
+    state: Any, tree_dirty: bool, runtime: dict[str, bool]
+) -> tuple[str | None, list[str]]:
+    """Decide which downstream subcommand to invoke based on state snapshot.
+
+    Decision tree (sec.S.5.10):
+
+    - ``current_phase`` in (``red``, ``green``, ``refactor``) + tree
+      clean + ``auto-run.json`` present -> ``auto_cmd`` (a previous auto
+      run was interrupted mid-cycle; resume it).
+    - ``current_phase`` in (``red``, ``green``, ``refactor``) + tree
+      clean + no ``auto-run.json`` -> no delegation (manual mode; user
+      drives next close-phase themselves).
+    - ``current_phase`` in TDD phases + tree dirty ->
+      ``uncommitted-resolution`` (decision deferred to Phase 4).
+    - ``current_phase == 'done'`` + tree clean + no verdict ->
+      ``pre_merge_cmd`` (next natural step).
+    - ``current_phase == 'done'`` + tree clean + verdict present ->
+      ``finalize_cmd``.
+    - ``current_phase == 'done'`` + tree dirty ->
+      ``uncommitted-resolution``.
+
+    Args:
+        state: :class:`state_file.SessionState` (duck-typed to the
+            ``current_phase`` attribute; ``_FakeState`` in tests also
+            satisfies the contract).
+        tree_dirty: Whether ``git status --short`` reported non-empty.
+        runtime: Mapping with keys ``auto-run.json`` /
+            ``magi-verdict.json`` -> bool (present).
+
+    Returns:
+        ``(module_name_or_sentinel, extra_args)``. ``module_name`` is
+        ``None`` when no delegation is appropriate;
+        ``"uncommitted-resolution"`` signals the caller to enter Phase 4.
+    """
+    if state.current_phase in ("red", "green", "refactor") and not tree_dirty:
+        if runtime.get("auto-run.json"):
+            return ("auto_cmd", [])
+        return (None, [])
+    if state.current_phase in ("red", "green", "refactor") and tree_dirty:
+        return ("uncommitted-resolution", [])
+    if state.current_phase == "done":
+        if not runtime.get("magi-verdict.json") and not tree_dirty:
+            return ("pre_merge_cmd", [])
+        if runtime.get("magi-verdict.json") and not tree_dirty:
+            return ("finalize_cmd", [])
+        if tree_dirty:
+            return ("uncommitted-resolution", [])
+    return (None, [])
+
+
+def _delegate(module_name: str, root: Path, extra: list[str]) -> int:
+    """Import and invoke ``<module>.main`` with ``--project-root``.
+
+    Uses ``importlib`` so the decision tree does not pull every
+    subcommand's transitive dependency chain at resume module import
+    time.
+
+    Args:
+        module_name: Name of a ``*_cmd`` module (``auto_cmd``,
+            ``pre_merge_cmd``, ``finalize_cmd``).
+        root: Project root directory passed as ``--project-root``.
+        extra: Extra CLI arguments appended after ``--project-root``.
+
+    Returns:
+        The ``main``-supplied return code from the delegated subcommand.
+    """
+    import importlib
+
+    mod = importlib.import_module(module_name)
+    rc: int = mod.main(["--project-root", str(root)] + extra)
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd resume (diagnostic + delegation wrapper)."""
     parser = _build_parser()
@@ -152,9 +226,22 @@ def main(argv: list[str] | None = None) -> int:
             "Project is in manual mode. Invoke /sbtdd spec to bootstrap a feature.\n"
         )
         return 0
-    _report_diagnostic(root)
+    report = _report_diagnostic(root)
     _recheck_environment(root)
-    return 0
+    module_name, extra = _decide_delegation(
+        report["state"], report["tree_dirty"], report["runtime"]
+    )
+    if module_name is None:
+        sys.stdout.write("Nothing to delegate. Run a manual subcommand.\n")
+        return 0
+    if ns.dry_run:
+        sys.stdout.write(f"Would delegate to: {module_name} with args {extra}\n")
+        return 0
+    if module_name == "uncommitted-resolution":
+        # Task 36 will wire real behavior; for now signal unhandled path
+        # as rc=1 so callers see the decision is pending implementation.
+        return 1
+    return _delegate(module_name, root, extra)
 
 
 run = main

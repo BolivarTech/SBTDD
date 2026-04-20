@@ -265,3 +265,84 @@ def test_resume_aborts_on_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     )
     with pytest.raises(DriftError):
         resume_cmd._recheck_environment(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Task 35 -- Phase 3 delegation decision tree.
+# ---------------------------------------------------------------------------
+
+
+class _FakeState:
+    """Minimal SessionState-shaped stub for decision-tree testing."""
+
+    def __init__(self, current_phase: str, current_task_id: str | None = None) -> None:
+        self.current_phase = current_phase
+        self.current_task_id = current_task_id
+
+
+def test_resume_delegates_to_auto_when_phase_red_and_auto_run_present() -> None:
+    """state=red + auto-run.json present + tree clean -> auto_cmd."""
+    import resume_cmd
+
+    state = _FakeState("red", current_task_id="1")
+    module, extra = resume_cmd._decide_delegation(
+        state, tree_dirty=False, runtime={"auto-run.json": True, "magi-verdict.json": False}
+    )
+    assert module == "auto_cmd"
+    assert extra == []
+
+
+def test_resume_delegates_to_pre_merge_when_done_no_verdict() -> None:
+    """state=done, no magi-verdict.json, tree clean -> pre_merge_cmd."""
+    import resume_cmd
+
+    state = _FakeState("done", current_task_id=None)
+    module, _ = resume_cmd._decide_delegation(
+        state, tree_dirty=False, runtime={"auto-run.json": False, "magi-verdict.json": False}
+    )
+    assert module == "pre_merge_cmd"
+
+
+def test_resume_delegates_to_finalize_when_done_and_verdict_present() -> None:
+    """state=done, verdict present, tree clean -> finalize_cmd."""
+    import resume_cmd
+
+    state = _FakeState("done", current_task_id=None)
+    module, _ = resume_cmd._decide_delegation(
+        state, tree_dirty=False, runtime={"auto-run.json": False, "magi-verdict.json": True}
+    )
+    assert module == "finalize_cmd"
+
+
+def test_resume_dry_run_prints_plan_without_delegating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--dry-run prints 'would delegate to ...' without invoking the target."""
+    import resume_cmd
+
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    # state=done + verdict present -> decision tree picks finalize
+    _seed_state(tmp_path, current_phase="done", current_task_id=None)
+    import json as _json
+
+    (tmp_path / ".claude" / "magi-verdict.json").write_text(
+        _json.dumps({"verdict": "GO", "degraded": False}), encoding="utf-8"
+    )
+    monkeypatch.setattr(resume_cmd, "check_environment", lambda *a, **k: _ok_report())
+    monkeypatch.setattr(resume_cmd, "detect_drift", lambda *a, **k: None)
+
+    # Spy to detect whether the delegate was actually invoked.
+    invoked = {"finalize": 0}
+
+    def fake_delegate(module_name: str, root: Path, extra: list[str]) -> int:
+        invoked["finalize"] += 1
+        return 0
+
+    monkeypatch.setattr(resume_cmd, "_delegate", fake_delegate)
+
+    rc = resume_cmd.main(["--project-root", str(tmp_path), "--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "would delegate" in out.lower() or "dry" in out.lower()
+    assert invoked["finalize"] == 0
