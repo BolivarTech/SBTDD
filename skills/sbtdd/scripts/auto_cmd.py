@@ -725,15 +725,24 @@ def _read_audit_tasks_completed(path: Path) -> int:
 
     Used by the MAGIGateError handler to recover the raise-safe partial
     count that ``_phase2_task_loop`` writes after each task close (Plan D
-    iter 2 Caspar -- raise-safe audit). Missing or malformed file returns
-    0 (degraded but not corrupted).
+    iter 2 Caspar -- raise-safe audit). Missing file returns 0 silently
+    (expected cold-start path). Malformed content still returns 0 but
+    emits a stderr diagnostic so operators see that a previously-valid
+    audit has regressed (MAGI Loop 2 D iter 1 Balthasar WARNING --
+    silent fallback could otherwise mask real corruption).
     """
     if not path.exists():
         return 0
     try:
         data = json.loads(path.read_text("utf-8"))
         return int(data.get("tasks_completed", 0))
-    except (json.JSONDecodeError, ValueError, OSError):
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        sys.stderr.write(
+            f"warning: failed to parse {path}: {type(exc).__name__}: {exc}. "
+            f"Falling back to tasks_completed=0 for auto-run audit. "
+            f"If this file was previously valid, the run may have been "
+            f"interrupted mid-write or corrupted externally.\n"
+        )
         return 0
 
 
