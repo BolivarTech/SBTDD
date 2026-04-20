@@ -83,6 +83,15 @@ def main(argv: list[str] | None = None) -> int:
     sha, subject = _read_head_commit(root)
     last_v_at = state.last_verification_at or "null"
     last_v_res = state.last_verification_result or "null"
+    drift_report = detect_drift(state_path, plan_path, root)
+    if drift_report is None:
+        drift_line = "Drift:         none\n"
+    else:
+        drift_line = (
+            f"Drift:         detected: state={drift_report.state_value}, "
+            f"HEAD={drift_report.git_value}:, plan={drift_report.plan_value}\n"
+            f"               reason: {drift_report.reason}\n"
+        )
     sys.stdout.write(
         f"Active task:   {state.current_task_id or 'null'}"
         f" - {state.current_task_title or 'null'}\n"
@@ -90,10 +99,9 @@ def main(argv: list[str] | None = None) -> int:
         f"HEAD commit:   {sha} {subject}\n"
         f"Plan progress: {completed}/{total} tasks [x]\n"
         f"Last verif:    {last_v_at} - {last_v_res}\n"
+        f"{drift_line}"
     )
-    # Drift detection wired in Task 3; call always and ignore return for now.
-    _ = detect_drift(state_path, plan_path, root)
-    return 0
+    return 3 if drift_report is not None else 0
 
 
 run = main
