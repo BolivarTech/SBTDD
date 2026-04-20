@@ -981,6 +981,32 @@ def test_parse_receiving_review_handles_mixedcase_headers() -> None:
     assert rejected == ["cond 2"]
 
 
+def test_write_magi_conditions_file_body_structure(tmp_path: Path) -> None:
+    """Finding 1: conditions file body includes step-by-step recovery guidance.
+
+    MAGI Loop 2 iter 3 Finding 1 (Balthasar): first-time users may not
+    know the full state-machine transition after exit 8. The generated
+    ``.claude/magi-conditions.md`` must include a concrete worked example
+    showing the close-phase -> close-task -> pre-merge recovery
+    sequence, plus an explicit pointer to ``.claude/magi-feedback.md``
+    for the rejected-feedback loop.
+    """
+    import pre_merge_cmd
+
+    verdict = _make_verdict("GO_WITH_CAVEATS", conditions=("cond A",))
+    path = pre_merge_cmd._write_magi_conditions_file(
+        ["cond A", "cond B"], tmp_path, verdict, iteration=2
+    )
+    body = path.read_text(encoding="utf-8")
+    assert "## How to apply these conditions" in body
+    assert "sbtdd close-phase --variant test" in body
+    assert "sbtdd close-phase --variant fix" in body
+    assert "sbtdd close-phase --variant refactor" in body
+    assert "sbtdd close-task" in body
+    assert "sbtdd pre-merge" in body
+    assert ".claude/magi-feedback.md" in body
+
+
 def test_gitignore_covers_magi_feedback_file() -> None:
     """MAGI Loop 2 iter 1 Finding 8: ``.claude/magi-feedback.md`` ignored.
 
