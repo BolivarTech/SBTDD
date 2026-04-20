@@ -246,15 +246,60 @@ def _phase4_smoke_test(staging: Path) -> None:
 
 
 def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:
-    """Atomically copy the staged tree into dest_root. Returns list of targets."""
+    """Relocate the staged tree into ``dest_root`` with best-effort atomicity.
+
+    Copies each staged file into its destination location under
+    ``dest_root``. True cross-volume atomicity would require
+    ``os.rename`` of the parent directory, which fails across volumes
+    and is unreliable on Windows when ``dest_root`` already exists --
+    so we implement "best effort atomicity with rollback": on any
+    per-file copy failure (disk full, permission denied on the N-th
+    file, etc.), the helper removes every file it already copied, then
+    re-raises the original exception. A subsequent ``/sbtdd init``
+    invocation therefore sees a clean ``dest_root`` and can retry
+    cleanly. Fix for MAGI Loop 2 iter 1 Finding 3.
+
+    Rollback guarantees:
+      - Every path in the returned ``created`` list up to the failure
+        point is removed via ``Path.unlink(missing_ok=True)``.
+      - Directories created by ``parent.mkdir(parents=True)`` are NOT
+        removed (they may have pre-existed; safer to leave).
+      - Rollback errors (e.g. unlink fails because a concurrent process
+        grabbed the file) are swallowed; the original copy failure is
+        what the caller cares about and is re-raised unchanged.
+
+    Args:
+        staging: Root of the prepared tree (typically a tempdir).
+        dest_root: Final destination; must exist and be writable.
+
+    Returns:
+        List of destination paths that were created, in copy order.
+        On exception this list is NOT returned; the rollback handler
+        consumes it internally before re-raising.
+
+    Raises:
+        OSError: Any filesystem failure during the copy loop is
+            propagated unchanged after rollback completes.
+    """
     staged_files = [p for p in staging.rglob("*") if p.is_file()]
     created: list[Path] = []
-    for src in staged_files:
-        rel = src.relative_to(staging)
-        target = dest_root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, target)
-        created.append(target)
+    try:
+        for src in staged_files:
+            rel = src.relative_to(staging)
+            target = dest_root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            created.append(target)
+    except Exception:
+        # Best-effort rollback: remove every file we already copied.
+        # Suppress unlink errors so the original OSError reaches the
+        # caller intact (it carries the useful diagnostic).
+        for copied in created:
+            try:
+                copied.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
     return created
 
 

@@ -547,13 +547,19 @@ def test_init_phase5_relocate_rolls_back_partial_copy_on_failure(
     original_copy2 = _shutil.copy2
     call_counter = {"n": 0}
 
-    def flaky_copy2(src: str, dst: str, *a: object, **kw: object) -> object:
+    def flaky_copy2(src: object, dst: object, **kw: object) -> object:
         call_counter["n"] += 1
         if call_counter["n"] >= 3:
             raise OSError("simulated disk full")
-        return original_copy2(src, dst, *a, **kw)
+        # Typed-cast to str for the real copy2 overload; the staging
+        # tree uses only str/Path inputs so narrowing here is safe.
+        return original_copy2(str(src), str(dst))
 
-    monkeypatch.setattr(init_cmd.shutil, "copy2", flaky_copy2)
+    # Patch the module-scope ``shutil.copy2`` -- ``init_cmd`` imports
+    # ``shutil`` once, so mutating the real module is equivalent to
+    # mutating ``init_cmd.shutil`` but avoids mypy's "not explicitly
+    # exported" warning on attribute access.
+    monkeypatch.setattr(_shutil, "copy2", flaky_copy2)
 
     with pytest.raises(OSError, match="simulated disk full"):
         init_cmd._phase5_relocate(staging, dest)
