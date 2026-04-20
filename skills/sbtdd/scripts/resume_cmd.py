@@ -112,28 +112,37 @@ def _report_diagnostic(root: Path) -> dict[str, Any]:
 def _assert_state_stable_between_reads(path: Path) -> None:
     """Best-effort check that the state file isn't being concurrently written.
 
-    Reads mtime + contents twice with a small delay; raises
-    :class:`StateFileError` if either differs. This is a HEURISTIC, not
-    a guarantee -- a write completing entirely between the two reads
-    could still slip through. In practice, ``auto_cmd`` is the only
-    concurrent writer, and its state-file updates are atomic
-    (``os.replace`` via :func:`state_file.save`), so this check catches
-    the common case (an actively-running auto interrupted mid-write).
-    For single-user local development (the v0.1 deployment target),
-    this is sufficient. File locking would be more robust but is
-    cross-platform-fragile without third-party deps, which would
-    violate the stdlib-only constraint on hot paths (INV-21 /
-    CLAUDE.md sec.3 "stdlib-only on hot paths").
+    Reads mtime + contents twice with a small delay. Raises
+    :class:`StateFileError` ONLY when CONTENT differs between the two
+    reads -- that is the strong signal of a racing concurrent writer.
+    When only ``st_mtime_ns`` differs but bytes are identical, the
+    function emits a diagnostic line to stderr and returns normally
+    (MAGI Loop 2 D iter 1 triple-flag Caspar + Balthasar + Melchior):
+    on Windows NTFS an editor ``save`` bumps mtime without rewriting
+    content, so mtime-only divergence is expected background noise and
+    must not trap the user into re-running resume indefinitely.
+
+    This is a HEURISTIC, not a guarantee -- a write completing entirely
+    between the two reads could still slip through. In practice,
+    ``auto_cmd`` is the only concurrent writer, and its state-file
+    updates are atomic (``os.replace`` via :func:`state_file.save`), so
+    this check catches the common case (an actively-running auto
+    interrupted mid-write). For single-user local development (the v0.1
+    deployment target), this is sufficient. File locking would be more
+    robust but is cross-platform-fragile without third-party deps,
+    which would violate the stdlib-only constraint on hot paths (INV-21
+    / CLAUDE.md sec.3 "stdlib-only on hot paths").
 
     The 10 ms sleep window is chosen to be small enough that human
     interaction latency dominates it (resume is never on a critical
     path) and large enough that realistic concurrent writers
     (a second shell running ``sbtdd status``) are observed by the
-    second stat. Finding 4 + Finding 8 of Plan D iter 1 both flagged
-    the heuristic nature; this docstring documents the tradeoff
-    explicitly rather than hiding it. Raises
-    :class:`StateFileError` on detected divergence, ``None`` on stable
-    reads.
+    second stat.
+
+    Raises:
+        StateFileError: Content diverged between the two reads -- a
+            genuine concurrent writer is at work; abort to avoid acting
+            on stale state.
     """
     if not path.exists():
         return
@@ -144,12 +153,20 @@ def _assert_state_stable_between_reads(path: Path) -> None:
     _time.sleep(0.01)
     second_mtime = path.stat().st_mtime_ns
     second_content = path.read_bytes()
-    if first_mtime != second_mtime or first_content != second_content:
+    if first_content != second_content:
         raise StateFileError(
             f"concurrent modification detected on {path} "
-            f"(mtime or content changed between reads). "
+            f"(content changed between reads). "
             f"Abort to avoid acting on stale state; re-run /sbtdd resume "
             f"once writers have stopped."
+        )
+    if first_mtime != second_mtime:
+        # mtime-only divergence: expected on Windows NTFS editor saves
+        # where the same bytes get rewritten. Emit a diagnostic so the
+        # signal is still visible, but do not trap the user.
+        sys.stderr.write(
+            f"note: {path} mtime changed between reads but content is "
+            f"identical; continuing (see _assert_state_stable_between_reads).\n"
         )
 
 
