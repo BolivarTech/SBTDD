@@ -41,9 +41,7 @@ def test_parse_junit_on_nonexistent_file_raises_validation_error(
     missing = tmp_path / "nope.xml"
     with pytest.raises(ValidationError) as exc:
         ctest_reporter.parse_junit(missing)
-    assert "not found" in str(exc.value).lower() or "does not exist" in str(
-        exc.value
-    ).lower()
+    assert "not found" in str(exc.value).lower() or "does not exist" in str(exc.value).lower()
 
 
 def test_run_wraps_empty_file(tmp_path: Path) -> None:

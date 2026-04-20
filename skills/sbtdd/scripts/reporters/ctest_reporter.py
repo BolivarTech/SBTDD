@@ -100,6 +100,12 @@ def parse_junit(path: Path) -> TestJSON:
     """
     if not path.exists():
         raise ValidationError(f"JUnit XML file not found: {path}")
+    if path.stat().st_size == 0:
+        raise ValidationError(
+            f"JUnit XML file is empty (0 bytes): {path}. "
+            f"Ensure `ctest --output-junit` ran successfully before invoking "
+            f"the reporter."
+        )
     try:
         # Trusted local input -- see module docstring "XXE / entity expansion
         # risk" section for rationale on not using defusedxml here.
