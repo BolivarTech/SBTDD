@@ -393,3 +393,56 @@ def test_resume_after_quota_exhaustion_continues_to_completion(bootstrapped_proj
     # Resume must pick up where auto left off and drive to completion.
     rc = run_sbtdd.main(["resume", "--project-root", str(bootstrapped_project), "--auto"])
     assert rc == 0
+
+
+def test_finalize_blocks_on_degraded_verdict(bootstrapped_project, monkeypatch):
+    """Scenario 17 defense-in-depth (INV-28): a degraded verdict must not merge.
+
+    Hand-crafts a ``magi-verdict.json`` with ``degraded: true`` and drives
+    finalize through the dispatcher. The checklist item ``MAGI verdict >=
+    threshold AND not degraded`` fails -> ChecklistError -> exit 9.
+    """
+    from state_file import SessionState, save as save_state
+
+    import run_sbtdd
+
+    # Spec to seed the state/plan, then mark everything done so finalize's
+    # preflight preconditions are satisfied.
+    rc = run_sbtdd.main(["spec", "--project-root", str(bootstrapped_project)])
+    assert rc == 0
+    state_path = bootstrapped_project / ".claude" / "session-state.json"
+    plan_path = bootstrapped_project / "planning" / "claude-plan-tdd.md"
+    # Flip every [ ] to [x] so the checklist finds no open tasks.
+    plan_path.write_text(
+        plan_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]"),
+        encoding="utf-8",
+    )
+    # Set state to done.
+    done_state = SessionState(
+        plan_path="planning/claude-plan-tdd.md",
+        current_task_id=None,
+        current_task_title=None,
+        current_phase="done",
+        phase_started_at_commit="deadbee",
+        last_verification_at="2026-04-19T12:00:00Z",
+        last_verification_result="passed",
+        plan_approved_at="2030-01-01T00:00:00Z",  # in the future to avoid staleness
+    )
+    save_state(done_state, state_path)
+
+    # Write a degraded verdict artifact.
+    (bootstrapped_project / ".claude" / "magi-verdict.json").write_text(
+        json.dumps(
+            {
+                "timestamp": "2030-01-02T00:00:00Z",
+                "verdict": "GO",
+                "degraded": True,
+                "conditions": [],
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = run_sbtdd.main(["finalize", "--project-root", str(bootstrapped_project)])
+    assert rc == 9
