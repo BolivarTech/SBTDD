@@ -73,3 +73,10 @@ def test_dispatcher_routes_auto_to_auto_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["auto"] is auto_cmd.main
+
+
+def test_dispatcher_routes_resume_to_resume_cmd():
+    import resume_cmd
+    import run_sbtdd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["resume"] is resume_cmd.main

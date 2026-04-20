@@ -32,6 +32,7 @@ import close_task_cmd
 import finalize_cmd
 import init_cmd
 import pre_merge_cmd
+import resume_cmd
 import spec_cmd
 import status_cmd
 from errors import EXIT_CODES, SBTDDError, ValidationError
@@ -70,7 +71,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "pre-merge": pre_merge_cmd.main,
     "finalize": finalize_cmd.main,
     "auto": auto_cmd.main,
-    "resume": _default_handler_factory("resume"),
+    "resume": resume_cmd.main,
 }
 
 
