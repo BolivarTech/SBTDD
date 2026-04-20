@@ -6,6 +6,11 @@
 
 4-step protocol: 0) drift check, 1) verification, 2) atomic commit, 3) state
 update. Refactor close cascades to close-task (sec.S.5.3 paso 3c-d).
+
+Enforces INV-1 (atomic phase close: commit + state file consistent),
+INV-2 (no phase mixing in a single commit), INV-12 (precondition
+validation), INV-16 (verification emits evidence via
+/verification-before-completion), and INV-17 (drift surfaced explicitly).
 """
 
 from __future__ import annotations

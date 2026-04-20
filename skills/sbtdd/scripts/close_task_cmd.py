@@ -10,6 +10,11 @@ Implements the sec.S.5.4 three-step protocol:
    only the plan edit.
 3. Advance ``session-state.json`` to the next open task (fresh red phase)
    or mark the plan ``done`` if this was the last task.
+
+Enforces INV-3 (plan checkboxes monotonic: [x] never unset) and is
+subject to INV-12 (every subcomando validates preconditions before
+mutating state). The ``chore:`` commit honours INV-5..7 commit discipline
+via :mod:`commits`.
 """
 
 from __future__ import annotations

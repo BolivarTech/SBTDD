@@ -95,3 +95,28 @@ def test_replace_point_marker_is_removed():
 
     src = inspect.getsource(run_sbtdd)
     assert "MILESTONE-C-REPLACE-POINT" not in src
+
+
+def test_all_cmd_modules_reference_spec_section_in_docstring():
+    """Every *_cmd module must cite its spec section (sec.S.*) in the module docstring."""
+    import ast
+    import importlib
+
+    for mod_name in (
+        "status_cmd",
+        "close_task_cmd",
+        "close_phase_cmd",
+        "init_cmd",
+        "spec_cmd",
+        "pre_merge_cmd",
+        "finalize_cmd",
+        "auto_cmd",
+        "resume_cmd",
+    ):
+        mod = importlib.import_module(mod_name)
+        assert mod.__file__ is not None
+        with open(mod.__file__, encoding="utf-8") as f:
+            src = f.read()
+        doc = ast.get_docstring(ast.parse(src))
+        assert doc is not None, f"{mod_name}: missing module docstring"
+        assert "sec.S." in doc, f"{mod_name}: docstring lacks sec.S. reference"

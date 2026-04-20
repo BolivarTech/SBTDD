@@ -16,6 +16,9 @@ passes. Phase 5 performs a single atomic relocation from tempdir to
 dest_root. If Phase 4 fails, the tempdir is cleaned up and dest_root
 remains byte-identical to its pre-invocation state -- satisfying
 sec.S.5.1 all-or-nothing.
+
+Honours INV-0 (global authority of ``~/.claude/CLAUDE.md``) and INV-12
+(preconditions validated before any mutation).
 """
 
 from __future__ import annotations

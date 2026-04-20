@@ -2,7 +2,13 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-19
-"""/sbtdd finalize -- checklist sec.M.7 + /finishing-a-development-branch (sec.S.5.7)."""
+"""/sbtdd finalize -- checklist sec.M.7 + /finishing-a-development-branch (sec.S.5.7).
+
+Enforces INV-10 (block on verdict below configured threshold), INV-12
+(precondition validation at entry) and the INV-28 defense-in-depth rule
+(degraded verdicts cannot merge: the checklist item ``MAGI verdict >=
+threshold AND not degraded`` is mandatory and cannot be skipped).
+"""
 
 from __future__ import annotations
 

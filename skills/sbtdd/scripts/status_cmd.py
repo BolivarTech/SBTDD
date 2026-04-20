@@ -4,6 +4,10 @@
 # Date: 2026-04-19
 """/sbtdd status - read-only report of state + git + plan + drift (sec.S.5.5).
 
+Enforces INV-4 (no state file -> manual mode: only init/spec/status operate)
+and INV-17 (drift surfaced explicitly, never silenced). Never mutates any
+artifact -- status is the diagnostic subcomando.
+
 Exit codes: 0 success, 1 state file corrupt (StateFileError), 3 drift detected.
 """
 
