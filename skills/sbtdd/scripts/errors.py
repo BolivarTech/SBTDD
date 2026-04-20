@@ -58,6 +58,10 @@ class Loop1DivergentError(SBTDDError):
     """Loop 1 (/requesting-code-review) did not converge in 10 iterations (exit 7)."""
 
 
+class ChecklistError(SBTDDError):
+    """Finalize checklist item failed (exit 9, CHECKLIST_FAILED)."""
+
+
 _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     ValidationError: 1,
     StateFileError: 1,
@@ -67,6 +71,7 @@ _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     DriftError: 3,
     Loop1DivergentError: 7,
     MAGIGateError: 8,
+    ChecklistError: 9,
     QuotaExhaustedError: 11,
 }
 

@@ -68,7 +68,7 @@ def test_quota_exhausted_error_derives_from_sbtdd():
     assert issubclass(QuotaExhaustedError, SBTDDError)
 
 
-def test_all_nine_subclasses_exist():
+def test_all_ten_subclasses_exist():
     import errors
 
     expected = {
@@ -81,6 +81,7 @@ def test_all_nine_subclasses_exist():
         "QuotaExhaustedError",
         "CommitError",
         "Loop1DivergentError",
+        "ChecklistError",
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
@@ -98,6 +99,20 @@ def test_loop1_divergent_error_exit_code_is_7():
     from errors import EXIT_CODES, Loop1DivergentError
 
     assert EXIT_CODES[Loop1DivergentError] == 7
+
+
+def test_checklist_error_derives_from_sbtdd():
+    from errors import ChecklistError, SBTDDError
+
+    assert issubclass(ChecklistError, SBTDDError)
+    with pytest.raises(SBTDDError):
+        raise ChecklistError("checklist failed")
+
+
+def test_checklist_error_exit_code_is_9():
+    from errors import EXIT_CODES, ChecklistError
+
+    assert EXIT_CODES[ChecklistError] == 9
 
 
 def test_commit_error_derives_from_sbtdd():
@@ -128,6 +143,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
     """
     from errors import (
         EXIT_CODES,
+        ChecklistError,
         CommitError,
         DependencyError,
         DriftError,
@@ -149,6 +165,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         QuotaExhaustedError,
         CommitError,
         Loop1DivergentError,
+        ChecklistError,
     }
     assert set(EXIT_CODES.keys()) == expected_classes
 
@@ -189,6 +206,7 @@ def test_exit_codes_is_read_only():
 def test_mro_is_flat_single_inheritance():
     """All subclasses inherit directly from SBTDDError (no diamond)."""
     from errors import (
+        ChecklistError,
         CommitError,
         DependencyError,
         DriftError,
@@ -211,6 +229,7 @@ def test_mro_is_flat_single_inheritance():
         QuotaExhaustedError,
         CommitError,
         Loop1DivergentError,
+        ChecklistError,
     ]
     for cls in subclasses:
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"
