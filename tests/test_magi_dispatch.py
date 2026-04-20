@@ -431,3 +431,58 @@ def test_write_verdict_artifact_preserves_degraded_flag(tmp_path):
     write_verdict_artifact(v, target, timestamp="2026-04-19T10:00:00Z")
     data = json.loads(target.read_text(encoding="utf-8"))
     assert data["degraded"] is True
+
+
+def test_write_verdict_artifact_rejects_invalid_timestamp(tmp_path):
+    """Non-ISO-8601 timestamp must raise ValidationError (Finding 2, melchior).
+
+    MAGI Loop 2 Milestone B iter 1 Finding 2: previously the function
+    accepted any string as ``timestamp`` and persisted it verbatim. A
+    caller passing garbage (eg. 'not-a-timestamp') wrote a malformed
+    artifact that the ``finalize`` subcommand would then be expected to
+    parse, corrupting the downstream gate. The function now validates
+    against the same ISO 8601 contract used by state_file.py.
+    """
+    from errors import ValidationError
+    from magi_dispatch import MAGIVerdict, write_verdict_artifact
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    target = tmp_path / "verdict.json"
+    with pytest.raises(ValidationError, match="ISO 8601"):
+        write_verdict_artifact(v, target, timestamp="not-a-timestamp")
+    # Bad input must NOT leave a partial artifact behind.
+    assert not target.exists()
+
+
+def test_write_verdict_artifact_defaults_timestamp_to_now(tmp_path):
+    """When timestamp is None the function stamps UTC ISO 8601 with Z suffix.
+
+    MAGI Loop 2 Milestone B iter 1 Finding 2: makes timestamp optional
+    so hot-path callers don't need to recompute the canonical form
+    everywhere. The default is ``datetime.now(timezone.utc)`` rendered
+    with the project's ``Z`` suffix.
+    """
+    import re
+
+    from magi_dispatch import MAGIVerdict, write_verdict_artifact
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    target = tmp_path / "verdict.json"
+    write_verdict_artifact(v, target, timestamp=None)
+    data = json.loads(target.read_text(encoding="utf-8"))
+    # Same regex state_file.py uses.
+    iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+    assert iso_re.match(data["timestamp"]), (
+        f"default timestamp '{data['timestamp']}' is not ISO 8601 with timezone"
+    )
+
+
+def test_write_verdict_artifact_accepts_valid_iso_timestamp(tmp_path):
+    """Valid ISO 8601 with Z suffix is accepted and persisted verbatim."""
+    from magi_dispatch import MAGIVerdict, write_verdict_artifact
+
+    v = MAGIVerdict("GO", False, (), (), "")
+    target = tmp_path / "verdict.json"
+    write_verdict_artifact(v, target, timestamp="2026-04-19T16:30:00Z")
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["timestamp"] == "2026-04-19T16:30:00Z"
