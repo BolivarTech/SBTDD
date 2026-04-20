@@ -182,3 +182,83 @@ def check_tdd_guard_data_dir(project_root: Path) -> DependencyCheck:
         detail=f"{data_dir} writable",
         remediation=None,
     )
+
+
+#: 12 superpowers skills required by sec.S.1.3 item 4.
+SUPERPOWERS_SKILLS: tuple[str, ...] = (
+    "brainstorming",
+    "writing-plans",
+    "test-driven-development",
+    "verification-before-completion",
+    "requesting-code-review",
+    "receiving-code-review",
+    "executing-plans",
+    "subagent-driven-development",
+    "dispatching-parallel-agents",
+    "systematic-debugging",
+    "using-git-worktrees",
+    "finishing-a-development-branch",
+)
+
+
+def _find_skill_md(plugins_root: Path, plugin_name: str, skill_name: str) -> Path | None:
+    """Return the first ``SKILL.md`` under ``plugins_root/**/{plugin}/**/skills/{skill}/``."""
+    if not plugins_root.exists():
+        return None
+    for candidate in plugins_root.rglob(f"{plugin_name}/**/skills/{skill_name}/SKILL.md"):
+        return candidate
+    return None
+
+
+def check_superpowers(plugins_root: Path) -> DependencyCheck:
+    """Verify all 12 superpowers skills are discoverable (sec.S.1.3 item 4)."""
+    missing: list[str] = []
+    for skill in SUPERPOWERS_SKILLS:
+        if _find_skill_md(plugins_root, "superpowers", skill) is None:
+            missing.append(skill)
+    if len(missing) == len(SUPERPOWERS_SKILLS):
+        return DependencyCheck(
+            name="superpowers plugin",
+            status="MISSING",
+            detail=f"Plugin not discoverable under {plugins_root}.",
+            remediation="/plugin marketplace add obra/superpowers && /plugin install",
+        )
+    if missing:
+        return DependencyCheck(
+            name="superpowers plugin",
+            status="BROKEN",
+            detail=f"missing skills: {', '.join(missing)}",
+            remediation="Reinstall superpowers via /plugin install",
+        )
+    return DependencyCheck(
+        name="superpowers plugin",
+        status="OK",
+        detail=f"{len(SUPERPOWERS_SKILLS)} skills found",
+        remediation=None,
+    )
+
+
+def check_magi(plugins_root: Path) -> DependencyCheck:
+    """Verify the magi plugin is discoverable (sec.S.1.3 item 5)."""
+    skill_md = _find_skill_md(plugins_root, "magi", "magi")
+    if skill_md is None:
+        return DependencyCheck(
+            name="magi plugin",
+            status="MISSING",
+            detail=f"Plugin not discoverable under {plugins_root}.",
+            remediation="/plugin marketplace add BolivarTech/magi",
+        )
+    run_magi = skill_md.parent / "scripts" / "run_magi.py"
+    if not run_magi.exists():
+        return DependencyCheck(
+            name="magi plugin",
+            status="BROKEN",
+            detail=f"run_magi.py missing at {run_magi}",
+            remediation="Reinstall magi via /plugin install",
+        )
+    return DependencyCheck(
+        name="magi plugin",
+        status="OK",
+        detail=f"found at {skill_md.parent}",
+        remediation=None,
+    )

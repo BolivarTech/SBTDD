@@ -169,3 +169,55 @@ def test_check_tdd_guard_data_dir_writable(tmp_path):
     chk = check_tdd_guard_data_dir(project_root=tmp_path)
     assert chk.status == "OK"
     assert (tmp_path / ".claude" / "tdd-guard" / "data").exists()
+
+
+def test_check_superpowers_missing_when_no_skills(tmp_path):
+    from dependency_check import check_superpowers
+
+    chk = check_superpowers(plugins_root=tmp_path)
+    assert chk.status == "MISSING"
+    assert "superpowers" in chk.detail.lower() or "plugin" in chk.detail.lower()
+
+
+def test_check_superpowers_ok_with_all_twelve_skills(tmp_path):
+    from dependency_check import SUPERPOWERS_SKILLS, check_superpowers
+
+    base = tmp_path / "cache" / "superpowers" / "skills"
+    for skill in SUPERPOWERS_SKILLS:
+        (base / skill).mkdir(parents=True)
+        (base / skill / "SKILL.md").write_text("# " + skill, encoding="utf-8")
+    chk = check_superpowers(plugins_root=tmp_path)
+    assert chk.status == "OK"
+
+
+def test_check_superpowers_broken_when_partial(tmp_path):
+    from dependency_check import SUPERPOWERS_SKILLS, check_superpowers
+
+    base = tmp_path / "cache" / "superpowers" / "skills"
+    # Install only the first 5 of 12 skills.
+    for skill in SUPERPOWERS_SKILLS[:5]:
+        (base / skill).mkdir(parents=True)
+        (base / skill / "SKILL.md").write_text("# " + skill, encoding="utf-8")
+    chk = check_superpowers(plugins_root=tmp_path)
+    assert chk.status == "BROKEN"
+    # Ensure the detail lists at least one missing skill.
+    assert any(name in chk.detail for name in SUPERPOWERS_SKILLS[5:])
+
+
+def test_check_magi_missing_when_no_scripts(tmp_path):
+    from dependency_check import check_magi
+
+    chk = check_magi(plugins_root=tmp_path)
+    assert chk.status == "MISSING"
+
+
+def test_check_magi_ok_with_skill_and_script(tmp_path):
+    from dependency_check import check_magi
+
+    base = tmp_path / "cache" / "magi" / "skills" / "magi"
+    base.mkdir(parents=True)
+    (base / "SKILL.md").write_text("# magi", encoding="utf-8")
+    (base / "scripts").mkdir()
+    (base / "scripts" / "run_magi.py").write_text("# run", encoding="utf-8")
+    chk = check_magi(plugins_root=tmp_path)
+    assert chk.status == "OK"
