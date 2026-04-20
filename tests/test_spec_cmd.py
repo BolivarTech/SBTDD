@@ -52,21 +52,16 @@ def test_spec_accepts_lowercase_todos_spanish_prose(
     (spec_dir / "spec-behavior-base.md").write_text(body, encoding="utf-8")
     # Prevent the real claude -p subprocess invocations in the downstream
     # flow; INV-27 validation is what we exercise here, not the dispatcher.
-    monkeypatch.setattr(
-        superpowers_dispatch,
-        "brainstorming",
-        lambda *a, **kw: None,
-    )
-    monkeypatch.setattr(
-        superpowers_dispatch,
-        "writing_plans",
-        lambda *a, **kw: None,
-    )
-    # Lowercase must not trigger INV-27; may still fail on later precondition.
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", lambda *a, **kw: None)
+    monkeypatch.setattr(superpowers_dispatch, "writing_plans", lambda *a, **kw: None)
+    # Lowercase must not trigger INV-27; downstream precondition failures
+    # (e.g. missing plugin.local.md, unseeded planning/ dir) are the
+    # expected escape hatch.
     try:
         spec_cmd.main(["--project-root", str(tmp_path)])
     except Exception as e:
-        assert ("T" + "ODO") not in str(e) and "pending" not in str(e).lower()
+        msg = str(e)
+        assert ("T" + "ODO") not in msg and "pending" not in msg.lower()
 
 
 def _seed_valid_spec_base(tmp_path: Path) -> Path:
@@ -80,20 +75,31 @@ def _seed_valid_spec_base(tmp_path: Path) -> Path:
     return path
 
 
+def _seed_plugin_local(tmp_path: Path) -> None:
+    """Copy the valid-python plugin.local.md fixture into tmp_path/.claude."""
+    import shutil
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    fixture = Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md"
+    shutil.copy(fixture, tmp_path / ".claude" / "plugin.local.md")
+
+
 def test_spec_invokes_brainstorming_with_spec_base_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import magi_dispatch
     import spec_cmd
     import superpowers_dispatch
 
     _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _setup_git_repo(tmp_path)
     calls: list[dict[str, object]] = []
 
     def spy_brainstorming(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
     ) -> object:
         calls.append({"skill": "brainstorming", "args": args})
-        # Side effect: produce the downstream file so the validator moves on.
         (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
             "# Feature spec behavior\nContent\n", encoding="utf-8"
         )
@@ -110,6 +116,12 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_writing_plans)
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("GO"),
+    )
+
     spec_cmd.main(["--project-root", str(tmp_path)])
 
     assert calls[0]["skill"] == "brainstorming"
@@ -122,10 +134,13 @@ def test_spec_invokes_brainstorming_with_spec_base_path(
 def test_spec_invokes_writing_plans_after_spec_generated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import magi_dispatch
     import spec_cmd
     import superpowers_dispatch
 
     _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _setup_git_repo(tmp_path)
     calls: list[str] = []
 
     def spy_brainstorming(
@@ -144,12 +159,17 @@ def test_spec_invokes_writing_plans_after_spec_generated(
         (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
             "### Task 1: sample\n- [ ] work\n", encoding="utf-8"
         )
-        # writing_plans arg should reference spec-behavior.md
         assert args is not None and any("spec-behavior.md" in tok for tok in args)
         return None
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", spy_brainstorming)
     monkeypatch.setattr(superpowers_dispatch, "writing_plans", spy_writing_plans)
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("GO"),
+    )
+
     spec_cmd.main(["--project-root", str(tmp_path)])
     assert calls == ["brainstorming", "writing-plans"]
     assert (tmp_path / "planning" / "claude-plan-tdd-org.md").exists()
@@ -163,6 +183,7 @@ def test_spec_aborts_when_brainstorming_fails(
     from errors import ValidationError
 
     _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
 
     def raising_brainstorming(
         args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
@@ -172,3 +193,272 @@ def test_spec_aborts_when_brainstorming_fails(
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", raising_brainstorming)
     with pytest.raises(ValidationError):
         spec_cmd.main(["--project-root", str(tmp_path)])
+
+
+def _setup_git_repo(tmp_path: Path) -> None:
+    """Init a git repo at tmp_path with one initial commit so HEAD resolves."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tester@example.com"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Tester"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "chore: initial"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+
+
+def _seed_spec_flow_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set up a complete env for spec_cmd.main end-to-end tests.
+
+    - Valid spec-behavior-base.md.
+    - plugin.local.md with default magi_threshold + magi_max_iterations=3.
+    - Git repo with initial commit.
+    - Stubbed brainstorming/writing_plans producing the downstream files.
+    """
+    import shutil
+
+    import superpowers_dispatch
+
+    _seed_valid_spec_base(tmp_path)
+    # Seed the plugin.local.md used by load_plugin_local.
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    fixture = Path(__file__).parent / "fixtures" / "plugin-locals" / "valid-python.md"
+    shutil.copy(fixture, tmp_path / ".claude" / "plugin.local.md")
+    _setup_git_repo(tmp_path)
+
+    def fake_brainstorming(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
+            "# behavior\nContent goes here\n", encoding="utf-8"
+        )
+        return None
+
+    def fake_writing_plans(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+            "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+        )
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", fake_brainstorming)
+    monkeypatch.setattr(superpowers_dispatch, "writing_plans", fake_writing_plans)
+
+
+def _make_verdict(
+    label: str = "GO_WITH_CAVEATS",
+    degraded: bool = False,
+    conditions: tuple[str, ...] = (),
+) -> object:
+    from magi_dispatch import MAGIVerdict
+
+    return MAGIVerdict(
+        verdict=label,
+        degraded=degraded,
+        conditions=conditions,
+        findings=(),
+        raw_output=f'{{"verdict": "{label}"}}',
+    )
+
+
+def test_spec_magi_loop_accepts_full_go_on_first_iter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import magi_dispatch
+    import spec_cmd
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+    call_count: dict[str, int] = {"n": 0}
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        call_count["n"] += 1
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    rc = spec_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert call_count["n"] == 1
+
+
+def test_spec_magi_loop_rejects_degraded_and_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import magi_dispatch
+    import spec_cmd
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+    verdicts = iter(
+        [
+            _make_verdict("GO", degraded=True),
+            _make_verdict("GO", degraded=False),
+        ]
+    )
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return next(verdicts)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    rc = spec_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    # Second verdict consumed -> exhausted.
+    with pytest.raises(StopIteration):
+        next(verdicts)
+
+
+def test_spec_magi_loop_strong_no_go_aborts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import magi_dispatch
+    import spec_cmd
+    from errors import MAGIGateError
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return _make_verdict("STRONG_NO_GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    with pytest.raises(MAGIGateError):
+        spec_cmd.main(["--project-root", str(tmp_path)])
+
+
+def test_spec_magi_loop_aborts_after_max_iterations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import magi_dispatch
+    import spec_cmd
+    from errors import MAGIGateError
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return _make_verdict("HOLD", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    with pytest.raises(MAGIGateError):
+        spec_cmd.main(["--project-root", str(tmp_path)])
+
+
+def test_spec_creates_state_file_on_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    import magi_dispatch
+    import spec_cmd
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    spec_cmd.main(["--project-root", str(tmp_path)])
+    state = json.loads((tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8"))
+    assert state["plan_approved_at"] is not None
+    assert state["current_phase"] == "red"
+    assert state["current_task_id"] == "1"
+
+
+def test_spec_commits_approved_artifacts_after_state_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Iter-2 W7 deterministic probe: state save runs BEFORE the chore commit."""
+    import subprocess
+
+    import commits
+    import magi_dispatch
+    import spec_cmd
+    import state_file
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+
+    call_order: list[str] = []
+    orig_save = state_file.save
+    orig_create = commits.create
+
+    def spy_save(*a: object, **kw: object) -> object:
+        call_order.append("save")
+        return orig_save(*a, **kw)  # type: ignore[arg-type]
+
+    def spy_create(prefix: str, message: str, *a: object, **kw: object) -> object:
+        call_order.append(f"commit:{prefix}")
+        return orig_create(prefix, message, *a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(state_file, "save", spy_save)
+    monkeypatch.setattr(commits, "create", spy_create)
+
+    spec_cmd.main(["--project-root", str(tmp_path)])
+
+    # Deterministic ordering: state file persisted BEFORE the chore commit.
+    assert call_order == ["save", "commit:chore"]
+
+    # The chore commit includes the three approved artifacts (via git log).
+    result = subprocess.run(
+        ["git", "log", "-1", "--name-only", "--pretty=format:%s"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = result.stdout
+    assert "chore: add MAGI-approved spec and plan" in output
+    assert "sbtdd/spec-behavior.md" in output
+    assert "planning/claude-plan-tdd-org.md" in output
+    assert "planning/claude-plan-tdd.md" in output
+
+
+def test_spec_does_not_commit_artifacts_when_magi_rejects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import magi_dispatch
+    import spec_cmd
+    from errors import MAGIGateError
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
+        return _make_verdict("STRONG_NO_GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
+    with pytest.raises(MAGIGateError):
+        spec_cmd.main(["--project-root", str(tmp_path)])
+
+    # No chore: MAGI-approved commit present.
+    result = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "MAGI-approved" not in result.stdout

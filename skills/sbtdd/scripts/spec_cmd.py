@@ -15,10 +15,17 @@ from __future__ import annotations
 
 import argparse
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
+import _plan_ops
+import commits
+import magi_dispatch
+import state_file
+import subprocess_utils
 import superpowers_dispatch
-from errors import PreconditionError
+from config import load_plugin_local
+from errors import MAGIGateError, PreconditionError
 
 # INV-27 forbids the three uppercase word-tokens below from appearing in
 # ``spec-behavior-base.md``. The regex encodes that contract; the token
@@ -99,6 +106,115 @@ def _run_spec_flow(root: Path) -> None:
         raise PreconditionError(f"/writing-plans completed but {plan_org} was not generated")
 
 
+def _write_plan_tdd(
+    root: Path,
+    verdict: magi_dispatch.MAGIVerdict,
+    plan_org: Path,
+    plan: Path,
+) -> None:
+    """Copy ``plan_org`` into ``plan`` with MAGI Conditions appended.
+
+    Appending the conditions inline is the simplest form of "apply the
+    conditions" compatible with the Checkpoint 2 loop: subsequent
+    iterations consume the same file and MAGI re-evaluates against the
+    annotated plan. Full condition-merging is delegated to the user.
+    """
+    del root  # reserved for future use; signature matches plan.
+    org_text = plan_org.read_text(encoding="utf-8")
+    tail = ""
+    if verdict.conditions:
+        tail = "\n\n## MAGI Conditions for Approval\n\n" + "\n".join(
+            f"- {c}" for c in verdict.conditions
+        )
+    plan.write_text(org_text + tail, encoding="utf-8")
+
+
+def _first_open_task(plan: Path) -> tuple[str, str]:
+    """Return (id, title) of the first ``- [ ]`` task in ``plan``."""
+    return _plan_ops.first_open_task(plan.read_text(encoding="utf-8"))
+
+
+def _run_magi_checkpoint2(root: Path, cfg: object) -> magi_dispatch.MAGIVerdict:
+    """Run the Checkpoint 2 MAGI loop honoring INV-28 degraded handling.
+
+    Args:
+        root: Project root.
+        cfg: :class:`config.PluginConfig` carrying threshold + iteration cap.
+
+    Returns:
+        The ``MAGIVerdict`` that passed the gate (full, non-degraded,
+        >= threshold).
+
+    Raises:
+        MAGIGateError: STRONG_NO_GO at any iteration, or non-convergence
+            after ``cfg.magi_max_iterations`` iterations.
+    """
+    spec = root / "sbtdd" / "spec-behavior.md"
+    plan_org = root / "planning" / "claude-plan-tdd-org.md"
+    plan = root / "planning" / "claude-plan-tdd.md"
+    max_iter = int(getattr(cfg, "magi_max_iterations"))
+    threshold = str(getattr(cfg, "magi_threshold"))
+    for iteration in range(1, max_iter + 1):
+        verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
+        if magi_dispatch.verdict_is_strong_no_go(verdict):
+            raise MAGIGateError(
+                f"MAGI returned STRONG_NO_GO at iter {iteration}. Refine spec-behavior-base.md."
+            )
+        _write_plan_tdd(root, verdict, plan_org, plan)
+        if verdict.degraded:
+            continue  # INV-28: degraded never exits.
+        if magi_dispatch.verdict_passes_gate(verdict, threshold):
+            return verdict
+    raise MAGIGateError(f"MAGI did not converge to full {threshold}+ after {max_iter} iterations")
+
+
+def _create_state_file(root: Path, cfg: object, plan: Path) -> None:
+    """Write the initial session-state.json after Checkpoint 2 approval.
+
+    ``plan_approved_at`` is populated with the current UTC timestamp -- this
+    is the marker that unlocks the "Excepcion bajo plan aprobado" contract
+    (CLAUDE.md / template sec.5).
+    """
+    del cfg  # reserved for future fields (state_file_path override, ...).
+    task_id, task_title = _first_open_task(plan)
+    r = subprocess_utils.run_with_timeout(
+        ["git", "rev-parse", "--short", "HEAD"], timeout=10, cwd=str(root)
+    )
+    sha = r.stdout.strip() or "0000000"
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    state = state_file.SessionState(
+        plan_path="planning/claude-plan-tdd.md",
+        current_task_id=task_id,
+        current_task_title=task_title,
+        current_phase="red",
+        phase_started_at_commit=sha,
+        last_verification_at=None,
+        last_verification_result=None,
+        plan_approved_at=now,
+    )
+    claude_dir = root / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    state_file.save(state, claude_dir / "session-state.json")
+
+
+def _commit_approved_artifacts(root: Path) -> None:
+    """Commit the three spec/plan artifacts under the ``chore:`` prefix.
+
+    Addresses iter-1 Finding 3: /brainstorming and /writing-plans produce
+    files that should be committed once MAGI approves. Under the
+    "Excepcion bajo plan aprobado" clause (template sec.5), this is one
+    of the four authorized categories (plan bookkeeping).
+    """
+    artifacts = (
+        "sbtdd/spec-behavior.md",
+        "planning/claude-plan-tdd-org.md",
+        "planning/claude-plan-tdd.md",
+    )
+    for rel in artifacts:
+        subprocess_utils.run_with_timeout(["git", "add", rel], timeout=10, cwd=str(root))
+    commits.create("chore", "add MAGI-approved spec and plan", cwd=str(root))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the spec subcommand.
 
@@ -111,11 +227,22 @@ def main(argv: list[str] | None = None) -> int:
     Raises:
         PreconditionError: INV-27 violation, skeleton markers, or missing
             downstream spec/plan artifact.
+        MAGIGateError: Checkpoint 2 MAGI loop produced STRONG_NO_GO or
+            exhausted the iteration budget without convergence.
     """
     parser = _build_parser()
     ns = parser.parse_args(argv)
-    _validate_spec_base_no_placeholders(ns.project_root / "sbtdd" / "spec-behavior-base.md")
-    _run_spec_flow(ns.project_root)
+    root = Path(ns.project_root)
+    _validate_spec_base_no_placeholders(root / "sbtdd" / "spec-behavior-base.md")
+    cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
+    _run_spec_flow(root)
+    _run_magi_checkpoint2(root, cfg)
+    # State file MUST be persisted BEFORE the artifacts commit so that
+    # plan_approved_at is visible to any follow-on subcommand even if
+    # the commit itself fails mid-way (state = canon of the present;
+    # git = canon of the past; CLAUDE.local.md §2.1).
+    _create_state_file(root, cfg, root / "planning" / "claude-plan-tdd.md")
+    _commit_approved_artifacts(root)
     return 0
 
 
