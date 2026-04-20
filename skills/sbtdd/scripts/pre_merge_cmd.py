@@ -398,6 +398,16 @@ def _loop2(
 ) -> magi_dispatch.MAGIVerdict:
     """Run Loop 2 -- ``/magi:magi`` with INV-28 + INV-29 (sec.S.5.6).
 
+    **INV-29 contract (feedback loop).** Rejected MAGI conditions are not
+    silently discarded: every ``/receiving-code-review`` rejection is
+    appended to ``rejections`` and written as a feedback file that is
+    passed as an extra context path on the next MAGI iteration. This
+    breaks the "sterile loop" where MAGI keeps re-emitting the same
+    technically-wrong condition because it has no visibility into why the
+    previous iteration rejected it. The rationale is preserved across
+    iterations until the gate is passed or iterations are exhausted. See
+    :func:`_write_magi_feedback_file` for the on-disk format.
+
     MAGI Loop 2 iter-3 redesign: the gate no longer orchestrates a
     three-commit mini-cycle for accepted conditions. ``_loop2`` cannot
     synthesize code edits -- the fix diff must come from human or
