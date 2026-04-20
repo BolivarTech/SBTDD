@@ -9,14 +9,43 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import magi_dispatch
 import superpowers_dispatch
+from commits import create as commit_create
+from config import PluginConfig, load_plugin_local
 from drift import detect_drift
-from errors import DriftError, Loop1DivergentError, PreconditionError
+from errors import (
+    DriftError,
+    Loop1DivergentError,
+    MAGIGateError,
+    PreconditionError,
+    ValidationError,
+)
+from models import VERDICT_RANK
 from state_file import SessionState
 from state_file import load as load_state
 
 #: Safety valve for Loop 1 (sec.S.5.6, INV-11). Exceeding aborts with exit 7.
 _LOOP1_MAX: int = 10
+
+#: Low-risk keyword set (iter-2 Finding W8): 'test' deliberately EXCLUDED.
+#: Phrases like "add structural test for X" are structural, not low-risk; only
+#: keywords that genuinely don't require a re-MAGI remain (doc/docstring/
+#: naming/rename/comment/logging/message).
+_LOW_RISK_KEYWORDS: tuple[str, ...] = (
+    "doc",
+    "docstring",
+    "naming",
+    "rename",
+    "comment",
+    "logging",
+    "message",
+)
+
+#: Filename of the auxiliary rejection-feedback file written between iterations.
+#: Lives inside the destination project's ``.claude/`` (gitignored, never
+#: committed). See :func:`_write_magi_feedback_file` for the rationale.
+_MAGI_FEEDBACK_FILENAME: str = "magi-feedback.md"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -105,13 +134,225 @@ def _loop1(root: Path) -> None:
     raise Loop1DivergentError(f"Loop 1 did not converge in {_LOOP1_MAX} iterations")
 
 
+def _conditions_low_risk(conditions: tuple[str, ...]) -> bool:
+    """Return True iff every condition matches at least one low-risk keyword.
+
+    Empty tuple returns True vacuously (no conditions == no gate work),
+    but the caller guards the empty-conditions path separately.
+    """
+    return all(any(kw in c.lower() for kw in _LOW_RISK_KEYWORDS) for c in conditions)
+
+
+def _parse_receiving_review(
+    skill_result: superpowers_dispatch.SkillResult,
+) -> tuple[list[str], list[str]]:
+    """Parse /receiving-code-review stdout into (accepted, rejected) lists.
+
+    Expected stdout format (markdown bullet lists under two headers)::
+
+        ## Accepted
+        - condition text 1
+        - condition text 2
+
+        ## Rejected
+        - condition text 3 (rationale: ...)
+
+    Returns ``([accepted_texts], [rejected_texts])`` with leading bullet /
+    dash / whitespace stripped. Either section may be absent (empty list).
+    A completely empty stdout returns ``([], [])`` -- the caller (``_loop2``)
+    treats this as "no decisions produced, re-raise" via a dedicated
+    :class:`errors.ValidationError` path.
+    """
+    accepted: list[str] = []
+    rejected: list[str] = []
+    section: list[str] | None = None
+    stdout = getattr(skill_result, "stdout", "") or ""
+    for line in stdout.splitlines():
+        s = line.strip()
+        if s.lower().startswith("## accepted"):
+            section = accepted
+            continue
+        if s.lower().startswith("## rejected"):
+            section = rejected
+            continue
+        if section is not None and s.startswith(("-", "*")):
+            section.append(s.lstrip("-* ").strip())
+    return accepted, rejected
+
+
+def _safe_threshold_rank(threshold: str) -> int:
+    """Return ``VERDICT_RANK[threshold]`` or raise :class:`ValidationError`.
+
+    Ensures threshold-override errors flow through the ``SBTDDError``
+    hierarchy so the dispatcher maps them to exit 1 (USER_ERROR), not an
+    unhandled ``KeyError`` (iter-2 Finding 5).
+    """
+    if threshold not in VERDICT_RANK:
+        raise ValidationError(
+            f"threshold '{threshold}' not in VERDICT_RANK "
+            f"(valid values: {', '.join(sorted(VERDICT_RANK))})"
+        )
+    return VERDICT_RANK[threshold]
+
+
+def _apply_condition_via_mini_cycle(condition: str, root: Path, iteration: int, idx: int) -> None:
+    """Record ONE accepted MAGI condition as a test/fix/refactor mini-cycle.
+
+    Does NOT perform code edits. Expects the caller to have already
+    staged the fixed code before invoking. Emits three atomic commits
+    asserting the test -> fix -> refactor cycle was observed.
+
+    Contract (iter-2 Finding W2 clarification):
+      - The actual code modifications are the responsibility of the
+        upstream orchestrator -- in interactive ``pre-merge`` the user
+        applies them; in ``auto`` mode the subagent-driven-development
+        dispatcher applies them before invoking this helper. In both
+        cases ``/receiving-code-review`` has already validated the approach
+        (INV-29 gate). This helper only MATERIALISES the TDD discipline
+        as three atomic commits over the working-tree state the caller
+        has prepared.
+      - Each ``commit_create`` call relies on whatever the caller has
+        staged via ``git add`` plus the implicit index state; the three
+        commits are sequential so the caller is expected to re-stage
+        between each (the reproducing test, the fix, the refactor). If
+        the caller fails to stage, ``commit_create`` emits an empty commit
+        which fails its precondition check and raises ``CommitError``.
+
+    Preconditions:
+      - Caller has already invoked ``/receiving-code-review`` and the
+        condition is ACCEPTED (rejected conditions never reach here;
+        they feed back into the next MAGI iteration as context -- see
+        :func:`_loop2`'s rejection bookkeeping).
+      - Caller has already applied the fix code in the working tree AND
+        staged the relevant files between each commit boundary.
+
+    INV-29 compliance: ``/receiving-code-review`` acts as the technical
+    gate BEFORE this helper runs. Mini-cycle atomicity per sec.M.5 row 5:
+    ``test:`` (reproducing), ``fix:`` (resolution), ``refactor:`` (polish).
+    """
+    tag = f"magi iter {iteration} cond {idx}"
+    commit_create("test", f"add reproducing test for {condition} ({tag})", cwd=str(root))
+    commit_create("fix", f"apply fix for {condition} ({tag})", cwd=str(root))
+    commit_create("refactor", f"polish {condition} ({tag})", cwd=str(root))
+
+
+def _write_magi_feedback_file(root: Path, rejections: list[str]) -> Path:
+    """Persist rejection history to ``.claude/magi-feedback.md`` for next iter.
+
+    Implements iter-2 Finding W6 Option B: the current
+    :func:`magi_dispatch.invoke_magi` signature does NOT accept an
+    ``extra_context`` kwarg. Instead of extending the frozen Milestone B
+    API, rejection feedback is passed through an auxiliary file that MAGI
+    reads via its ``context_paths`` argument. The file lives at
+    ``.claude/magi-feedback.md`` (inside the destination project's
+    ``.claude/`` gitignored dir, never committed) and is overwritten each
+    iteration with the full rejection history so MAGI receives cumulative
+    context, not per-iter deltas.
+    """
+    path = root / ".claude" / _MAGI_FEEDBACK_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "# MAGI iteration feedback\n\n"
+    body += (
+        "The following conditions from prior iterations were REJECTED "
+        "by /receiving-code-review with documented rationale. Re-raising "
+        "them without new evidence produces sterile loops.\n\n"
+    )
+    for line in rejections:
+        body += f"- {line}\n"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def _conditions_to_skill_args(conditions: tuple[str, ...]) -> list[str]:
+    """Serialise MAGI conditions as CLI args for /receiving-code-review.
+
+    The skill accepts findings as quoted positional arguments via
+    ``claude -p /receiving-code-review "<finding1>" "<finding2>" ...``
+    (consistent with the ``_make_wrapper`` pattern in
+    :mod:`superpowers_dispatch`).
+    """
+    return [c for c in conditions]
+
+
+def _loop2(
+    root: Path, cfg: PluginConfig, threshold_override: str | None
+) -> magi_dispatch.MAGIVerdict:
+    """Run Loop 2 -- ``/magi:magi`` with INV-28 + INV-29 (sec.S.5.6).
+
+    Delegates ``/receiving-code-review`` gating to
+    :func:`_parse_receiving_review`, applies accepted conditions via
+    :func:`_apply_condition_via_mini_cycle`, feeds rejections to the next
+    iteration via :func:`_write_magi_feedback_file`. Short-circuits on
+    STRONG_NO_GO (INV-28 exception). Caps iterations at
+    ``cfg.magi_max_iterations``.
+
+    Args:
+        root: Project root directory.
+        cfg: Parsed plugin configuration (for ``magi_threshold`` and
+            ``magi_max_iterations``).
+        threshold_override: Optional threshold override passed via
+            ``--magi-threshold``. Must ELEVATE the configured threshold,
+            never lower it.
+
+    Returns:
+        The last :class:`magi_dispatch.MAGIVerdict` that cleared the gate.
+
+    Raises:
+        MAGIGateError: STRONG_NO_GO at any iteration, OR iterations
+            exhausted without reaching ``threshold`` full.
+        ValidationError: Unknown threshold override, or
+            ``/receiving-code-review`` produced no decisions for non-empty
+            MAGI conditions.
+    """
+    threshold = threshold_override or cfg.magi_threshold
+    if _safe_threshold_rank(threshold) < _safe_threshold_rank(cfg.magi_threshold):
+        raise ValidationError(
+            f"--magi-threshold can only elevate; {threshold} < config {cfg.magi_threshold}"
+        )
+    diff_paths = [str(root / cfg.plan_path)]
+    rejections: list[str] = []
+    for iteration in range(1, cfg.magi_max_iterations + 1):
+        iter_paths = list(diff_paths)
+        if rejections:
+            iter_paths.append(str(_write_magi_feedback_file(root, rejections)))
+        verdict = magi_dispatch.invoke_magi(context_paths=iter_paths, cwd=str(root))
+        if magi_dispatch.verdict_is_strong_no_go(verdict):
+            raise MAGIGateError(f"MAGI STRONG_NO_GO at iter {iteration}")
+        if verdict.conditions:
+            review_result = superpowers_dispatch.receiving_code_review(
+                args=_conditions_to_skill_args(verdict.conditions),
+                cwd=str(root),
+            )
+            accepted, rejected = _parse_receiving_review(review_result)
+            if not accepted and not rejected:
+                raise ValidationError(
+                    f"/receiving-code-review produced no decisions for "
+                    f"{len(verdict.conditions)} MAGI conditions; cannot proceed"
+                )
+            for idx, cond in enumerate(accepted, start=1):
+                _apply_condition_via_mini_cycle(cond, root, iteration, idx)
+            rejections.extend(f"iter {iteration} rejected: {c}" for c in rejected)
+        if magi_dispatch.verdict_passes_gate(verdict, threshold):
+            if verdict.verdict == "GO_WITH_CAVEATS" and not _conditions_low_risk(
+                verdict.conditions
+            ):
+                continue  # structural condition -- re-invoke to confirm
+            return verdict
+    raise MAGIGateError(
+        f"MAGI did not converge to full {threshold}+ after {cfg.magi_max_iterations} iterations"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for /sbtdd pre-merge (Loop 1 wired; Loop 2 added in Task 21)."""
+    """Entry point for /sbtdd pre-merge (Loop 1 + Loop 2, sec.S.5.6)."""
     parser = _build_parser()
     ns = parser.parse_args(argv)
-    root = ns.project_root
+    root: Path = ns.project_root
     _preflight(root)
+    cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
     _loop1(root)
+    verdict = _loop2(root, cfg, ns.magi_threshold)
+    magi_dispatch.write_verdict_artifact(verdict, root / ".claude" / "magi-verdict.json")
     return 0
 
 
