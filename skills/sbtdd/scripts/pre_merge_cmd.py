@@ -408,6 +408,16 @@ def _loop2(
     iterations until the gate is passed or iterations are exhausted. See
     :func:`_write_magi_feedback_file` for the on-disk format.
 
+    **Stale-conditions invariant (D iter 1 Caspar).** On entry the loop
+    unlinks any existing ``.claude/magi-conditions.md`` left by a
+    previous exit-8 run. This guarantees that after ``_loop2`` returns or
+    raises, at most one conditions file exists and its content matches
+    the current invocation -- never a stale snapshot from resolved
+    iterations. The invariant is load-bearing for
+    :mod:`resume_cmd`: without it, resume would detect the stale file
+    and misdirect the user to ``sbtdd close-phase`` even when the
+    conditions were already applied.
+
     MAGI Loop 2 iter-3 redesign: the gate no longer orchestrates a
     three-commit mini-cycle for accepted conditions. ``_loop2`` cannot
     synthesize code edits -- the fix diff must come from human or
