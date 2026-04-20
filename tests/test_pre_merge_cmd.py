@@ -8,8 +8,12 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from magi_dispatch import MAGIVerdict
 
 
 def _seed_state(
@@ -270,7 +274,7 @@ def _make_verdict(
     degraded: bool = False,
     conditions: tuple[str, ...] = (),
     findings: tuple[dict[str, object], ...] = (),
-) -> object:
+) -> "MAGIVerdict":
     """Return a MAGIVerdict matching the magi_dispatch dataclass contract."""
     from magi_dispatch import MAGIVerdict
 
