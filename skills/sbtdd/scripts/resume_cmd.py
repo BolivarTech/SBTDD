@@ -177,12 +177,21 @@ def _decide_delegation(
     if state.current_phase in ("red", "green", "refactor") and tree_dirty:
         return ("uncommitted-resolution", [])
     if state.current_phase == "done":
-        if not runtime.get("magi-verdict.json") and not tree_dirty:
-            return ("pre_merge_cmd", [])
-        if runtime.get("magi-verdict.json") and not tree_dirty:
-            return ("finalize_cmd", [])
         if tree_dirty:
             return ("uncommitted-resolution", [])
+        # MAGI Loop 2 iter 1 Finding 9: an auto run that advanced every
+        # task to done but died before Loop 2 produced magi-verdict.json
+        # MUST resume as auto (elevated budget + auto-run.json audit
+        # trail), not as fresh pre-merge (interactive budget, no audit
+        # update). The signal is ``auto-run.json`` present alongside a
+        # missing verdict. When neither auto-run.json nor verdict
+        # exists the user drove the task loop manually; delegate to
+        # pre_merge_cmd as before.
+        if not runtime.get("magi-verdict.json"):
+            if runtime.get("auto-run.json"):
+                return ("auto_cmd", [])
+            return ("pre_merge_cmd", [])
+        return ("finalize_cmd", [])
     return (None, [])
 
 
