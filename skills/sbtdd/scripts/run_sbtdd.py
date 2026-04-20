@@ -26,6 +26,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, MutableMapping
 
+import status_cmd
 from errors import EXIT_CODES, SBTDDError, ValidationError
 from models import VALID_SUBCOMMANDS
 
@@ -54,7 +55,15 @@ def _default_handler_factory(name: str) -> SubcommandHandler:
 #: entries here to install real ``{subcommand}_cmd.run`` functions without
 #: touching the dispatcher.
 SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
-    name: _default_handler_factory(name) for name in VALID_SUBCOMMANDS
+    "init": _default_handler_factory("init"),
+    "spec": _default_handler_factory("spec"),
+    "close-phase": _default_handler_factory("close-phase"),
+    "close-task": _default_handler_factory("close-task"),
+    "status": status_cmd.main,
+    "pre-merge": _default_handler_factory("pre-merge"),
+    "finalize": _default_handler_factory("finalize"),
+    "auto": _default_handler_factory("auto"),
+    "resume": _default_handler_factory("resume"),
 }
 
 
