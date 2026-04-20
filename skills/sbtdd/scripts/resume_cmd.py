@@ -33,8 +33,11 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
+import subprocess_utils
 from errors import PreconditionError
+from state_file import load as load_state
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -45,6 +48,60 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--discard-uncommitted", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     return p
+
+
+def _report_diagnostic(root: Path) -> dict[str, Any]:
+    """Print and return a diagnostic snapshot for the active session.
+
+    Reads three canonical sources -- state file, git HEAD + status, and
+    the presence of runtime artifacts (``magi-verdict.json`` /
+    ``auto-run.json``) -- and emits a human-readable report to stdout.
+    Pure diagnostic: no mutation, no prompts.
+
+    The returned dict feeds into the delegation decision tree (Task 35)
+    so the subsequent phases share a single snapshot (avoids races
+    between repeated reads in each phase).
+
+    Args:
+        root: Project root directory.
+
+    Returns:
+        A dict with keys ``state`` (:class:`state_file.SessionState`),
+        ``head_sha`` (short SHA or ``"-"`` when HEAD is missing),
+        ``tree_dirty`` (bool), ``runtime`` (mapping of artifact basename
+        -> bool present).
+    """
+    state_path = root / ".claude" / "session-state.json"
+    state = load_state(state_path)
+    head_r = subprocess_utils.run_with_timeout(
+        ["git", "log", "-1", "--format=%h|%s"], timeout=10, cwd=str(root)
+    )
+    raw = head_r.stdout.strip()
+    if "|" in raw:
+        sha, subject = raw.split("|", 1)
+    else:
+        sha, subject = ("-", "-")
+    status_r = subprocess_utils.run_with_timeout(
+        ["git", "status", "--short"], timeout=10, cwd=str(root)
+    )
+    dirty = status_r.stdout.strip() != ""
+    runtime = {
+        "magi-verdict.json": (root / ".claude" / "magi-verdict.json").exists(),
+        "auto-run.json": (root / ".claude" / "auto-run.json").exists(),
+    }
+    sys.stdout.write("State file:\n")
+    sys.stdout.write(f"  current_task_id:          {state.current_task_id}\n")
+    sys.stdout.write(f"  current_task_title:       {state.current_task_title}\n")
+    sys.stdout.write(f"  current_phase:            {state.current_phase}\n")
+    sys.stdout.write(f"  plan_approved_at:         {state.plan_approved_at}\n")
+    sys.stdout.write(f"  phase_started_at_commit:  {state.phase_started_at_commit}\n")
+    sys.stdout.write(f"  last_verification_at:     {state.last_verification_at}\n")
+    sys.stdout.write(f"  last_verification_result: {state.last_verification_result}\n")
+    sys.stdout.write(f"Git HEAD:     {sha} {subject}\n")
+    sys.stdout.write(f"Working tree: {'DIRTY' if dirty else 'clean'}\n")
+    for art, present in runtime.items():
+        sys.stdout.write(f"  {art}: {'present' if present else 'absent'}\n")
+    return {"state": state, "head_sha": sha, "tree_dirty": dirty, "runtime": runtime}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             "Project is in manual mode. Invoke /sbtdd spec to bootstrap a feature.\n"
         )
         return 0
+    _report_diagnostic(root)
     return 0
 
 
