@@ -31,3 +31,10 @@ def test_dispatcher_routes_close_task_to_close_task_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["close-task"] is close_task_cmd.main
+
+
+def test_dispatcher_routes_close_phase_to_close_phase_cmd():
+    import close_phase_cmd
+    import run_sbtdd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["close-phase"] is close_phase_cmd.main
