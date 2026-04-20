@@ -165,7 +165,7 @@ Los tests de "spy" para INV-25 (no push/merge) y INV-26 (audit trail completenes
 
 Estos fixtures alimentan tests de Fases 1 y 2. Se crean una sola vez al inicio del milestone.
 
-- [ ] **Step 1: Create junit-xml fixtures**
+- [x] **Step 1: Create junit-xml fixtures**
 
 Create `tests/fixtures/junit-xml/empty.xml` as a zero-byte file:
 
@@ -183,7 +183,7 @@ Create `tests/fixtures/junit-xml/malformed.xml`:
 
 (Intentionally truncated — missing closing tag. Parse must raise `ValidationError`, not a bare `ParseError`.)
 
-- [ ] **Step 2: Create auto-run fixtures**
+- [x] **Step 2: Create auto-run fixtures**
 
 Create `tests/fixtures/auto-run/happy-path.json`:
 
@@ -219,7 +219,7 @@ Create `tests/fixtures/auto-run/gate-blocked.json`:
 }
 ```
 
-- [ ] **Step 3: Verify fixture load round-trip**
+- [x] **Step 3: Verify fixture load round-trip**
 
 ```bash
 python -c "import json; d=json.load(open('tests/fixtures/auto-run/happy-path.json')); assert d['status']=='success'; print('OK')"
@@ -228,7 +228,7 @@ python -c "p=open('tests/fixtures/junit-xml/empty.xml','rb').read(); assert len(
 
 Expected: `OK` printed twice.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/fixtures/junit-xml/ tests/fixtures/auto-run/
@@ -253,7 +253,7 @@ Objetivo: codificar un schema frozen para `.claude/auto-run.json`. Hoy `_write_a
 
 **Incremental audit contract (Plan D iter 2 Caspar — raise-safe partial counts):** Task 4's revised design requires `_phase2_task_loop` to write `.claude/auto-run.json` after each task close with the running `tasks_completed` count. `_write_auto_run_audit` is the persistence primitive used for both in-progress writes (status="success", auto_finished_at=None) and terminal writes (status="magi_gate_blocked", auto_finished_at=set). The schema shape is identical in both cases — only the terminal status string and nullability of `auto_finished_at` differ. Task 1 does not implement the incremental-write logic (that belongs to Task 4) but DOES ensure `auto_finished_at` is nullable (`str | None`) so the in-progress shape validates cleanly.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_auto_run_audit.py
@@ -381,19 +381,19 @@ def test_write_auto_run_audit_rejects_dict(tmp_path: Path) -> None:
     assert not target.exists()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_auto_run_audit.py -v`
 Expected: FAIL — `AttributeError: module 'auto_cmd' has no attribute 'AutoRunAudit'`.
 
-- [ ] **Step 3: Commit the failing test**
+- [x] **Step 3: Commit the failing test**
 
 ```bash
 git add tests/test_auto_run_audit.py
 git commit -m "test: add AutoRunAudit schema contract tests"
 ```
 
-- [ ] **Step 4: Write minimal implementation**
+- [x] **Step 4: Write minimal implementation**
 
 Modify `skills/sbtdd/scripts/auto_cmd.py`. Add imports (top of file, preserving ordering):
 
@@ -540,16 +540,16 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
 
 The `Union` import from the top-of-file edit is no longer needed if nothing else in `auto_cmd.py` uses it — remove the `from typing import Union` line in that case to keep `ruff check` clean.
 
-- [ ] **Step 5: Run test to verify it passes** — 7 tests green.
+- [x] **Step 5: Run test to verify it passes** — 7 tests green.
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/auto_cmd.py
 git commit -m "feat: add AutoRunAudit dataclass with schema validation"
 ```
 
-- [ ] **Step 7: Migrate internal call sites to AutoRunAudit**
+- [x] **Step 7: Migrate internal call sites to AutoRunAudit**
 
 Replace the two `_write_auto_run_audit(auto_run, {...})` inline dict writes in `main` and the one in `_phase5_report` with explicit `AutoRunAudit(...)` constructions. The MAGIGateError branch builds a `status="magi_gate_blocked"` audit. The happy-path `_phase5_report` builds a `status="success"` audit. Use `_now_iso()` for timestamps. Tasks_completed comes from reading the final state's position in the plan (count of `[x]` tasks); accepted/rejected conditions default to 0 for this migration (Task 4 fills them in).
 
@@ -563,7 +563,7 @@ Every match must pass an `AutoRunAudit(...)` expression, never a dict literal.
 
 Run: `python -m pytest tests/ -v` — all Milestone C tests MUST still pass (regression). If any fails because a dict write slipped through, convert it to `AutoRunAudit(...)`; do NOT re-introduce the dict branch.
 
-- [ ] **Step 8: Commit refactor**
+- [x] **Step 8: Commit refactor**
 
 ```bash
 git add skills/sbtdd/scripts/auto_cmd.py
@@ -581,7 +581,7 @@ Objetivo: regresion test asegurando que `auto_cmd`, `pre_merge_cmd` y `close_pha
 
 **Regression-pinning coverage, no Red phase (Finding 6, Plan D iter 1):** these tests pass immediately because the current implementation already respects INV-25 by design (no call site in `auto_cmd`, `pre_merge_cmd`, or `close_phase_cmd` emits `push`/`merge`/`gh`). The value is preventing silent regression if a future patch introduces such a call. Per CLAUDE.local.md sec.3 "Reglas por fase", a test that passes on first run is acceptable as a regression pin; per sec.M.5 row 1, adding a test file is `test:` regardless of first-run outcome. Plans A and B already use this pattern (Tasks 8, 20, 23, 26, 30, 34 of Plan A). We skip the Red commit entirely for this task.
 
-- [ ] **Step 1: Write regression-pinning test**
+- [x] **Step 1: Write regression-pinning test**
 
 ```python
 # tests/test_auto_cmd_inv25.py
@@ -776,16 +776,16 @@ def test_auto_cmd_no_finishing_branch_skill_invocation(
     ), "INV-25 violated: auto invoked /finishing-a-development-branch"
 ```
 
-- [ ] **Step 2: Run test** — these tests PASS immediately (regression-pinning). Commit message uses `test:` per sec.M.5 row 1 precedent:
+- [x] **Step 2: Run test** — these tests PASS immediately (regression-pinning). Commit message uses `test:` per sec.M.5 row 1 precedent:
 
-- [ ] **Step 3: Commit pinning test**
+- [x] **Step 3: Commit pinning test**
 
 ```bash
 git add tests/test_auto_cmd_inv25.py
 git commit -m "test: pin INV-25 branch-scoped enforcement in auto_cmd"
 ```
 
-- [ ] **Step 4: Sanity sweep**
+- [x] **Step 4: Sanity sweep**
 
 Run `python -m pytest tests/test_auto_cmd_inv25.py -v`. Expected: 2 green.
 
@@ -804,7 +804,7 @@ Objetivo: regresion test asegurando que cada task commit, phase close, pre-merge
 
 **Regression-pinning coverage, no Red phase (Finding 6, Plan D iter 1):** the first two fixture tests pass immediately once Task 1 is in (they just validate the fixtures against the new schema). The `test_gate_blocked_write_records_counts` test passes as soon as Task 1's migration completes — Task 3's role is to pin the contract, not to drive new behavior. Per CLAUDE.local.md sec.3 and precedent from Plans A-C (Tasks 8, 20, 23, 26, 30, 34 of Plan A), pinning tests use `test:` prefix per sec.M.5 row 1 and skip the Red commit.
 
-- [ ] **Step 1: Write regression-pinning test**
+- [x] **Step 1: Write regression-pinning test**
 
 ```python
 # tests/test_auto_cmd_inv26.py
@@ -874,18 +874,18 @@ def test_gate_blocked_write_records_counts(
     assert data["status"] == "magi_gate_blocked"
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 First two fixture tests PASS immediately once Task 1 is in (the fixtures validate against the new schema). The dry-run and gate-blocked write tests depend on Task 1's migration — if step 7 of Task 1 was completed, the third test passes; otherwise it may fail because AutoRunAudit is not yet used at gate-block paths. Task 4 completes this migration; for Task 3 this test pins the contract.
 
-- [ ] **Step 3: Commit pinning test**
+- [x] **Step 3: Commit pinning test**
 
 ```bash
 git add tests/test_auto_cmd_inv26.py
 git commit -m "test: pin INV-26 audit-trail schema conformance in auto_cmd"
 ```
 
-- [ ] **Step 4: Sanity sweep**
+- [x] **Step 4: Sanity sweep**
 
 Run `python -m pytest tests/test_auto_cmd_inv26.py -v`. Expected: 4 green.
 
@@ -909,7 +909,7 @@ Adicionalmente, el mensaje a stderr debe incluir estos counts en una linea conci
 
 **Why `tasks_completed` needs incremental audit writes (Finding 2, Plan D iter 1 + Plan D iter 2 Caspar WARNING):** el plan v1 proponia `state._tasks_completed_count = N` despues de Phase 2. Esto **falla** porque `SessionState` es `@dataclass(frozen=True)` (ver Milestone A) — frozen dataclasses bloquean attribute assignment con `FrozenInstanceError`. Plan D iter 1 propuso side-banding via `_phase2_task_loop` return tuple, pero Plan D iter 2 Caspar flagged que bajo un raise mid-loop el count final se pierde y el audit reporta 0 tareas completadas en vez del count parcial real. **Solucion iter 2**: incremental audit writes. `_phase2_task_loop` escribe el audit file despues de cada task close via `_write_audit_incremental(tasks_completed=N)`. Si el loop raise, el ultimo audit escrito tiene el partial count correcto. El `MAGIGateError` handler en `main` re-lee el audit existente (si esta) para leer `tasks_completed`, o usa 0 si no hay audit previo. El return value de `_phase2_task_loop` sigue siendo `state` solo (no tuple) — simpler signature, no frozen-attribute hacks, raise-safe partial counts.
 
-- [ ] **Step 0: Verify `from __future__ import annotations` is first non-comment line of `errors.py`**
+- [x] **Step 0: Verify `from __future__ import annotations` is first non-comment line of `errors.py`**
 
 Plan D iter 2 Caspar flagged a Python 3.9 annotation-runtime compatibility issue: built-in generics (`tuple[str, ...]`) used in class-body annotations require the `from __future__ import annotations` future import to be treated as strings at runtime; without it, evaluating the annotation at class-definition time raises `TypeError` on Python 3.9. The existing `errors.py` (introduced in Milestone A) already has this import as its first non-comment line, but this step exists to assert that before modifying the file:
 
@@ -927,7 +927,7 @@ python -m py_compile skills/sbtdd/scripts/errors.py
 
 Expected: exit code 0, no TypeError at import time.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_auto_cmd_exit8.py
@@ -1069,16 +1069,16 @@ def test_auto_cmd_exit8_strong_no_go_records_zero_counts(
     assert data["tasks_completed"] == 0
 ```
 
-- [ ] **Step 2: Run test** — expected FAIL (`MAGIGateError` does not yet accept kw-only attributes; `_phase2_task_loop` does not yet perform incremental audit writes after each task close).
+- [x] **Step 2: Run test** — expected FAIL (`MAGIGateError` does not yet accept kw-only attributes; `_phase2_task_loop` does not yet perform incremental audit writes after each task close).
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_auto_cmd_exit8.py
 git commit -m "test: fail for exit-8 enriched audit with typed gate-error attrs"
 ```
 
-- [ ] **Step 4: Implement Green — augment `MAGIGateError` (scope addition)**
+- [x] **Step 4: Implement Green — augment `MAGIGateError` (scope addition)**
 
 Modify `skills/sbtdd/scripts/errors.py`. Locate the existing `MAGIGateError` class and extend its `__init__`:
 
@@ -1110,7 +1110,7 @@ class MAGIGateError(SBTDDError):
         self.iteration = iteration
 ```
 
-- [ ] **Step 5: Update raise sites in `pre_merge_cmd.py`**
+- [x] **Step 5: Update raise sites in `pre_merge_cmd.py`**
 
 In `pre_merge_cmd._loop2`, every `raise MAGIGateError(...)` must now pass the typed attributes. Locate the gate-block branch (where `magi-conditions.md` is written) and the STRONG_NO_GO branch, and update them:
 
@@ -1143,7 +1143,7 @@ In `pre_merge_cmd._loop2`, every `raise MAGIGateError(...)` must now pass the ty
     )
 ```
 
-- [ ] **Step 6: Wire incremental audit writes into `_phase2_task_loop` and update `main` in `auto_cmd.py`**
+- [x] **Step 6: Wire incremental audit writes into `_phase2_task_loop` and update `main` in `auto_cmd.py`**
 
 `_phase2_task_loop` signature stays `(ns, state, cfg) -> SessionState` (no tuple return — Plan D iter 2 Caspar revision: raise-safe partial counts require persistence, not an in-memory counter). After each task close inside the loop body, write the running `tasks_completed` to `.claude/auto-run.json` via `AutoRunAudit(...)` so an out-of-loop raise still leaves the last-persisted count on disk. Sketch:
 
@@ -1228,9 +1228,9 @@ def _read_audit_tasks_completed(path: Path) -> int:
 
 Note: there is no `_parse_condition_counts_from_msg` helper, no regex on the exception message. Attribute access only. If a future raise site forgets to set the attributes, the kw-only defaults `()` / `None` kick in and the audit reports zeros — degraded but not corrupted. The tasks_completed source is on-disk persistence — if the whole run crashes before any task completes, the count is correctly 0.
 
-- [ ] **Step 7: Run test to verify all three tests pass**
+- [x] **Step 7: Run test to verify all three tests pass**
 
-- [ ] **Step 8: Commit Green**
+- [x] **Step 8: Commit Green**
 
 Three related modifications land in one commit (atomic per finding resolution):
 
@@ -1255,7 +1255,7 @@ Tasks independientes. Cada uno es un mini-ciclo TDD aislado sobre un modulo A/B.
 
 La idea del hardening: anadir `_check_python_binary()` que corre `python --version`, parsea y valida >= 3.9 (ademas del check de `sys.version_info`). Se integra en `check_environment`.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check_python_floor.py
@@ -1330,18 +1330,18 @@ def test_check_python_binary_handles_missing_binary(
     assert result.status == "MISSING"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: FAIL — `AttributeError: module 'dependency_check' has no attribute '_check_python_binary'`.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_dependency_check_python_floor.py
 git commit -m "test: fail for python-binary version floor check"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Add to `dependency_check.py` after `check_python`:
 
@@ -1413,9 +1413,9 @@ Wire `_check_python_binary()` into `check_environment` right after `check_python
     checks.append(_check_python_binary())  # Floor-enforcement hardening
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py
@@ -1434,7 +1434,7 @@ Objetivo: el check actual `_check_binary` asserts `returncode == 0`. Un shim rot
 
 Solo aplica a `cargo-clippy` / `cargo-fmt` / `cargo-nextest` / `cargo-audit`: binarios rust con formato conocido. `cargo` mismo pasa el check plano.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_dependency_check_rust_versions.py
@@ -1526,18 +1526,18 @@ def test_non_rust_binary_unaffected(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.status == "OK"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: `test_rust_shim_broken_output_rejected` FAILS (current impl accepts any exit-0 shim); the other tests pass coincidentally.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_dependency_check_rust_versions.py
 git commit -m "test: fail for rust shim version-format validation"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Add a version regex + targeted check in `dependency_check.py`:
 
@@ -1575,9 +1575,9 @@ Inside `_check_binary`, right after the `combined = (result.stdout or result.std
 
 Add the `import re as _re` + MappingProxyType/Mapping imports if not already present (MappingProxyType is already imported from Milestone B).
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/dependency_check.py
@@ -1594,7 +1594,7 @@ git commit -m "fix: validate rust shim --version output format"
 
 `--message-format libtest-json-plus` requires `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`. Sin el env var, nextest emite "unknown format" y el pipeline falla silenciosamente (reporter trata el stream como json y falla al parsear). Detectar proactivamente y raise con remediation.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_rust_reporter_nextest_env.py
@@ -1677,18 +1677,18 @@ def test_run_pipeline_happy_path_with_env_var_set(
     assert len(calls) == 2
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: FAIL — `AttributeError: module has no attribute 'ensure_nextest_experimental_env'`. The pipeline API is unchanged (no new parameters — see Finding 7 rewrite below).
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_rust_reporter_nextest_env.py
 git commit -m "test: fail for nextest experimental env var detection"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Modify `reporters/rust_reporter.py`. Add import at top:
 
@@ -1748,9 +1748,9 @@ At the top of `run_pipeline` body (before any subprocess dispatch):
 
 Update the docstring to state that the env var check runs unconditionally and is the first side effect of the function. Tests that need to exercise the happy path set the env var via `monkeypatch.setenv("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")`; tests that want the fail-loud branch use `monkeypatch.delenv(...)`. No parameter toggle. No production code knows tests exist.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/reporters/rust_reporter.py
@@ -1767,7 +1767,7 @@ git commit -m "fix: detect NEXTEST_EXPERIMENTAL_LIBTEST_JSON env var before pipe
 
 `parse_junit` actualmente catchea `ET.ParseError` y lo traduce a `ValidationError`. Pero `ET.parse` sobre archivo de 0 bytes raisea `ET.ParseError: no element found` — el catch ya existe, lo cual es bueno. El hardening: mensaje enriquecido que indique explicitamente `"file is empty (0 bytes)"`, + test regresion sobre la fixture.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_ctest_reporter_empty_xml.py
@@ -1821,18 +1821,18 @@ def test_run_wraps_empty_file(tmp_path: Path) -> None:
     assert not target.exists()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: the `empty.xml` test FAILS because the current error message says `"invalid JUnit XML in ..."` — generic, not empty-specific. The other two tests (malformed, nonexistent) already pass coincidentally.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_ctest_reporter_empty_xml.py
 git commit -m "test: fail for empty-junit-xml distinguishable error"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Modify `parse_junit` in `reporters/ctest_reporter.py`. Before the `ET.parse` call, add:
 
@@ -1845,9 +1845,9 @@ Modify `parse_junit` in `reporters/ctest_reporter.py`. Before the `ET.parse` cal
         )
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/reporters/ctest_reporter.py
@@ -1870,7 +1870,7 @@ Objetivo: cuando un usuario interrumpe mid-pre-merge despues de que `_loop2` esc
 
 Signal: `magi-conditions.md` presente en `.claude/` + state.current_phase == "done" + tree clean (o dirty con uncommitted fixes en progreso).
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_resume_cmd_magi_conditions.py
@@ -1985,18 +1985,18 @@ def test_diagnostic_snapshot_includes_magi_conditions_md(tmp_path: Path) -> None
     assert report["runtime"].get("magi-conditions.md") is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: FAIL. `_decide_delegation` currently returns `("auto_cmd", [])` for `phase=done + auto-run.json=True`; doesn't consider `magi-conditions.md`. Also `_report_diagnostic` doesn't include `magi-conditions.md` in its `runtime` dict.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_resume_cmd_magi_conditions.py
 git commit -m "test: fail for resume detection of magi-conditions.md pending"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Modify `resume_cmd._report_diagnostic`. Extend the `runtime` dict:
 
@@ -2037,9 +2037,9 @@ Modify `main` to handle the new sentinel. After `module_name, extra = _decide_de
         return 0
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/resume_cmd.py
@@ -2062,7 +2062,7 @@ Implementacion: en `_recheck_environment`, leer el archivo dos veces consecutiva
 
 **Deterministic test (Plan D iter 2 Caspar WARNING):** the iter 1 test relied on `time.sleep(0.02)` to force a wall-clock separation between the two reads, which is flaky on loaded CI. The revised test monkeypatches `os.path.getmtime` / `Path.stat` so the two internal reads observe different mtimes unconditionally, eliminating the wall-clock dependency. Positive path (divergent mtimes → raise) and negative path (stable reads → no raise) both become deterministic.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_resume_cmd_concurrent_state.py
@@ -2153,18 +2153,18 @@ def test_stable_state_does_not_raise(tmp_path: Path) -> None:
     resume_cmd._assert_state_stable_between_reads(state_path)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: FAIL — `_assert_state_stable_between_reads` does not exist.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_resume_cmd_concurrent_state.py
 git commit -m "test: fail for resume concurrent state-file write detection"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Add to `resume_cmd.py`:
 
@@ -2228,9 +2228,9 @@ def _recheck_environment(root: Path) -> None:
     ...
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/resume_cmd.py
@@ -2248,7 +2248,7 @@ Objetivo: full end-to-end test donde se prepara un estado sintetico de auto inte
 
 **Regression-pinning coverage, no Red phase (Finding 6, Plan D iter 1):** this is an integration test validating behavior produced by Tasks 9 + 10 (the resume diagnostic path). It does not drive new production code on its own; it pins the user-facing contract once Tasks 9/10 are green. Per CLAUDE.local.md sec.3 and Plans A-C precedent, commit uses `test:` per sec.M.5 row 1 and skips the Red commit.
 
-- [ ] **Step 1: Write regression-pinning test**
+- [x] **Step 1: Write regression-pinning test**
 
 ```python
 # tests/test_resume_cmd_dry_run_integration.py
@@ -2368,7 +2368,7 @@ def test_dry_run_clean_tree_delegates_to_auto(
     assert "Would delegate" in captured.out
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 Tests depend on Task 9 + 10 being in. If `_recheck_environment` fails locally (missing pytest/ruff/mypy on PATH), the monkeypatch stubs it. Run:
 
@@ -2378,7 +2378,7 @@ python -m pytest tests/test_resume_cmd_dry_run_integration.py -v
 
 Expected: 3 green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_resume_cmd_dry_run_integration.py
@@ -2395,7 +2395,7 @@ git commit -m "test: pin resume --dry-run end-to-end zero-side-effects"
 
 Objetivo: cuando `_loop2` escribe `.claude/magi-conditions.md` y raisea `MAGIGateError`, imprimir tambien a stderr una linea concisa de resumen con `N accepted + M rejected` + next-step hint. Hoy el mensaje de la excepcion menciona solo accepted count.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_pre_merge_cmd_exit8.py
@@ -2469,18 +2469,18 @@ def test_loop2_writes_conditions_and_emits_stderr_summary(
     assert "close-phase" in captured.err
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: FAIL — nothing currently writes to stderr in the exit-8 branch.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_pre_merge_cmd_exit8.py
 git commit -m "test: fail for pre_merge exit-8 stderr summary"
 ```
 
-- [ ] **Step 4: Implement Green**
+- [x] **Step 4: Implement Green**
 
 Modify `pre_merge_cmd._loop2`. In the `if accepted:` branch, after `conditions_path = _write_magi_conditions_file(...)` and before `raise MAGIGateError(...)`, add:
 
@@ -2495,9 +2495,9 @@ Modify `pre_merge_cmd._loop2`. In the `if accepted:` branch, after `conditions_p
 
 Ensure `import sys` is at top of file (already present in pre_merge_cmd).
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-- [ ] **Step 6: Commit Green**
+- [x] **Step 6: Commit Green**
 
 ```bash
 git add skills/sbtdd/scripts/pre_merge_cmd.py
@@ -2515,7 +2515,7 @@ Objetivo: pin the happy-path user journey across `pre-merge` (produces exit 8 + 
 
 **Regression-pinning coverage, no Red phase (Finding 6, Plan D iter 1):** integration test over the user journey built in Tasks 9 + 12; pins the contract, does not drive new production code. Per CLAUDE.local.md sec.3 and Plans A-C precedent, commit uses `test:` per sec.M.5 row 1 and skips the Red commit.
 
-- [ ] **Step 1: Write regression-pinning test**
+- [x] **Step 1: Write regression-pinning test**
 
 ```python
 # tests/test_pre_merge_resume_integration.py
@@ -2613,7 +2613,7 @@ def test_pre_merge_exit8_then_resume_directs_to_close_phase(
     assert "close-phase" in captured.out
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 Expected: PASS (depends on Tasks 9 + 12 being green). Run:
 
@@ -2621,7 +2621,7 @@ Expected: PASS (depends on Tasks 9 + 12 being green). Run:
 python -m pytest tests/test_pre_merge_resume_integration.py -v
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_pre_merge_resume_integration.py
@@ -2643,7 +2643,7 @@ Pure docstring / comment updates. No new behavior. `docs:` commits.
 
 Objetivo: add a docstring cross-reference in `auto_cmd.py`'s module docstring (and in `_phase3_pre_merge` or equivalent verification-retry path) explaining CONTINUE default for uncommitted work lives in `resume_cmd._resolve_uncommitted` — not in `auto` itself. `auto` never leaves uncommitted work because each phase commits atomically; it's the `resume` path that honors INV-24 when the user restarts.
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```python
 # tests/test_inv_documentation.py
@@ -2688,18 +2688,18 @@ def test_init_cmd_mkdir_tracked_documents_toctou() -> None:
     assert "TOCTOU" in source or "race" in source.lower()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Expected: FAIL — current `auto_cmd.__doc__` does not mention INV-24; `pre_merge_cmd._loop2.__doc__` does not mention INV-29 explicitly; `init_cmd._mkdir_tracked.__doc__` does not mention TOCTOU.
 
-- [ ] **Step 3: Commit Red**
+- [x] **Step 3: Commit Red**
 
 ```bash
 git add tests/test_inv_documentation.py
 git commit -m "test: fail for INV-24 / INV-29 / TOCTOU docstring contract"
 ```
 
-- [ ] **Step 4: Implement Green — auto_cmd INV-24 doc**
+- [x] **Step 4: Implement Green — auto_cmd INV-24 doc**
 
 Append to the module docstring of `auto_cmd.py` (before the closing `"""`):
 
@@ -2715,7 +2715,7 @@ common reader question "where is INV-24 enforced in auto?" — the answer
 is "in resume; auto never needs it".
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/auto_cmd.py
@@ -2731,11 +2731,11 @@ git commit -m "docs: document INV-24 cross-reference in auto_cmd"
 
 Objetivo: docstring formalizing the feedback-loop contract (INV-29: rejected conditions feed next MAGI iteration context to break sterile loops).
 
-- [ ] **Step 1: Reuse test from Task 14**
+- [x] **Step 1: Reuse test from Task 14**
 
 `test_pre_merge_loop2_docstring_mentions_inv29` is already in `test_inv_documentation.py`. After Task 14 commits the test, this task makes it green.
 
-- [ ] **Step 2: Implement Green — pre_merge INV-29 doc**
+- [x] **Step 2: Implement Green — pre_merge INV-29 doc**
 
 Prepend a paragraph to the `_loop2` docstring in `pre_merge_cmd.py`:
 
@@ -2751,7 +2751,7 @@ iterations until the gate is passed or iterations are exhausted. See
 :func:`_write_magi_feedback_file` for the on-disk format.
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/pre_merge_cmd.py
@@ -2767,11 +2767,11 @@ git commit -m "docs: document INV-29 feedback-loop contract in pre_merge._loop2"
 
 Objetivo: add an inline comment in `_mkdir_tracked` documenting the `os.rmdir`-based rollback contract and why the TOCTOU race between `_collect_created_dirs` and `path.mkdir(exist_ok=False)` is acceptable (init is single-user, window is microseconds, `mkdir(exist_ok=False)` raises FileExistsError loudly if another process created the dir concurrently, rollback sees `os.rmdir` fail on non-empty dirs which is the intended safety guard).
 
-- [ ] **Step 1: Reuse test from Task 14**
+- [x] **Step 1: Reuse test from Task 14**
 
 `test_init_cmd_mkdir_tracked_documents_toctou` already exists.
 
-- [ ] **Step 2: Implement Green — _mkdir_tracked TOCTOU comment**
+- [x] **Step 2: Implement Green — _mkdir_tracked TOCTOU comment**
 
 Modify `_mkdir_tracked` in `init_cmd.py`:
 
@@ -2807,7 +2807,7 @@ def _mkdir_tracked(directory: Path, dest_root: Path, created_dirs: list[Path]) -
         created_dirs.append(path)
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add skills/sbtdd/scripts/init_cmd.py
@@ -2822,7 +2822,7 @@ git commit -m "docs: document TOCTOU contract in init_cmd._mkdir_tracked"
 
 **Files:** None modified.
 
-- [ ] **Step 1: Run full test suite + time budget check**
+- [x] **Step 1: Run full test suite + time budget check**
 
 ```bash
 python -m pytest tests/ -v --tb=short
@@ -2832,7 +2832,7 @@ Expected: all Milestones A+B+C tests remain green; all Milestone D tests green. 
 
 On Windows (bash): `time python -m pytest tests/`. Target: `make verify` `<= 75 seconds` (raised from C's 60s; expected growth from +~30-40 tests). If exceeded, mark slowest 20% with `@pytest.mark.slow` and extend the Makefile split to `verify-all`.
 
-- [ ] **Step 2: Run lint + format + types**
+- [x] **Step 2: Run lint + format + types**
 
 ```bash
 python -m ruff check .
@@ -2842,7 +2842,7 @@ python -m mypy .
 
 Expected: 0 warnings, clean format, 0 mypy errors (strict mode).
 
-- [ ] **Step 3: Scope coverage audit**
+- [x] **Step 3: Scope coverage audit**
 
 Cross-check scope items 1-15 from this plan's Goal:
 
@@ -2864,7 +2864,7 @@ Cross-check scope items 1-15 from this plan's Goal:
 | 14 (pre_merge INV-29 docstring) | 15 |
 | 15 (_mkdir_tracked TOCTOU) | 16 |
 
-- [ ] **Step 4: INV scan**
+- [x] **Step 4: INV scan**
 
 Grep for INV tokens added in this milestone:
 
@@ -2881,7 +2881,7 @@ python -m pytest tests/test_auto_cmd_inv25.py tests/test_auto_cmd_inv26.py tests
 
 Expected: all green.
 
-- [ ] **Step 4b: Dict back-compat regression check (Plan D iter 2 Caspar WARNING)**
+- [x] **Step 4b: Dict back-compat regression check (Plan D iter 2 Caspar WARNING)**
 
 `_write_auto_run_audit` no longer accepts a `dict` payload. Verify no caller regresses by grepping the plugin tree:
 
@@ -2899,7 +2899,7 @@ grep -n "from typing import Union" skills/sbtdd/scripts/auto_cmd.py
 
 Expected: zero matches (unless Union is genuinely used elsewhere in the module).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
