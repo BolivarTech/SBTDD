@@ -24,3 +24,10 @@ def test_dispatcher_status_returns_0_with_no_state(tmp_path):
 
     rc = run_sbtdd.main(["status", "--project-root", str(tmp_path)])
     assert rc == 0
+
+
+def test_dispatcher_routes_close_task_to_close_task_cmd():
+    import close_task_cmd
+    import run_sbtdd
+
+    assert run_sbtdd.SUBCOMMAND_DISPATCH["close-task"] is close_task_cmd.main

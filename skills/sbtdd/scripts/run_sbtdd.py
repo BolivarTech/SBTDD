@@ -26,6 +26,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, MutableMapping
 
+import close_task_cmd
 import status_cmd
 from errors import EXIT_CODES, SBTDDError, ValidationError
 from models import VALID_SUBCOMMANDS
@@ -58,7 +59,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "init": _default_handler_factory("init"),
     "spec": _default_handler_factory("spec"),
     "close-phase": _default_handler_factory("close-phase"),
-    "close-task": _default_handler_factory("close-task"),
+    "close-task": close_task_cmd.main,
     "status": status_cmd.main,
     "pre-merge": _default_handler_factory("pre-merge"),
     "finalize": _default_handler_factory("finalize"),
