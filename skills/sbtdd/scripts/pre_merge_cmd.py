@@ -262,6 +262,28 @@ def _write_magi_conditions_file(
     body += "## Accepted conditions\n\n"
     for cond in conditions:
         body += f"- {cond}\n"
+    body += "\n## How to apply these conditions\n\n"
+    body += (
+        "Step-by-step recovery sequence (one pass per accepted condition):\n\n"
+        "1. Edit code to address the condition.\n"
+        "2. Add a failing test that reproduces the gap (Red phase).\n"
+        '3. `sbtdd close-phase --variant test --message "<red msg>"` to '
+        "close Red.\n"
+        '4. `sbtdd close-phase --variant fix --message "<green msg>"` to '
+        "close Green.\n"
+        '5. `sbtdd close-phase --variant refactor --message "<refactor '
+        'msg>"` to close Refactor.\n'
+        "6. `sbtdd close-task --project-root .` to advance state to the "
+        "next task (or to `done` if this was the last one).\n"
+        "7. After every accepted condition has its own 3-commit cycle on "
+        "the branch, re-run `sbtdd pre-merge --project-root .`. MAGI "
+        "re-evaluates the new diff; if conditions are genuinely addressed "
+        "the gate clears.\n\n"
+        "If `/receiving-code-review` rejects one of the conditions "
+        "above on a later re-run, the rejection is written to "
+        "`.claude/magi-feedback.md` and fed to the next MAGI iteration "
+        "as context instead of being applied.\n"
+    )
     path.write_text(body, encoding="utf-8")
     return path
 
