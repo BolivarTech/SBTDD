@@ -981,6 +981,42 @@ def test_parse_receiving_review_handles_mixedcase_headers() -> None:
     assert rejected == ["cond 2"]
 
 
+def test_write_magi_conditions_file_emits_frontmatter_for_traceability(
+    tmp_path: Path,
+) -> None:
+    """Finding 3 (Caspar): conditions file header is a YAML frontmatter block.
+
+    ``_write_magi_conditions_file`` overwrites ``.claude/magi-conditions.md``
+    on every pre-merge invocation, losing prior iteration history.
+    Option A mitigates this by embedding a YAML frontmatter block with
+    ``generated_at`` (ISO 8601), ``magi_iteration`` (1-indexed int),
+    ``pre_merge_head_sha`` (short SHA or ``unknown`` when not a git repo),
+    and ``verdict`` so each overwrite is self-describing and a log
+    reader can reconstruct the sequence post-hoc.
+    """
+    import subprocess as _subprocess
+
+    import pre_merge_cmd
+
+    # tmp_path is not a git repo; _build_conditions_frontmatter must
+    # handle the missing-repo case gracefully (head_sha="unknown").
+    _subprocess.run = _subprocess.run  # mypy no-op; keep import live
+
+    verdict = _make_verdict("GO_WITH_CAVEATS", conditions=("cond 1",))
+    path = pre_merge_cmd._write_magi_conditions_file(["cond 1"], tmp_path, verdict, iteration=2)
+    body = path.read_text(encoding="utf-8")
+    lines = body.splitlines()
+    assert lines[0] == "---", f"first line must open frontmatter, got: {lines[0]!r}"
+    # Find the closing '---' after the opener.
+    close_idx = next((i for i, line in enumerate(lines[1:], start=1) if line == "---"), -1)
+    assert close_idx > 0, "frontmatter block must close with '---'"
+    frontmatter = "\n".join(lines[1:close_idx])
+    assert "generated_at:" in frontmatter
+    assert "magi_iteration: 2" in frontmatter
+    assert "pre_merge_head_sha:" in frontmatter
+    assert "verdict: GO_WITH_CAVEATS" in frontmatter
+
+
 def test_write_magi_conditions_file_body_structure(tmp_path: Path) -> None:
     """Finding 1: conditions file body includes step-by-step recovery guidance.
 
