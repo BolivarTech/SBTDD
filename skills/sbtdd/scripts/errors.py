@@ -62,6 +62,10 @@ class ChecklistError(SBTDDError):
     """Finalize checklist item failed (exit 9, CHECKLIST_FAILED)."""
 
 
+class VerificationIrremediableError(SBTDDError):
+    """Phase verification failed after auto retry budget (exit 6)."""
+
+
 _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     ValidationError: 1,
     StateFileError: 1,
@@ -69,6 +73,7 @@ _EXIT_CODES_MUTABLE: dict[type[SBTDDError], int] = {
     DependencyError: 2,
     PreconditionError: 2,
     DriftError: 3,
+    VerificationIrremediableError: 6,
     Loop1DivergentError: 7,
     MAGIGateError: 8,
     ChecklistError: 9,

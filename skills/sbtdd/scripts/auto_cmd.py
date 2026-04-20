@@ -33,13 +33,26 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
+import close_task_cmd
+import subprocess_utils
+import superpowers_dispatch
+from commits import create as commit_create
 from config import PluginConfig, load_plugin_local
 from dependency_check import check_environment
-from errors import DependencyError, PreconditionError
+from drift import detect_drift
+from errors import (
+    DependencyError,
+    DriftError,
+    PreconditionError,
+    VerificationIrremediableError,
+)
+from models import COMMIT_PREFIX_MAP
 from state_file import SessionState
 from state_file import load as load_state
+from state_file import save as save_state
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -117,6 +130,148 @@ def _phase1_preflight(ns: argparse.Namespace) -> tuple[SessionState, PluginConfi
     return state, cfg
 
 
+_PHASE_ORDER: tuple[str, ...] = ("red", "green", "refactor")
+
+
+def _now_iso() -> str:
+    """Return UTC ISO 8601 timestamp with a Z suffix (CLAUDE.md sec.2.2)."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _current_head_sha(root: Path) -> str:
+    """Return short SHA of HEAD via ``git rev-parse --short``."""
+    r = subprocess_utils.run_with_timeout(
+        ["git", "rev-parse", "--short", "HEAD"], timeout=10, cwd=str(root)
+    )
+    return r.stdout.strip()
+
+
+def _run_verification_with_retries(root: Path, retries: int) -> None:
+    """Invoke ``/verification-before-completion`` with retry budget.
+
+    Each failure below the budget triggers ``/systematic-debugging`` to give
+    the loop a structured hand-off for root-cause analysis (sec.M.3). When
+    attempts exceed ``retries`` the last failure is wrapped as
+    :class:`VerificationIrremediableError` (exit 6).
+
+    Args:
+        root: Project root directory passed as ``cwd`` to the skills.
+        retries: Number of additional attempts allowed after the first
+            failure. ``retries=0`` means a single attempt with no retry.
+
+    Raises:
+        VerificationIrremediableError: When the retry budget is exhausted.
+    """
+    for attempt in range(retries + 1):
+        try:
+            superpowers_dispatch.verification_before_completion(cwd=str(root))
+            return
+        except Exception as exc:
+            if attempt >= retries:
+                raise VerificationIrremediableError(
+                    f"verification failed after {retries} retries: {exc}"
+                ) from exc
+            superpowers_dispatch.systematic_debugging(cwd=str(root))
+
+
+def _phase_prefix(phase: str) -> str:
+    """Return the sec.M.5 commit prefix for the closing phase.
+
+    Auto uses ``green_feat`` by default (consistent with
+    ``/sbtdd close-phase --variant feat``). Callers that want ``fix``
+    semantics must use manual ``close-phase``.
+    """
+    if phase == "red":
+        return COMMIT_PREFIX_MAP["red"]
+    if phase == "green":
+        return COMMIT_PREFIX_MAP["green_feat"]
+    if phase == "refactor":
+        return COMMIT_PREFIX_MAP["refactor"]
+    raise ValueError(f"unknown phase '{phase}'")
+
+
+def _phase2_task_loop(
+    ns: argparse.Namespace, state: SessionState, cfg: PluginConfig
+) -> SessionState:
+    """Run Phase 2 -- sequential task loop with TDD cycles per task.
+
+    For each pending task: iterate ``_PHASE_ORDER`` from the current phase
+    forward; invoke ``/test-driven-development`` for the phase,
+    ``/verification-before-completion`` (with retries), then commit with
+    the sec.M.5 prefix. At ``refactor`` close, delegate to
+    :func:`close_task_cmd.mark_and_advance` (iter-2 W1 public helper) so
+    the close-task bookkeeping stays single-sourced.
+
+    Drift is re-checked at entry; any non-None
+    :class:`drift.DriftReport` aborts with :class:`DriftError` (INV-17,
+    exit 3). Drift detection is not re-run between phases: the close of
+    each phase produces a commit whose prefix is, by definition, the
+    expected one for the NEW phase -- re-checking inside the inner loop
+    would flag every legitimate transition as drift.
+
+    Args:
+        ns: Parsed argparse namespace.
+        state: Current :class:`SessionState` (entry phase may be
+            ``red``, ``green``, or ``refactor``; auto starts from there).
+        cfg: Plugin configuration (for ``auto_verification_retries``).
+
+    Returns:
+        The final :class:`SessionState` after the last task's close-task
+        cascade (either ``current_phase='done'`` when the plan is fully
+        consumed, or the next task's fresh red phase).
+
+    Raises:
+        DriftError: Drift detected at entry.
+        VerificationIrremediableError: Phase verification exhausted the
+            retry budget.
+    """
+    root: Path = ns.project_root
+    retries = (
+        ns.verification_retries
+        if ns.verification_retries is not None
+        else cfg.auto_verification_retries
+    )
+    state_path = root / ".claude" / "session-state.json"
+    plan_path = root / state.plan_path
+    dr = detect_drift(state_path, plan_path, root)
+    if dr is not None:
+        raise DriftError(f"drift at auto Phase 2: {dr.reason}")
+    current = state
+    while current.current_task_id is not None:
+        phase_idx = (
+            _PHASE_ORDER.index(current.current_phase)
+            if current.current_phase in _PHASE_ORDER
+            else 0
+        )
+        for phase in _PHASE_ORDER[phase_idx:]:
+            superpowers_dispatch.test_driven_development(args=[f"--phase={phase}"], cwd=str(root))
+            _run_verification_with_retries(root, retries)
+            prefix = _phase_prefix(phase)
+            commit_create(prefix, f"{phase} for task {current.current_task_id}", cwd=str(root))
+            new_sha = _current_head_sha(root)
+            if phase != "refactor":
+                next_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) + 1]
+                current = SessionState(
+                    plan_path=current.plan_path,
+                    current_task_id=current.current_task_id,
+                    current_task_title=current.current_task_title,
+                    current_phase=next_phase,
+                    phase_started_at_commit=new_sha,
+                    last_verification_at=_now_iso(),
+                    last_verification_result="passed",
+                    plan_approved_at=current.plan_approved_at,
+                )
+                save_state(current, state_path)
+            else:
+                # W1: delegate to public helper in close_task_cmd instead
+                # of duplicating the entire flip / commit chore / advance
+                # sequence.
+                current = close_task_cmd.mark_and_advance(current, root)
+        # After refactor cascade, outer loop re-evaluates against updated
+        # current.current_task_id (None -> terminate).
+    return current
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd auto (shoot-and-forget full-cycle)."""
     parser = _build_parser()
@@ -128,7 +283,9 @@ def main(argv: list[str] | None = None) -> int:
     if ns.dry_run:
         _print_dry_run_preview(ns)
         return 0
-    _phase1_preflight(ns)
+    state, cfg = _phase1_preflight(ns)
+    if state.current_phase != "done":
+        state = _phase2_task_loop(ns, state, cfg)
     return 0
 
 

@@ -82,9 +82,24 @@ def test_all_ten_subclasses_exist():
         "CommitError",
         "Loop1DivergentError",
         "ChecklistError",
+        "VerificationIrremediableError",
     }
     actual = {name for name in dir(errors) if name.endswith("Error") and name != "SBTDDError"}
     assert expected == actual, f"mismatch: expected {expected}, got {actual}"
+
+
+def test_verification_irremediable_error_exit_code_is_6():
+    from errors import EXIT_CODES, VerificationIrremediableError
+
+    assert EXIT_CODES[VerificationIrremediableError] == 6
+
+
+def test_verification_irremediable_error_derives_from_sbtdd():
+    from errors import SBTDDError, VerificationIrremediableError
+
+    assert issubclass(VerificationIrremediableError, SBTDDError)
+    with pytest.raises(SBTDDError):
+        raise VerificationIrremediableError("exhausted retries")
 
 
 def test_loop1_divergent_error_derives_from_sbtdd():
@@ -153,6 +168,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         QuotaExhaustedError,
         StateFileError,
         ValidationError,
+        VerificationIrremediableError,
     )
 
     expected_classes = {
@@ -166,6 +182,7 @@ def test_exit_codes_mapping_covers_all_subclasses():
         CommitError,
         Loop1DivergentError,
         ChecklistError,
+        VerificationIrremediableError,
     }
     assert set(EXIT_CODES.keys()) == expected_classes
 
@@ -217,6 +234,7 @@ def test_mro_is_flat_single_inheritance():
         SBTDDError,
         StateFileError,
         ValidationError,
+        VerificationIrremediableError,
     )
 
     subclasses = [
@@ -230,6 +248,7 @@ def test_mro_is_flat_single_inheritance():
         CommitError,
         Loop1DivergentError,
         ChecklistError,
+        VerificationIrremediableError,
     ]
     for cls in subclasses:
         assert cls.__mro__[1] is SBTDDError, f"{cls.__name__} MRO skips SBTDDError"

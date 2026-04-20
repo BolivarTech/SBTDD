@@ -166,3 +166,359 @@ def test_auto_aborts_when_plan_not_approved(
         auto_cmd._phase1_preflight(
             auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 28 -- Phase 2 task-loop inner loop + VerificationIrremediableError.
+# ---------------------------------------------------------------------------
+
+
+def _setup_git_repo(tmp_path: Path) -> None:
+    """Init a git repo with an initial commit so HEAD resolves cleanly."""
+    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tester@example.com"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Tester"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=str(tmp_path), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "chore: initial"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+
+
+def _seed_plan_one_task(tmp_path: Path) -> Path:
+    """Write a single-task plan (task id=1)."""
+    planning = tmp_path / "planning"
+    planning.mkdir(parents=True, exist_ok=True)
+    plan = planning / "claude-plan-tdd.md"
+    plan.write_text(
+        "# Plan\n\n### Task 1: First task\n\n- [ ] step 1\n- [ ] step 2\n",
+        encoding="utf-8",
+    )
+    return plan
+
+
+def _seed_plan_three_tasks(tmp_path: Path) -> Path:
+    """Write a three-task plan (task ids 1, 2, 3 all open)."""
+    planning = tmp_path / "planning"
+    planning.mkdir(parents=True, exist_ok=True)
+    plan = planning / "claude-plan-tdd.md"
+    plan.write_text(
+        "# Plan\n\n"
+        "### Task 1: First task\n- [ ] step 1\n\n"
+        "### Task 2: Second task\n- [ ] step 1\n\n"
+        "### Task 3: Third task\n- [ ] step 1\n",
+        encoding="utf-8",
+    )
+    return plan
+
+
+def _seed_loop_state(
+    tmp_path: Path,
+    *,
+    task_id: str = "1",
+    current_phase: str = "red",
+    title: str = "First task",
+) -> None:
+    """Seed state file pointing at an in-progress task for Phase 2 tests."""
+    _seed_state(
+        tmp_path,
+        current_phase=current_phase,
+        current_task_id=task_id,
+        current_task_title=title,
+    )
+
+
+def _seed_auto_env(
+    tmp_path: Path,
+    *,
+    tasks: str = "one",
+    task_id: str = "1",
+    current_phase: str = "red",
+) -> None:
+    """Seed a fully valid environment for Phase 2 tests."""
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    if tasks == "one":
+        _seed_plan_one_task(tmp_path)
+    else:
+        _seed_plan_three_tasks(tmp_path)
+    _seed_loop_state(tmp_path, task_id=task_id, current_phase=current_phase)
+
+
+def test_auto_phase2_processes_single_task_red_green_refactor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One-task plan; happy path creates 3 commits (test/feat/refactor) + 1 chore."""
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    # Dummy TDD skill + verification skill as no-ops.
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    # Disable drift detection in Phase 2 helper.
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+
+    # Each phase of each task commits an empty diff; simulate tree changes by
+    # touching a file between invocations.
+    counter = {"n": 0}
+
+    def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+        counter["n"] += 1
+        # Make a file change so the commit has something to record.
+        (tmp_path / f"touch-{counter['n']}.txt").write_text(
+            f"commit {counter['n']}\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"{prefix}: {message}"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        return "ok"
+
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    # close_task_cmd also uses commit_create internally -- patch it as well.
+    import close_task_cmd
+
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    final = auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    # 3 TDD commits + 1 chore close = 4 commits beyond the initial one.
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=str(tmp_path), check=True, capture_output=True, text=True
+    )
+    lines = log.stdout.strip().splitlines()
+    # Initial + 3 phase commits + 1 chore
+    assert len(lines) == 5
+    assert final.current_phase == "done"
+    assert final.current_task_id is None
+
+
+def test_auto_phase2_respects_verification_retries_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verification fails twice then passes; with retries=2 passes."""
+    import auto_cmd
+    import superpowers_dispatch
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+
+    attempts = {"n": 0}
+
+    def flaky_verify(**kw: object) -> None:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", flaky_verify)
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+
+    # retries=2 means up to 3 attempts
+    auto_cmd._run_verification_with_retries(tmp_path, retries=2)
+    assert attempts["n"] == 3
+
+
+def test_auto_phase2_aborts_after_exhausting_retries_exit_6(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verification always fails -> raises VerificationIrremediableError (exit 6)."""
+    import auto_cmd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, VerificationIrremediableError
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+
+    def always_fail(**kw: object) -> None:
+        raise RuntimeError("always fails")
+
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", always_fail)
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+
+    with pytest.raises(VerificationIrremediableError):
+        auto_cmd._run_verification_with_retries(tmp_path, retries=1)
+    assert EXIT_CODES[VerificationIrremediableError] == 6
+
+
+def test_auto_phase2_sequential_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """3-task plan; tasks processed in order 1, 2, 3."""
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="three", task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    task_ids_seen: list[str] = []
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+
+    counter = {"n": 0}
+
+    def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+        counter["n"] += 1
+        if prefix != "chore":
+            # Record the task id we're working on for every non-chore commit.
+            # The state file reflects current_task_id at commit time.
+            import json as _json
+
+            data = _json.loads(
+                (tmp_path / ".claude" / "session-state.json").read_text(encoding="utf-8")
+            )
+            if data.get("current_task_id"):
+                task_ids_seen.append(data["current_task_id"])
+        (tmp_path / f"touch-{counter['n']}.txt").write_text(
+            f"commit {counter['n']}\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"{prefix}: {message}"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        return "ok"
+
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    import close_task_cmd
+
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    # With 3 tasks * 3 phases = 9 non-chore commits total.
+    # First 3 must be task 1, next 3 task 2, last 3 task 3.
+    assert task_ids_seen[:3] == ["1", "1", "1"]
+    assert task_ids_seen[3:6] == ["2", "2", "2"]
+    assert task_ids_seen[6:9] == ["3", "3", "3"]
+
+
+def test_auto_phase2_aborts_on_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drift detector returns a report -> DriftError."""
+    import auto_cmd
+    from config import load_plugin_local
+    from drift import DriftReport
+    from errors import DriftError
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    monkeypatch.setattr(
+        auto_cmd,
+        "detect_drift",
+        lambda *a, **kw: DriftReport("red", "chore", "[ ]", "synthetic"),
+    )
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    with pytest.raises(DriftError):
+        auto_cmd._phase2_task_loop(ns, state, cfg)
+
+
+def test_auto_phase2_inner_loop_entry_phase_respects_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """state.current_phase=green -> auto starts at green, skipping red."""
+    import auto_cmd
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, tasks="one", task_id="1", current_phase="green")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+
+    phases_seen: list[str] = []
+
+    def capture_phase(**kw: object) -> None:
+        args_list = kw.get("args")
+        if isinstance(args_list, list):
+            for a in args_list:
+                if isinstance(a, str) and a.startswith("--phase="):
+                    phases_seen.append(a.split("=", 1)[1])
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", capture_phase, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None, raising=False)
+
+    counter = {"n": 0}
+
+    def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+        counter["n"] += 1
+        (tmp_path / f"touch-{counter['n']}.txt").write_text(f"c {counter['n']}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"{prefix}: {message}"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        return "ok"
+
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    import close_task_cmd
+
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    # Starting phase=green -> skips red; only green and refactor run for task 1.
+    assert phases_seen == ["green", "refactor"]
