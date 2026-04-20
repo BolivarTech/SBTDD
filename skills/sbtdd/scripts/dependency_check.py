@@ -410,12 +410,18 @@ _CARGO_SUBCOMMAND_SHIMS: Mapping[str, str] = MappingProxyType(
 #: stdout matches the corresponding regex -- catches shims that return
 #: exit 0 with garbage output (e.g. broken PATH entry shadowing a real
 #: binary, or a placeholder script installed during incomplete setup).
+#: MAGI Loop 2 D iter 1 Melchior: per-shim anchored patterns replace the
+#: loose ``^\w+\s+\d+\.\d+`` originals. Each regex now (a) fixes the
+#: expected shim-name prefix exactly (no generic ``\w+``), and (b)
+#: requires the full three-part semver ``major.minor.patch`` to prove
+#: the shim is a real release build rather than a stub. Suffixes after
+#: the semver (git hash, ``-stable``, etc.) remain unconstrained.
 _RUST_VERSION_REGEXES: Mapping[str, _re.Pattern[str]] = MappingProxyType(
     {
-        "cargo-clippy": _re.compile(r"^clippy\s+\d+\.\d+"),
-        "cargo-fmt": _re.compile(r"^rustfmt\s+\d+\.\d+"),
-        "cargo-nextest": _re.compile(r"^cargo-nextest[-\w]*\s+\d+\.\d+"),
-        "cargo-audit": _re.compile(r"^cargo-audit[-\w]*\s+\d+\.\d+"),
+        "cargo-clippy": _re.compile(r"^clippy\s+(\d+\.\d+\.\d+)"),
+        "cargo-fmt": _re.compile(r"^rustfmt\s+(\d+\.\d+\.\d+)"),
+        "cargo-nextest": _re.compile(r"^cargo-nextest-nextest\s+(\d+\.\d+\.\d+)"),
+        "cargo-audit": _re.compile(r"^cargo-audit-audit\s+(\d+\.\d+\.\d+)"),
     }
 )
 
