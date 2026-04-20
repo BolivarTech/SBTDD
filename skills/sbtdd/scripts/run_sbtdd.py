@@ -8,10 +8,13 @@ Invoked as ``python run_sbtdd.py <subcommand> [args...]`` from the skill.
 Validates the subcommand name against :data:`models.VALID_SUBCOMMANDS`,
 then dispatches to the matching ``{subcommand}_cmd.run`` function.
 
-Exit codes are derived from :data:`errors.EXIT_CODES` -- unknown
-:class:`errors.SBTDDError` subclasses fall through to exit 1. ``KeyboardInterrupt``
-becomes exit 130 (sec.S.11.3). All other uncaught exceptions surface with
-traceback and exit 1 (bug report channel per sec.S.11.2).
+Exit codes are derived from :data:`errors.EXIT_CODES` via an MRO walk --
+unregistered :class:`errors.SBTDDError` subclasses inherit the closest
+registered ancestor's code, falling through to exit 1 only when no
+ancestor is registered (MAGI Loop 2 Milestone B iter 1 Finding 1).
+``KeyboardInterrupt`` becomes exit 130 (sec.S.11.3). All other uncaught
+exceptions surface with traceback and exit 1 (bug report channel per
+sec.S.11.2).
 
 In Milestone B the dispatch table is wired with placeholder handlers that
 raise :class:`errors.ValidationError` for unimplemented subcommands. Milestone C+
