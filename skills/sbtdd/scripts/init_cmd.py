@@ -291,16 +291,26 @@ def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:
             shutil.copy2(src, target)
             created.append(target)
     except Exception:
-        # Best-effort rollback: remove every file we already copied.
-        # Suppress unlink errors so the original OSError reaches the
-        # caller intact (it carries the useful diagnostic).
-        for copied in created:
-            try:
-                copied.unlink(missing_ok=True)
-            except OSError:
-                pass
+        _rollback_partial_copy(created)
         raise
     return created
+
+
+def _rollback_partial_copy(copied: list[Path]) -> None:
+    """Remove every file in ``copied`` best-effort, swallowing OSError.
+
+    Helper for :func:`_phase5_relocate`: the rollback MUST NOT raise --
+    doing so would mask the original copy failure (which carries the
+    useful diagnostic like "disk full" or "permission denied"). Unlink
+    failures (e.g. another process has the file open on Windows) are
+    logged as absent because the caller will observe them on the next
+    ``/sbtdd init`` retry via the Phase 1 dependency check.
+    """
+    for path in copied:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _cleanup_staging(staging: Path) -> None:
