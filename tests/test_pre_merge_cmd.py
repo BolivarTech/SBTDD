@@ -807,3 +807,79 @@ def test_conditions_low_risk_classifies_structural_test_as_structural() -> None:
 
     assert pre_merge_cmd._conditions_low_risk(("add structural test for timeout path",)) is False
     assert pre_merge_cmd._conditions_low_risk(("fix docstring naming",)) is True
+
+
+# ---------------------------------------------------------------------------
+# MAGI Loop 2 iter 1 Finding 1: _apply_condition_via_mini_cycle requires
+# caller-provided staging callbacks so the three commits wrap actual diffs.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_condition_via_mini_cycle_invokes_stage_callbacks_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding 1 (red): helper must call stage_test -> stage_fix -> stage_refactor.
+
+    The pre-Finding-1 signature accepted no staging callbacks and emitted
+    three empty commits. The fixed contract requires the caller to pass
+    three ``Callable[[], None]`` kwargs; the helper must invoke each one
+    immediately before its matching ``commit_create`` call.
+    """
+    import pre_merge_cmd
+
+    calls: list[str] = []
+
+    def stage_test() -> None:
+        calls.append("stage_test")
+
+    def stage_fix() -> None:
+        calls.append("stage_fix")
+
+    def stage_refactor() -> None:
+        calls.append("stage_refactor")
+
+    def fake_commit_create(prefix: str, message: str, cwd: str | None = None) -> str:
+        calls.append(f"commit:{prefix}")
+        return "sha-" + prefix
+
+    monkeypatch.setattr(pre_merge_cmd, "commit_create", fake_commit_create)
+
+    result = pre_merge_cmd._apply_condition_via_mini_cycle(
+        condition="structural refactor",
+        root=Path("."),
+        iteration=1,
+        idx=1,
+        stage_test=stage_test,
+        stage_fix=stage_fix,
+        stage_refactor=stage_refactor,
+    )
+
+    assert calls == [
+        "stage_test",
+        "commit:test",
+        "stage_fix",
+        "commit:fix",
+        "stage_refactor",
+        "commit:refactor",
+    ]
+    assert result == ("sha-test", "sha-fix", "sha-refactor")
+
+
+def test_apply_condition_via_mini_cycle_raises_when_callbacks_missing() -> None:
+    """Finding 1 (red): missing callbacks must raise NotImplementedError.
+
+    Default ``stage_*=None`` forces callers to think about what is being
+    staged rather than silently emitting empty commits.
+    """
+    import pre_merge_cmd
+
+    with pytest.raises(NotImplementedError):
+        pre_merge_cmd._apply_condition_via_mini_cycle(
+            condition="cond",
+            root=Path("."),
+            iteration=1,
+            idx=1,
+            stage_test=None,
+            stage_fix=None,
+            stage_refactor=None,
+        )
