@@ -6,7 +6,7 @@
 
 Invoked as ``python run_sbtdd.py <subcommand> [args...]`` from the skill.
 Validates the subcommand name against :data:`models.VALID_SUBCOMMANDS`,
-then dispatches to the matching ``{subcommand}_cmd.run`` function.
+then dispatches to the matching ``{subcommand}_cmd.main`` function.
 
 Exit codes are derived from :data:`errors.EXIT_CODES` via an MRO walk --
 unregistered :class:`errors.SBTDDError` subclasses inherit the closest
@@ -16,9 +16,7 @@ ancestor is registered (MAGI Loop 2 Milestone B iter 1 Finding 1).
 exceptions surface with traceback and exit 1 (bug report channel per
 sec.S.11.2).
 
-In Milestone B the dispatch table is wired with placeholder handlers that
-raise :class:`errors.ValidationError` for unimplemented subcommands. Milestone C+
-replaces each entry with the real ``{subcommand}_cmd.run``.
+In Milestone C, all 9 entries point to the real subcomando implementations.
 """
 
 from __future__ import annotations
@@ -35,33 +33,14 @@ import pre_merge_cmd
 import resume_cmd
 import spec_cmd
 import status_cmd
-from errors import EXIT_CODES, SBTDDError, ValidationError
+from errors import EXIT_CODES, SBTDDError
 from models import VALID_SUBCOMMANDS
 
 #: Handler signature: consumes the subcommand's argv tail and returns an exit code.
 SubcommandHandler = Callable[[list[str]], int]
 
-
-def _default_handler_factory(name: str) -> SubcommandHandler:
-    """Return a placeholder handler that reports not-yet-implemented."""
-
-    def _handler(_argv: list[str]) -> int:
-        raise ValidationError(
-            f"subcommand '{name}' not yet implemented (Milestone C+ will wire the real handler)"
-        )
-
-    return _handler
-
-
-# MILESTONE-C-REPLACE-POINT: replace each default handler with the real
-# ``{subcommand}_cmd.run`` function as each module lands in Milestones C and
-# D. Grep for this marker to find the wiring site. The dispatch table's
-# shape (MutableMapping[str, SubcommandHandler]) is stable -- only the
-# values change. See Plan B "Deferred from MAGI Checkpoint 2" item 3 for
-# the planned Protocol-typing refactor.
-#: Subcommand name -> handler. Tests and Milestone C+ ``monkeypatch``/replace
-#: entries here to install real ``{subcommand}_cmd.run`` functions without
-#: touching the dispatcher.
+#: Subcommand name -> handler. All 9 entries point to the real
+#: ``{subcommand}_cmd.main`` functions as of Milestone C.
 SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "init": init_cmd.main,
     "spec": spec_cmd.main,

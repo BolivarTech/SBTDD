@@ -80,3 +80,18 @@ def test_dispatcher_routes_resume_to_resume_cmd():
     import run_sbtdd
 
     assert run_sbtdd.SUBCOMMAND_DISPATCH["resume"] is resume_cmd.main
+
+
+def test_default_handler_factory_is_removed():
+    import run_sbtdd
+
+    assert not hasattr(run_sbtdd, "_default_handler_factory")
+
+
+def test_replace_point_marker_is_removed():
+    import inspect
+
+    import run_sbtdd
+
+    src = inspect.getsource(run_sbtdd)
+    assert "MILESTONE-C-REPLACE-POINT" not in src

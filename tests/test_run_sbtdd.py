@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 
 def test_main_rejects_unknown_subcommand(capsys):
     from run_sbtdd import main
@@ -136,13 +134,3 @@ def test_dispatch_table_has_all_nine_subcommands():
     from run_sbtdd import SUBCOMMAND_DISPATCH
 
     assert set(SUBCOMMAND_DISPATCH.keys()) == set(VALID_SUBCOMMANDS)
-
-
-def test_all_default_handlers_raise_not_implemented_validation_error():
-    """Default handlers raise ValidationError pending Milestone C+ implementation."""
-    from errors import ValidationError
-    from run_sbtdd import _default_handler_factory
-
-    handler = _default_handler_factory("init")
-    with pytest.raises(ValidationError, match="not yet implemented"):
-        handler([])
