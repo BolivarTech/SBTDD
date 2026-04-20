@@ -1,0 +1,7 @@
+{
+  "timestamp": "2026-04-19T12:00:00Z",
+  "verdict": "GO_WITH_CAVEATS",
+  "degraded": false,
+  "conditions": ["Document the retry policy in module docstring"],
+  "findings": [{"severity": "INFO", "message": "Consider naming clarity"}]
+}
