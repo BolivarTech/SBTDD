@@ -342,3 +342,88 @@ def test_check_stack_toolchain_rejects_unknown_stack():
 
     with pytest.raises(ValidationError):
         check_stack_toolchain("haskell")
+
+
+def test_check_environment_aggregates_all_eight_items(tmp_path, monkeypatch):
+    """All eight fixed checks must run even if earlier ones fail (no short-circuit).
+
+    Eight = 7 sec.S.1.3 mandatory deps + claude CLI (Task 4a / MAGI ckpt2 iter 2
+    caspar WARNING). The term "7 deps" in CLAUDE.md External Dependencies remains
+    accurate for the sec.S.1.3 contract; claude CLI is a companion check surfaced
+    during pre-flight.
+    """
+    from dependency_check import check_environment
+
+    # Ensure git present (so git check passes); force tdd-guard missing.
+
+    def fake_which(name: str) -> str | None:
+        return None if name == "tdd-guard" else f"/usr/bin/{name}"
+
+    monkeypatch.setattr("shutil.which", fake_which)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "v1"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    # Plugins root empty -> superpowers + magi MISSING; but check_environment
+    # still continues through all items.
+    plugins_root = tmp_path / "plugins"
+    plugins_root.mkdir()
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+
+    rep = check_environment(
+        stack="python",
+        project_root=project_root,
+        plugins_root=plugins_root,
+    )
+    # Names collected confirm every stage ran.
+    names = {c.name for c in rep.checks}
+    # Non-toolchain names
+    assert "python" in names
+    assert "git" in names
+    assert "tdd-guard" in names
+    assert "tdd-guard data directory" in names
+    assert "claude CLI" in names
+    assert "superpowers plugin" in names
+    assert "magi plugin" in names
+    assert "git working tree" in names
+    # Toolchain names (3 for python stack)
+    assert "python (pytest)" in names
+    assert "python (ruff)" in names
+    assert "python (mypy)" in names
+
+
+def test_check_environment_returns_dependency_report(tmp_path, monkeypatch):
+    from dependency_check import DependencyReport, check_environment
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    rep = check_environment(
+        stack="python",
+        project_root=tmp_path,
+        plugins_root=tmp_path,
+    )
+    assert isinstance(rep, DependencyReport)
+    assert rep.ok() is False
+
+
+def test_check_environment_never_raises_on_failing_checks(tmp_path, monkeypatch):
+    """Even when every single check fails, check_environment returns a report."""
+    from dependency_check import check_environment
+
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    rep = check_environment(
+        stack="rust",
+        project_root=tmp_path,
+        plugins_root=tmp_path,
+    )
+    # 8 fixed checks (7 sec.S.1.3 deps + claude CLI from Task 4a) + 6 rust
+    # toolchain checks = 14 total; all failing.
+    assert len(rep.checks) >= 14
+    assert rep.ok() is False

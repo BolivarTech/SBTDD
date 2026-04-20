@@ -398,3 +398,46 @@ def check_working_tree(project_root: Path) -> DependencyCheck:
         detail=f".git/ not found at {project_root}",
         remediation="Run 'git init' in the project directory before re-running /sbtdd init",
     )
+
+
+def check_environment(
+    stack: str,
+    project_root: Path,
+    plugins_root: Path,
+) -> DependencyReport:
+    """Run all pre-flight checks aggregating failures (sec.S.5.1.1).
+
+    Eight fixed checks (7 sec.S.1.3 mandatory deps + ``claude CLI`` companion
+    from Task 4a) plus per-stack toolchain checks. Order matters only for the
+    reader; no check short-circuits the next. Every exception from an
+    individual check is contained -- any uncaught issue becomes a BROKEN entry
+    so the caller sees the complete picture.
+
+    Args:
+        stack: One of ``rust``, ``python``, ``cpp``.
+        project_root: Destination project directory (for .git/ check and
+            tdd-guard data dir).
+        plugins_root: Root under which Claude Code plugins are cached
+            (typically ``~/.claude/plugins``).
+
+    Returns:
+        DependencyReport whose ``.checks`` tuple contains every check.
+
+    Raises:
+        ValidationError: If ``stack`` is not one of the three supported values
+            (raised by :func:`check_stack_toolchain`, surfaces immediately --
+            this is a caller programming error, not an environment issue).
+    """
+    checks: list[DependencyCheck] = []
+    checks.append(check_python())
+    checks.append(check_git())
+    checks.append(check_tdd_guard_binary())
+    checks.append(check_tdd_guard_data_dir(project_root))
+    checks.append(check_claude_cli())
+    checks.append(check_superpowers(plugins_root))
+    checks.append(check_magi(plugins_root))
+    # check_stack_toolchain raises on unknown stack -- propagate; this is a
+    # programming error, not an environment issue.
+    checks.extend(check_stack_toolchain(stack))
+    checks.append(check_working_tree(project_root))
+    return DependencyReport(checks=tuple(checks))
