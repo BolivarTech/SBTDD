@@ -21,8 +21,8 @@ Run these after closing each Red, Green, or Refactor phase
 
 | Area | Rule |
 |------|------|
-| Author header | Every `.py` file starts with `# Author: {Author}`, `# Version: 1.0.0`, `# Date: YYYY-MM-DD` |
-| Error type | `{ErrorType}` is the project's root error type |
+| Author header | Every `.py` file starts with `# Author: {author}`, `# Version: 1.0.0`, `# Date: YYYY-MM-DD` |
+| Error type | `{error_type}` is the project's root error type |
 | Stack | `{stack}` |
 | Line length | 100 |
 

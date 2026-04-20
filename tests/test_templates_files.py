@@ -81,8 +81,14 @@ def test_claude_local_template_exists():
 
 
 def test_claude_local_template_placeholders_present():
+    """Placeholders are lowercase snake_case matching PluginConfig fields.
+
+    MAGI Loop 2 Milestone B iter 1 Finding 3 (caspar): convention aligned
+    with plugin.local.md.template so Milestone C init_cmd can build the
+    expansion context from ``dataclasses.asdict(config)`` directly.
+    """
     raw = (TEMPLATES_DIR / "CLAUDE.local.md.template").read_text(encoding="utf-8")
-    for placeholder in ("{Author}", "{ErrorType}", "{stack}"):
+    for placeholder in ("{author}", "{error_type}", "{stack}"):
         assert placeholder in raw, (
             f"placeholder {placeholder} missing from CLAUDE.local.md.template"
         )
@@ -95,14 +101,14 @@ def test_claude_local_template_expands_without_residual_placeholders():
     out = expand(
         raw,
         {
-            "Author": "Julian Bolivar",
-            "ErrorType": "MyErr",
+            "author": "Julian Bolivar",
+            "error_type": "MyErr",
             "stack": "python",
             "verification_commands": "pytest / ruff / mypy",
         },
     )
-    assert "{Author}" not in out
-    assert "{ErrorType}" not in out
+    assert "{author}" not in out
+    assert "{error_type}" not in out
     assert "{stack}" not in out
     assert "Julian Bolivar" in out
 
