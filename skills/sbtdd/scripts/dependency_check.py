@@ -380,13 +380,12 @@ def _check_binary(binary: str, display: str) -> DependencyCheck:
             remediation=f"Reinstall {binary}",
         )
     if result.returncode != 0:
+        first_stderr_line = (result.stderr or "").strip().splitlines()
+        suffix = f": {first_stderr_line[0]}" if first_stderr_line else ""
         return DependencyCheck(
             name=display,
             status="BROKEN",
-            detail=(
-                f"{label} --version returncode={result.returncode}: "
-                f"{(result.stderr or '').strip().splitlines()[0] if result.stderr else ''}"
-            ).strip(),
+            detail=f"{label} --version returncode={result.returncode}{suffix}",
             remediation=f"Reinstall {binary}",
         )
     combined = (result.stdout or result.stderr).strip()
