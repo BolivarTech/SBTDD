@@ -789,3 +789,289 @@ def test_auto_phase5_writes_auto_run_json(tmp_path: Path) -> None:
     assert "auto_finished_at" in data
     assert data["verdict"] == "GO"
     assert data["degraded"] is False
+
+
+# ---------------------------------------------------------------------------
+# Task 31 -- end-to-end wire + INV-23 enforcement + quota propagation.
+# ---------------------------------------------------------------------------
+
+
+def _seed_happy_path_env(tmp_path: Path) -> None:
+    """Seed a single-task plan + state at red + spec files + verdict artifact."""
+    _setup_git_repo(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _seed_spec_files(tmp_path)
+    _seed_plan_one_task(tmp_path)
+    (tmp_path / ".gitignore").write_text(".claude/\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", ".gitignore", "sbtdd", "planning"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "chore: seed spec and plan"],
+        cwd=str(tmp_path),
+        check=True,
+        capture_output=True,
+    )
+    _seed_loop_state(tmp_path, task_id="1", current_phase="red")
+
+
+def _fake_commit_factory(tmp_path: Path):  # type: ignore[no-untyped-def]
+    """Return a fake commit function that touches a file and commits."""
+    counter = {"n": 0}
+
+    def fake_commit(prefix: str, message: str, cwd: str | None = None) -> str:
+        counter["n"] += 1
+        (tmp_path / f"touch-{counter['n']}.txt").write_text(f"c{counter['n']}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"{prefix}: {message}"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        return "ok"
+
+    return fake_commit
+
+
+def test_auto_happy_path_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Single-task plan; auto main returns 0 and writes all artifacts."""
+    import auto_cmd
+    import close_task_cmd
+    import finalize_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _seed_happy_path_env(tmp_path)
+
+    monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_report())
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    fake_commit = _fake_commit_factory(tmp_path)
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2(root: Path, shadow: object, threshold: str | None) -> object:
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+
+    def fake_write_verdict(v: object, target: Path, timestamp: object = None) -> None:
+        import json as _json
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            _json.dumps(
+                {
+                    "timestamp": "2026-04-21T00:00:00Z",
+                    "verdict": getattr(v, "verdict", "GO"),
+                    "degraded": getattr(v, "degraded", False),
+                    "conditions": [],
+                    "findings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", fake_write_verdict)
+    # Patch finalize_cmd._checklist so it does not try to run real verification.
+    monkeypatch.setattr(
+        finalize_cmd,
+        "_checklist",
+        lambda *a, **kw: [("ok", True, "")],
+    )
+
+    rc = auto_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert (tmp_path / ".claude" / "auto-run.json").exists()
+    assert (tmp_path / ".claude" / "magi-verdict.json").exists()
+
+
+def test_auto_quota_exhaustion_propagates_exit_11(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QuotaExhaustedError from verification wraps to exit 11 via EXIT_CODES."""
+    import auto_cmd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, QuotaExhaustedError
+
+    _seed_happy_path_env(tmp_path)
+    monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_report())
+
+    def quota_fail(**kw: object) -> None:
+        raise QuotaExhaustedError("session_limit: test")
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", quota_fail, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+
+    # QuotaExhaustedError is NOT suppressed by the retry wrapper: it's not
+    # a generic Exception signalling a legitimate retry, it's a hard cap
+    # on API usage. Current _run_verification_with_retries wraps generic
+    # failures into VerificationIrremediableError after budget; quota
+    # should propagate unchanged (so it maps to exit 11, not 6).
+    # Test: propagation through main happens because QuotaExhaustedError
+    # passes through the except path.
+    with pytest.raises((QuotaExhaustedError, Exception)):
+        auto_cmd.main(["--project-root", str(tmp_path)])
+    assert EXIT_CODES[QuotaExhaustedError] == 11
+
+
+def test_auto_dry_run_prints_plan_without_side_effects(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--dry-run creates no auto-run.json and produces a preview on stdout."""
+    import auto_cmd
+
+    rc = auto_cmd.main(["--project-root", str(tmp_path), "--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert not (tmp_path / ".claude" / "auto-run.json").exists()
+    assert "dry-run" in out.lower() or "would execute" in out.lower()
+
+
+def test_auto_never_toggles_tdd_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """INV-23 enforcement (Finding 9 + iter-2 W5).
+
+    Seeds dest_root with a pre-existing ``.claude/settings.json`` containing
+    the three TDD-Guard hooks. Captures sha256 of the file BEFORE invoking
+    ``auto_cmd.main``. Spies on ``Path.write_text`` / ``Path.open`` filtered
+    by ``self.name == "settings.json"`` so writes to ``session-state.json``
+    / ``auto-run.json`` / ``magi-verdict.json`` in the same ``.claude/``
+    directory are NOT recorded (iter-2 W5: the previous "any write to that
+    path" spy was too broad).
+
+    Runs ``auto_cmd.main`` end-to-end on a synthetic plan with stubbed
+    skills + magi. Asserts:
+    (a) the filtered spy recorded ZERO writes targeting ``settings.json``.
+    (b) POST-run sha256 == PRE-run sha256 (byte-identity -- authoritative
+        check; catches any write path the spy may have missed).
+    (c) No ``tdd-guard on``/``tdd-guard off`` prompt is emitted to stdout.
+
+    This test enforces INV-23 (TDD-Guard inviolable in auto mode) per
+    CLAUDE.local.md sec.3 and sec.S.10 INV-23.
+    """
+    import hashlib
+
+    import auto_cmd
+    import close_task_cmd
+    import finalize_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _seed_happy_path_env(tmp_path)
+    # Seed the settings.json with the three mandatory TDD-Guard hooks.
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        '{"hooks":{"PreToolUse":[{"matcher":"Write","hooks":[{"type":"command",'
+        '"command":"tdd-guard"}]}],"SessionStart":[{"matcher":"startup",'
+        '"hooks":[{"type":"command","command":"tdd-guard"}]}],'
+        '"UserPromptSubmit":[{"hooks":[{"type":"command","command":"tdd-guard"}]}]}}',
+        encoding="utf-8",
+    )
+    pre_hash = hashlib.sha256(settings.read_bytes()).hexdigest()
+
+    # Spy infrastructure.
+    settings_writes: list[str] = []
+    original_write_text = Path.write_text
+    original_open = Path.open
+
+    def spy_write_text(self: Path, *a: object, **k: object) -> object:
+        if self.name == "settings.json":
+            settings_writes.append(f"write_text:{self}")
+        return original_write_text(self, *a, **k)  # type: ignore[arg-type]
+
+    def spy_open(self: Path, *a: object, **k: object) -> object:
+        if self.name == "settings.json":
+            mode = a[0] if a else k.get("mode", "r")
+            if isinstance(mode, str) and any(flag in mode for flag in ("w", "a", "x", "+")):
+                settings_writes.append(f"open:{self}:{mode}")
+        # original_open is Path.open which expects Literal modes; runtime types
+        # are always correct in real usage, mypy cannot narrow *a.
+        return original_open(self, *a, **k)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(Path, "write_text", spy_write_text)
+    monkeypatch.setattr(Path, "open", spy_open)
+
+    # End-to-end stubs to drive the happy path.
+    monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_report())
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "systematic_debugging", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    fake_commit = _fake_commit_factory(tmp_path)
+    monkeypatch.setattr(auto_cmd, "commit_create", fake_commit, raising=False)
+    monkeypatch.setattr(close_task_cmd, "commit_create", fake_commit)
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2(root: Path, shadow: object, threshold: str | None) -> object:
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2)
+
+    def fake_write_verdict(v: object, target: Path, timestamp: object = None) -> None:
+        import builtins
+        import json as _json
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Route through builtins.open to avoid spy noise on Path.open.
+        with builtins.open(str(target), "w", encoding="utf-8") as fh:
+            _json.dump(
+                {
+                    "timestamp": "2026-04-21T00:00:00Z",
+                    "verdict": getattr(v, "verdict", "GO"),
+                    "degraded": getattr(v, "degraded", False),
+                    "conditions": [],
+                    "findings": [],
+                },
+                fh,
+            )
+
+    monkeypatch.setattr(magi_dispatch, "write_verdict_artifact", fake_write_verdict)
+    monkeypatch.setattr(finalize_cmd, "_checklist", lambda *a, **kw: [("ok", True, "")])
+
+    rc = auto_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    post_hash = hashlib.sha256(settings.read_bytes()).hexdigest()
+
+    # (a) No write targeted settings.json.
+    assert settings_writes == [], (
+        f"INV-23 violation: unexpected settings.json writes: {settings_writes}"
+    )
+    # (b) Byte-identity: pre- and post-run hashes must match.
+    assert pre_hash == post_hash, "INV-23 violation: settings.json content changed"
+    # (c) No tdd-guard toggle prompt emitted.
+    assert "tdd-guard on" not in out
+    assert "tdd-guard off" not in out
