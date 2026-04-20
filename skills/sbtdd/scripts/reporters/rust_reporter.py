@@ -26,11 +26,41 @@ caspar, and balthasar).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from typing import Iterable
 
 import subprocess_utils
+from errors import ValidationError
+
+#: Name of the nextest experimental env var required for
+#: ``libtest-json-plus`` output (Plan D Task 7).
+_NEXTEST_ENV_VAR: str = "NEXTEST_EXPERIMENTAL_LIBTEST_JSON"
+
+
+def ensure_nextest_experimental_env() -> None:
+    """Raise :class:`ValidationError` unless the nextest env flag is set.
+
+    ``cargo nextest run --message-format libtest-json-plus`` requires
+    ``NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1``. Without this env var, nextest
+    silently emits a different (free-form) stream that ``tdd-guard-rust``
+    cannot parse, resulting in confusing "unknown format" downstream
+    errors. We fail loud up-front with an actionable remediation.
+
+    Raises:
+        ValidationError: Env var missing or set to something other than
+            the literal string ``"1"``.
+    """
+    value = os.environ.get(_NEXTEST_ENV_VAR)
+    if value != "1":
+        raise ValidationError(
+            f"{_NEXTEST_ENV_VAR} must be set to '1' for libtest-json-plus "
+            f"output. Current value: {value!r}. "
+            f"Export it before invoking `cargo nextest run` under SBTDD: "
+            f"`{_NEXTEST_ENV_VAR}=1 sbtdd close-phase`."
+        )
+
 
 _NEXTEST_CMD: tuple[str, ...] = (
     "cargo",
@@ -76,12 +106,19 @@ def run_pipeline(
         overall return code.
 
     Raises:
+        ValidationError: ``NEXTEST_EXPERIMENTAL_LIBTEST_JSON`` is missing
+            or not equal to ``"1"``. This check runs unconditionally as
+            the first side effect of the function (Plan D Task 7 -- no
+            ``check_env`` escape hatch; tests that need the happy path
+            set the env var via ``monkeypatch.setenv``). No subprocess is
+            spawned when the gate trips.
         subprocess.TimeoutExpired: If the combined pipeline exceeds
             ``timeout``. Both nextest and tdd-guard-rust are kill-tree'd
             (Windows taskkill-before-kill via
             :func:`subprocess_utils.kill_tree`) before the exception
             surfaces. The caller can wrap this as needed.
     """
+    ensure_nextest_experimental_env()
     nextest = subprocess.Popen(
         list(nextest_cmd),
         stdout=subprocess.PIPE,

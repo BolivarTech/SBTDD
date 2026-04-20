@@ -11,6 +11,18 @@ import subprocess
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _set_nextest_env(monkeypatch):
+    """Plan D Task 7: ``run_pipeline`` requires ``NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1``.
+
+    All tests in this module exercise the happy-path pipeline behavior,
+    so the env var gate is satisfied globally. The dedicated
+    ``test_rust_reporter_nextest_env.py`` module covers both branches of
+    the gate.
+    """
+    monkeypatch.setenv("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
+
+
 def test_run_pipeline_invokes_nextest_piped_to_tdd_guard_rust(monkeypatch):
     from reporters import rust_reporter
 
