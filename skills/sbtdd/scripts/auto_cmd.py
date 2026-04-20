@@ -157,13 +157,28 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
     attempts exceed ``retries`` the last failure is wrapped as
     :class:`VerificationIrremediableError` (exit 6).
 
+    Exception handling policy (MAGI Loop 2 iter 1 Finding 2):
+
+    - :class:`QuotaExhaustedError` is re-raised UNCHANGED without
+      consuming a retry or invoking ``/systematic-debugging``. Quota is
+      a hard cap on API usage, not a transient verification failure;
+      retrying cannot help and wrapping would remap exit 11 -> 6,
+      destroying the telemetry that ``/sbtdd resume`` consumes to
+      classify interruptions.
+    - Any other :class:`Exception` consumes one retry and triggers
+      ``/systematic-debugging``; budget exhaustion wraps as
+      :class:`VerificationIrremediableError`.
+
     Args:
         root: Project root directory passed as ``cwd`` to the skills.
         retries: Number of additional attempts allowed after the first
             failure. ``retries=0`` means a single attempt with no retry.
 
     Raises:
-        VerificationIrremediableError: When the retry budget is exhausted.
+        QuotaExhaustedError: Verification hit an Anthropic API cap (exit
+            11). Propagated unchanged; caller's dispatcher maps to 11.
+        VerificationIrremediableError: Non-quota verification failures
+            exhausted the retry budget (exit 6).
     """
     for attempt in range(retries + 1):
         try:
