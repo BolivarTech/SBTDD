@@ -981,6 +981,35 @@ def test_parse_receiving_review_handles_mixedcase_headers() -> None:
     assert rejected == ["cond 2"]
 
 
+def test_build_conditions_frontmatter_returns_valid_yaml_block_with_all_fields(
+    tmp_path: Path,
+) -> None:
+    """Finding 3 (Caspar): ``_build_conditions_frontmatter`` helper contract.
+
+    The helper is invoked once per ``_write_magi_conditions_file`` call
+    but its output is self-contained enough to justify a dedicated
+    test: it must return a well-formed YAML frontmatter block (opened
+    and closed by ``---`` on their own lines) carrying exactly four
+    keys (``generated_at``, ``magi_iteration``, ``pre_merge_head_sha``,
+    ``verdict``) in the order Option A declares, with a trailing blank
+    line so the caller can concatenate the body without extra plumbing.
+    """
+    import pre_merge_cmd
+
+    verdict = _make_verdict("STRONG_GO", conditions=())
+    fm = pre_merge_cmd._build_conditions_frontmatter(tmp_path, verdict, iteration=5)
+    lines = fm.splitlines()
+    assert lines[0] == "---"
+    assert lines[-1] == ""  # trailing blank enforced via ``---\n\n``
+    assert "---" in lines[1:-1]
+    # Keys in declared order.
+    body = [line for line in lines[1:-2] if line and line != "---"]
+    assert body[0].startswith("generated_at:")
+    assert body[1] == "magi_iteration: 5"
+    assert body[2].startswith("pre_merge_head_sha:")
+    assert body[3] == "verdict: STRONG_GO"
+
+
 def test_write_magi_conditions_file_emits_frontmatter_for_traceability(
     tmp_path: Path,
 ) -> None:
