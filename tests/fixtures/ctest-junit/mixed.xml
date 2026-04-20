@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="ParserSuite" tests="2" failures="1" errors="0">
+    <testcase classname="Trivial" name="Pass" time="0.01"/>
+    <testcase classname="Parser" name="Fails" time="0.03">
+      <failure message="expected &apos;{&apos; at line 3" type="AssertionFailure">
+        Stack trace:
+          parser.cpp:142
+      </failure>
+    </testcase>
+  </testsuite>
+</testsuites>
