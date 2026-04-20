@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "auto_started_at": "2026-04-19T10:00:00Z",
+  "auto_finished_at": "2026-04-19T10:20:00Z",
+  "status": "magi_gate_blocked",
+  "verdict": "GO_WITH_CAVEATS",
+  "degraded": false,
+  "accepted_conditions": 2,
+  "rejected_conditions": 1,
+  "tasks_completed": 3,
+  "error": "MAGI iter 1 produced 2 accepted condition(s); apply them via `sbtdd close-phase`."
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "auto_started_at": "2026-04-19T10:00:00Z",
+  "auto_finished_at": "2026-04-19T10:15:00Z",
+  "status": "success",
+  "verdict": "GO",
+  "degraded": false,
+  "accepted_conditions": 0,
+  "rejected_conditions": 0,
+  "tasks_completed": 3,
+  "error": null
+}
