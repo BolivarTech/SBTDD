@@ -51,6 +51,33 @@ from models import VERDICT_RANK, verdict_meets_threshold
 _ISO_8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 
 
+def _resolve_timestamp(timestamp: str | None) -> str:
+    """Return a validated ISO 8601 timestamp for artifact persistence.
+
+    Centralised so ``write_verdict_artifact`` stays readable and future
+    artifact writers (eg. ``auto-run.json``) can reuse the same contract
+    instead of re-implementing the None-default + validation logic.
+
+    Args:
+        timestamp: Caller-supplied ISO 8601 string, or ``None`` to stamp
+            the current UTC instant.
+
+    Returns:
+        The canonical ISO 8601 string that will be persisted.
+
+    Raises:
+        ValidationError: If ``timestamp`` is a non-None value that is not
+            a well-formed ISO 8601 string with timezone suffix.
+    """
+    if timestamp is None:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if not isinstance(timestamp, str) or not _ISO_8601_RE.match(timestamp):
+        raise ValidationError(
+            f"timestamp must be ISO 8601 with timezone (Z or +/-HH:MM), got {timestamp!r}"
+        )
+    return timestamp
+
+
 @dataclass(frozen=True)
 class MAGIVerdict:
     """Parsed result of a /magi:magi invocation (sec.S.5.6)."""
@@ -283,14 +310,7 @@ def write_verdict_artifact(
         OSError: If the atomic replace fails. No partial file, no
             ``*.tmp.<pid>`` leak.
     """
-    if timestamp is None:
-        stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    else:
-        if not isinstance(timestamp, str) or not _ISO_8601_RE.match(timestamp):
-            raise ValidationError(
-                f"timestamp must be ISO 8601 with timezone (Z or +/-HH:MM), got {timestamp!r}"
-            )
-        stamp = timestamp
+    stamp = _resolve_timestamp(timestamp)
     target.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "timestamp": stamp,
