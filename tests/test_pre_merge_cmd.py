@@ -883,3 +883,49 @@ def test_apply_condition_via_mini_cycle_raises_when_callbacks_missing() -> None:
             stage_fix=None,
             stage_refactor=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# MAGI Loop 2 iter 1 Finding 7: tighten receiving-code-review parser
+# against heading variations (##Accepted / ## ACCEPTED / mixed case).
+# ---------------------------------------------------------------------------
+
+
+def test_parse_receiving_review_handles_no_space_after_hashes() -> None:
+    """Finding 7: ``##Accepted`` (no space after ##) must be recognised."""
+    import pre_merge_cmd
+
+    stdout = "##Accepted\n- cond 1\n\n##Rejected\n- cond 2\n"
+    accepted, rejected = pre_merge_cmd._parse_receiving_review(_make_skill_result(stdout=stdout))
+    assert accepted == ["cond 1"]
+    assert rejected == ["cond 2"]
+
+
+def test_parse_receiving_review_handles_uppercase_headers() -> None:
+    """Finding 7: ``## ACCEPTED`` / ``## REJECTED`` upper-case recognised."""
+    import pre_merge_cmd
+
+    stdout = "## ACCEPTED\n- cond A\n\n## REJECTED\n- cond B\n"
+    accepted, rejected = pre_merge_cmd._parse_receiving_review(_make_skill_result(stdout=stdout))
+    assert accepted == ["cond A"]
+    assert rejected == ["cond B"]
+
+
+def test_parse_receiving_review_handles_multispace_after_hashes() -> None:
+    """Finding 7: ``##   Accepted`` (multi-space) must be recognised."""
+    import pre_merge_cmd
+
+    stdout = "##   Accepted\n- cond X\n"
+    accepted, rejected = pre_merge_cmd._parse_receiving_review(_make_skill_result(stdout=stdout))
+    assert accepted == ["cond X"]
+    assert rejected == []
+
+
+def test_parse_receiving_review_handles_mixedcase_headers() -> None:
+    """Finding 7: ``## aCCepteD`` / ``## reJecTed`` mixed-case recognised."""
+    import pre_merge_cmd
+
+    stdout = "## aCCepteD\n- cond 1\n\n## reJecTed\n- cond 2\n"
+    accepted, rejected = pre_merge_cmd._parse_receiving_review(_make_skill_result(stdout=stdout))
+    assert accepted == ["cond 1"]
+    assert rejected == ["cond 2"]
