@@ -413,6 +413,76 @@ def test_check_environment_returns_dependency_report(tmp_path, monkeypatch):
     assert rep.ok() is False
 
 
+def test_check_stack_toolchain_rust_clippy_subcommand_failure_detected(monkeypatch):
+    """cargo-clippy subcommand dispatch failure must surface as BROKEN.
+
+    MAGI Loop 2 Milestone B iter 1 Finding 4 (caspar, WARNING): ``cargo-clippy``
+    and ``cargo-fmt`` are shim binaries dispatched by the ``cargo`` driver. A
+    shim present on PATH does not guarantee the underlying component is
+    installed -- ``cargo clippy --version`` can still fail with non-zero exit
+    (eg. ``error: 'clippy' is not installed for the toolchain``). The Rust
+    toolchain check must therefore invoke ``cargo clippy --version`` (and
+    ``cargo fmt --version``) as subcommand calls, not just ``cargo-clippy
+    --version``, to catch this class of false-OK.
+
+    Here we simulate: every binary is present on PATH, but ``cargo clippy
+    --version`` returns non-zero. The check must report BROKEN for cargo-clippy.
+    """
+    from dependency_check import check_stack_toolchain
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    class OKProc:
+        returncode = 0
+        stdout = "v1"
+        stderr = ""
+
+    class FailProc:
+        returncode = 101
+        stdout = ""
+        stderr = "error: 'clippy' is not installed for the toolchain"
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        # ['cargo', 'clippy', '--version'] or ['cargo', 'fmt', '--version']
+        # must fail; every other command succeeds.
+        if cmd[:2] == ["cargo", "clippy"] or cmd[:2] == ["cargo", "fmt"]:
+            return FailProc()
+        return OKProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    checks = check_stack_toolchain("rust")
+    broken_clippy = [c for c in checks if "clippy" in c.name and c.status == "BROKEN"]
+    assert broken_clippy, (
+        f"expected BROKEN entry for cargo-clippy; got {[(c.name, c.status) for c in checks]}"
+    )
+    broken_fmt = [c for c in checks if "fmt" in c.name and c.status == "BROKEN"]
+    assert broken_fmt, (
+        f"expected BROKEN entry for cargo-fmt; got {[(c.name, c.status) for c in checks]}"
+    )
+
+
+def test_check_stack_toolchain_rust_clippy_subcommand_success(monkeypatch):
+    """When cargo clippy --version / cargo fmt --version succeed, status is OK."""
+    from dependency_check import check_stack_toolchain
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    class OKProc:
+        returncode = 0
+        stdout = "clippy 0.1.77\n"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: OKProc(),
+    )
+    checks = check_stack_toolchain("rust")
+    clippy = [c for c in checks if "clippy" in c.name]
+    fmt = [c for c in checks if "fmt" in c.name]
+    assert clippy and clippy[0].status == "OK"
+    assert fmt and fmt[0].status == "OK"
+
+
 def test_check_environment_never_raises_on_failing_checks(tmp_path, monkeypatch):
     """Even when every single check fails, check_environment returns a report."""
     from dependency_check import check_environment
