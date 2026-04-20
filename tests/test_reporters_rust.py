@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 
 import pytest
@@ -252,3 +253,33 @@ def test_run_pipeline_nextest_wait_timeout_also_kills_both_procs(monkeypatch):
     assert len(killed) == 2
     assert procs[0] in killed, "nextest (the hanging one) must be killed"
     assert procs[1] in killed, "reporter must also be killed defensively"
+
+
+@pytest.mark.skipif(
+    shutil.which("echo") is None or shutil.which("cat") is None,
+    reason="real echo/cat binaries required for pipe semantics integration",
+)
+def test_run_pipeline_real_pipe_semantics_with_echo_and_cat(capsys):
+    """Exercise the real proc1.stdout -> proc2.stdin wiring end-to-end.
+
+    MAGI Loop 2 Milestone B iter 1 Finding 5 (caspar, WARNING): every
+    other test in this module mocks subprocess.Popen, so the pipeline's
+    real pipe semantics are never exercised. Here we stand in ``echo``
+    for ``cargo nextest`` and ``cat`` for ``tdd-guard-rust``: the bytes
+    emitted by echo must travel through the pipe, be read by cat, and
+    surface on the parent process's stdout (run_pipeline writes
+    reporter.stdout to sys.stdout).
+    """
+    from reporters import rust_reporter
+
+    payload = "SBTDD-pipe-smoke"
+    rc = rust_reporter.run_pipeline(
+        nextest_cmd=["echo", payload],
+        reporter_cmd=["cat"],
+        timeout=30,
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert payload in captured.out, (
+        f"expected {payload!r} on stdout, got stdout={captured.out!r} stderr={captured.err!r}"
+    )
