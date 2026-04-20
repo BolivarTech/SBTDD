@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import argparse
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import magi_dispatch
+import subprocess_utils
 import superpowers_dispatch
 from config import PluginConfig, load_plugin_local
 from drift import detect_drift
@@ -215,6 +217,63 @@ def _safe_threshold_rank(threshold: str) -> int:
     return VERDICT_RANK[threshold]
 
 
+def _now_iso() -> str:
+    """Return UTC ISO 8601 timestamp with a ``Z`` suffix.
+
+    Finding 3 (Caspar): emitted in the conditions-file frontmatter as
+    ``generated_at``. Kept module-local to preserve the stdlib-only
+    import policy of ``pre_merge_cmd`` (no cross-module borrowing for a
+    one-line helper).
+    """
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _current_head_sha(root: Path) -> str:
+    """Return short SHA of ``HEAD`` at ``root`` or ``"unknown"``.
+
+    Uses ``git rev-parse --short HEAD`` with a 10s timeout. Non-zero
+    exit (e.g. ``root`` is not a git repo, or ``HEAD`` does not point to
+    a commit yet) returns the literal string ``"unknown"`` so the
+    frontmatter remains valid YAML even when traceability is
+    unavailable.
+    """
+    try:
+        r = subprocess_utils.run_with_timeout(
+            ["git", "rev-parse", "--short", "HEAD"], timeout=10, cwd=str(root)
+        )
+    except Exception:
+        return "unknown"
+    if r.returncode != 0:
+        return "unknown"
+    return r.stdout.strip() or "unknown"
+
+
+def _build_conditions_frontmatter(
+    root: Path, verdict: magi_dispatch.MAGIVerdict, iteration: int
+) -> str:
+    """Return a YAML frontmatter block documenting the pre-merge iteration.
+
+    Finding 3 (Caspar): since ``_write_magi_conditions_file`` overwrites
+    ``.claude/magi-conditions.md`` on every pre-merge invocation, each
+    write must carry enough provenance for a reader to reconstruct the
+    sequence post-hoc. The block emits four keys: ``generated_at`` (ISO
+    8601 with Z suffix), ``magi_iteration`` (1-indexed int matching
+    :func:`_loop2` iteration counter), ``pre_merge_head_sha`` (short
+    HEAD SHA or ``unknown``), and ``verdict`` (MAGI verdict string).
+
+    Returns the block including the leading ``---``, trailing ``---``,
+    and a blank line so the caller can concatenate it as the file prefix
+    without extra plumbing.
+    """
+    fm = "---\n"
+    fm += f"generated_at: {_now_iso()}\n"
+    fm += f"magi_iteration: {iteration}\n"
+    fm += f"pre_merge_head_sha: {_current_head_sha(root)}\n"
+    fm += f"verdict: {verdict.verdict}\n"
+    fm += "---\n\n"
+    return fm
+
+
 def _write_magi_conditions_file(
     conditions: list[str], root: Path, verdict: magi_dispatch.MAGIVerdict, iteration: int
 ) -> Path:
@@ -243,7 +302,14 @@ def _write_magi_conditions_file(
     """
     path = root / ".claude" / _MAGI_CONDITIONS_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = "# MAGI Loop 2 -- accepted conditions pending\n\n"
+    # Finding 3 (Caspar): each pre-merge invocation overwrites this
+    # file, losing prior iteration history. A YAML frontmatter block
+    # carrying iteration number, ISO 8601 timestamp, short HEAD SHA, and
+    # the MAGI verdict makes every overwrite self-describing -- a log
+    # reader (or a future append-mode audit sidecar) can reconstruct the
+    # sequence post-hoc without reparsing markdown content.
+    body = _build_conditions_frontmatter(root, verdict, iteration)
+    body += "# MAGI Loop 2 -- accepted conditions pending\n\n"
     body += (
         f"MAGI iteration {iteration} returned verdict `{verdict.verdict}` with "
         "the following conditions accepted by `/receiving-code-review`. They are "
