@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -165,6 +166,19 @@ def _conditions_low_risk(conditions: tuple[str, ...]) -> bool:
     return all(any(kw in c.lower() for kw in _LOW_RISK_KEYWORDS) for c in conditions)
 
 
+#: Regex matching ``## Accepted`` / ``## Rejected`` section headers.
+#:
+#: MAGI Loop 2 iter 1 Finding 7: the prior ``.startswith("## accepted")``
+#: check required a literal single space and broke on ``##Accepted`` /
+#: ``##  Accepted``. The regex accepts zero-or-more whitespace after the
+#: hashes and is case-insensitive, covering every emitted form of the
+#: superpowers skill header (hyphenated, spaced, upper-case, mixed).
+_SECTION_HEADER_RE: re.Pattern[str] = re.compile(
+    r"^##\s*(Accepted|Rejected)\b",
+    re.IGNORECASE,
+)
+
+
 def _parse_receiving_review(
     skill_result: superpowers_dispatch.SkillResult,
 ) -> tuple[list[str], list[str]]:
@@ -179,6 +193,14 @@ def _parse_receiving_review(
         ## Rejected
         - condition text 3 (rationale: ...)
 
+    Heading recognition (MAGI Loop 2 iter 1 Finding 7): the parser uses
+    :data:`_SECTION_HEADER_RE` to accept every observed spelling of the
+    section header -- ``##Accepted`` (no space), ``## Accepted``
+    (canonical), ``##   Accepted`` (multi-space), ``## ACCEPTED``
+    (upper-case), ``## aCCepteD`` (mixed case). All forms are mapped
+    onto the ``accepted`` / ``rejected`` section buckets regardless of
+    capitalisation.
+
     Returns ``([accepted_texts], [rejected_texts])`` with leading bullet /
     dash / whitespace stripped. Either section may be absent (empty list).
     A completely empty stdout returns ``([], [])`` -- the caller (``_loop2``)
@@ -191,11 +213,14 @@ def _parse_receiving_review(
     stdout = getattr(skill_result, "stdout", "") or ""
     for line in stdout.splitlines():
         s = line.strip()
-        if s.lower().startswith("## accepted"):
-            section = accepted
-            continue
-        if s.lower().startswith("## rejected"):
-            section = rejected
+        match = _SECTION_HEADER_RE.match(s)
+        if match is not None:
+            # Group(1) is "Accepted" / "Rejected" (case-preserved). Lower
+            # for dispatch so the section lookup is capitalisation-free.
+            if match.group(1).lower() == "accepted":
+                section = accepted
+            else:
+                section = rejected
             continue
         if section is not None and s.startswith(("-", "*")):
             section.append(s.lstrip("-* ").strip())
