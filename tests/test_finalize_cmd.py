@@ -82,3 +82,26 @@ def test_finalize_aborts_when_state_not_done(tmp_path: Path) -> None:
     _seed_magi_verdict(tmp_path)
     with pytest.raises(PreconditionError):
         finalize_cmd.main(["--project-root", str(tmp_path)])
+
+
+def test_finalize_aborts_when_verdict_predates_plan_approved_at(tmp_path: Path) -> None:
+    import finalize_cmd
+    from errors import PreconditionError
+
+    _seed_state(tmp_path, current_phase="done", plan_approved_at="2026-04-20T00:00:00Z")
+    _seed_magi_verdict(tmp_path, timestamp="2026-04-10T00:00:00Z")
+    with pytest.raises(PreconditionError):
+        finalize_cmd.main(["--project-root", str(tmp_path)])
+
+
+def test_finalize_accepts_verdict_after_plan_approved_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verdict timestamp later than plan_approved_at passes staleness check."""
+    import finalize_cmd
+
+    _seed_state(tmp_path, current_phase="done", plan_approved_at="2026-04-20T00:00:00Z")
+    _seed_magi_verdict(tmp_path, timestamp="2026-04-21T00:00:00Z")
+
+    # Staleness guard must not raise; checklist and downstream logic come in Task 24.
+    finalize_cmd._preflight(tmp_path)

@@ -7,11 +7,26 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from errors import PreconditionError
 from state_file import SessionState
 from state_file import load as load_state
+
+
+def _verdict_is_stale(state: SessionState, magi_verdict_path: Path) -> bool:
+    """Return True iff the verdict artifact predates ``plan_approved_at``.
+
+    Used by :func:`_preflight` to reject verdicts that belong to a
+    previous feature's ``pre-merge`` run (state file advanced, new plan
+    approved, but stale ``magi-verdict.json`` still on disk).
+    """
+    data = json.loads(magi_verdict_path.read_text(encoding="utf-8"))
+    ts = data.get("timestamp")
+    if not ts or not state.plan_approved_at:
+        return False
+    return bool(ts < state.plan_approved_at)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -50,6 +65,13 @@ def _preflight(root: Path) -> tuple[SessionState, Path]:
     if not magi_verdict.exists():
         raise PreconditionError(
             f"magi-verdict.json not found: {magi_verdict}. Run /sbtdd pre-merge first."
+        )
+    if _verdict_is_stale(state, magi_verdict):
+        data = json.loads(magi_verdict.read_text(encoding="utf-8"))
+        raise PreconditionError(
+            f"magi-verdict.json (timestamp={data.get('timestamp')}) predates "
+            f"plan_approved_at={state.plan_approved_at} -- belongs to previous "
+            f"feature. Run /sbtdd pre-merge for the current feature."
         )
     return state, magi_verdict
 
