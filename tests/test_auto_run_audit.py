@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import auto_cmd
+from errors import ValidationError
 
 
 def test_auto_run_audit_is_frozen_dataclass() -> None:
@@ -42,7 +43,7 @@ def test_auto_run_audit_from_dict_round_trip(tmp_path: Path) -> None:
 
 
 def test_auto_run_audit_rejects_unknown_status() -> None:
-    with pytest.raises(auto_cmd.ValidationError) as exc:
+    with pytest.raises(ValidationError) as exc:
         auto_cmd.AutoRunAudit(
             schema_version=1,
             auto_started_at="2026-04-19T10:00:00Z",
@@ -71,7 +72,7 @@ def test_auto_run_audit_rejects_negative_counts() -> None:
         tasks_completed=0,
         error=None,
     )
-    with pytest.raises(auto_cmd.ValidationError):
+    with pytest.raises(ValidationError):
         audit.validate_schema()
 
 
@@ -109,7 +110,7 @@ def test_write_auto_run_audit_validates_before_write(tmp_path: Path) -> None:
         tasks_completed=0,
         error=None,
     )
-    with pytest.raises(auto_cmd.ValidationError):
+    with pytest.raises(ValidationError):
         auto_cmd._write_auto_run_audit(target, bad)
     assert not target.exists()
 
@@ -121,8 +122,9 @@ def test_write_auto_run_audit_rejects_dict(tmp_path: Path) -> None:
     # silently persist an unvalidated payload. Pre-1.0 the removal is
     # safe; post-1.0 this test guards against regression.
     target = tmp_path / ".claude" / "auto-run.json"
-    with pytest.raises((TypeError, auto_cmd.ValidationError)):
+    with pytest.raises((TypeError, ValidationError)):
         auto_cmd._write_auto_run_audit(
-            target, {"auto_started_at": "2026-04-19T10:00:00Z"}  # type: ignore[arg-type]
+            target,
+            {"auto_started_at": "2026-04-19T10:00:00Z"},  # type: ignore[arg-type]
         )
     assert not target.exists()

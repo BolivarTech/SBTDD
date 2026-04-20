@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,12 +52,130 @@ from errors import (
     MAGIGateError,
     PreconditionError,
     QuotaExhaustedError,
+    ValidationError,
     VerificationIrremediableError,
 )
 from models import COMMIT_PREFIX_MAP
 from state_file import SessionState
 from state_file import load as load_state
 from state_file import save as save_state
+
+
+#: Allowed values for AutoRunAudit.status. Extending this set is a schema
+#: change: bump ``_AUTO_RUN_SCHEMA_VERSION`` below and update tests.
+_ALLOWED_AUTO_RUN_STATUSES: tuple[str, ...] = (
+    "success",
+    "magi_gate_blocked",
+    "verification_irremediable",
+    "loop1_divergent",
+    "quota_exhausted",
+    "checklist_failed",
+    "drift_detected",
+    "precondition_failed",
+)
+
+#: Current schema version for ``.claude/auto-run.json``. Bump when a
+#: backwards-incompatible change lands (field removed, type changed,
+#: status value removed). Additive changes (new status, new optional
+#: field) keep the version.
+_AUTO_RUN_SCHEMA_VERSION: int = 1
+
+
+@dataclass(frozen=True)
+class AutoRunAudit:
+    """Frozen schema for ``.claude/auto-run.json`` (INV-26 audit trail).
+
+    Formalises the opportunistic dict writes used in Milestone C. Every
+    field is required; ``to_dict`` is symmetric with ``from_dict`` and
+    the shape is asserted by ``validate_schema``. Bump
+    ``schema_version`` via ``_AUTO_RUN_SCHEMA_VERSION`` for
+    backwards-incompatible changes.
+
+    Attributes:
+        schema_version: Integer version (1 for v0.1 of the plugin).
+        auto_started_at: ISO 8601 timestamp of ``main`` entry.
+        auto_finished_at: ISO 8601 timestamp of ``main`` exit, or
+            ``None`` when the run is still in progress / aborted mid-way.
+        status: One of :data:`_ALLOWED_AUTO_RUN_STATUSES`.
+        verdict: The gating MAGI verdict string (``GO`` / ``GO_WITH_CAVEATS``
+            / ``STRONG_NO_GO`` / ...), or ``None`` if the run aborted
+            before Phase 3 completed.
+        degraded: ``True`` when MAGI returned degraded consensus; ``None``
+            if no verdict was obtained.
+        accepted_conditions: Count of MAGI conditions accepted by
+            ``/receiving-code-review`` across all Loop 2 iterations.
+        rejected_conditions: Count of MAGI conditions rejected by
+            ``/receiving-code-review``.
+        tasks_completed: Number of plan tasks that reached
+            ``current_phase == 'done'`` during this auto run.
+        error: Free-form error message when ``status != 'success'``,
+            ``None`` on success.
+    """
+
+    schema_version: int
+    auto_started_at: str
+    auto_finished_at: str | None
+    status: str
+    verdict: str | None
+    degraded: bool | None
+    accepted_conditions: int
+    rejected_conditions: int
+    tasks_completed: int
+    error: str | None
+
+    def validate_schema(self) -> None:
+        """Raise :class:`ValidationError` on any schema inconsistency."""
+        if self.schema_version != _AUTO_RUN_SCHEMA_VERSION:
+            raise ValidationError(
+                f"AutoRunAudit.schema_version={self.schema_version} != "
+                f"expected {_AUTO_RUN_SCHEMA_VERSION}"
+            )
+        if self.status not in _ALLOWED_AUTO_RUN_STATUSES:
+            raise ValidationError(
+                f"AutoRunAudit.status={self.status!r} not in {sorted(_ALLOWED_AUTO_RUN_STATUSES)}"
+            )
+        if self.accepted_conditions < 0:
+            raise ValidationError(
+                f"AutoRunAudit.accepted_conditions={self.accepted_conditions} < 0"
+            )
+        if self.rejected_conditions < 0:
+            raise ValidationError(
+                f"AutoRunAudit.rejected_conditions={self.rejected_conditions} < 0"
+            )
+        if self.tasks_completed < 0:
+            raise ValidationError(f"AutoRunAudit.tasks_completed={self.tasks_completed} < 0")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable dict representation."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> AutoRunAudit:
+        """Build an :class:`AutoRunAudit` from a parsed JSON dict."""
+
+        def _coerce_int(value: object, default: int) -> int:
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, (int, str)):
+                return int(value)
+            raise TypeError(f"cannot coerce {type(value).__name__} to int")
+
+        return cls(
+            schema_version=_coerce_int(data.get("schema_version"), _AUTO_RUN_SCHEMA_VERSION),
+            auto_started_at=str(data["auto_started_at"]),
+            auto_finished_at=(
+                str(data["auto_finished_at"]) if data.get("auto_finished_at") is not None else None
+            ),
+            status=str(data.get("status", "success")),
+            verdict=(str(data["verdict"]) if data.get("verdict") is not None else None),
+            degraded=(bool(data["degraded"]) if data.get("degraded") is not None else None),
+            accepted_conditions=_coerce_int(data.get("accepted_conditions"), 0),
+            rejected_conditions=_coerce_int(data.get("rejected_conditions"), 0),
+            tasks_completed=_coerce_int(data.get("tasks_completed"), 0),
+            error=(str(data["error"]) if data.get("error") is not None else None),
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -266,6 +385,19 @@ def _phase2_task_loop(
     if dr is not None:
         raise DriftError(f"drift at auto Phase 2: {dr.reason}")
     current = state
+    auto_run = root / ".claude" / "auto-run.json"
+    # Recover the auto_started_at timestamp from the in-progress audit
+    # written by main() BEFORE this loop. If absent (test harnesses that
+    # skip main's initialisation), fall back to the current timestamp so
+    # incremental writes remain schema-valid.
+    started_at = _now_iso()
+    if auto_run.exists():
+        try:
+            prev = json.loads(auto_run.read_text("utf-8"))
+            started_at = str(prev.get("auto_started_at", started_at))
+        except (json.JSONDecodeError, OSError):
+            pass
+    tasks_completed = 0
     while current.current_task_id is not None:
         phase_idx = (
             _PHASE_ORDER.index(current.current_phase)
@@ -296,6 +428,25 @@ def _phase2_task_loop(
                 # of duplicating the entire flip / commit chore / advance
                 # sequence.
                 current = close_task_cmd.mark_and_advance(current, root)
+                tasks_completed += 1
+                # Plan D iter 2 Caspar: incremental audit write after
+                # each task close so a mid-loop raise preserves the
+                # partial tasks_completed count on disk.
+                _write_auto_run_audit(
+                    auto_run,
+                    AutoRunAudit(
+                        schema_version=_AUTO_RUN_SCHEMA_VERSION,
+                        auto_started_at=started_at,
+                        auto_finished_at=None,
+                        status="success",
+                        verdict=None,
+                        degraded=None,
+                        accepted_conditions=0,
+                        rejected_conditions=0,
+                        tasks_completed=tasks_completed,
+                        error=None,
+                    ),
+                )
         # After refactor cascade, outer loop re-evaluates against updated
         # current.current_task_id (None -> terminate).
     return current
@@ -410,39 +561,56 @@ def _phase5_report(root: Path, started: str, verdict: object) -> None:
             happy path).
     """
     auto_run = root / ".claude" / "auto-run.json"
-    auto_run.parent.mkdir(parents=True, exist_ok=True)
     finished = _now_iso()
-    data = {
-        "auto_started_at": started,
-        "auto_finished_at": finished,
-        "verdict": getattr(verdict, "verdict", None),
-        "degraded": getattr(verdict, "degraded", None),
-    }
-    auto_run.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tasks_completed = _read_audit_tasks_completed(auto_run)
+    verdict_str = getattr(verdict, "verdict", None)
+    degraded_value = getattr(verdict, "degraded", None)
+    audit = AutoRunAudit(
+        schema_version=_AUTO_RUN_SCHEMA_VERSION,
+        auto_started_at=started,
+        auto_finished_at=finished,
+        status="success",
+        verdict=verdict_str if verdict_str is None else str(verdict_str),
+        degraded=None if degraded_value is None else bool(degraded_value),
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=tasks_completed,
+        error=None,
+    )
+    _write_auto_run_audit(auto_run, audit)
     sys.stdout.write(
         "/sbtdd auto: DONE.\n"
         f"Started:  {started}\n"
         f"Finished: {finished}\n"
-        f"MAGI:     {data['verdict']} (degraded={data['degraded']})\n"
+        f"MAGI:     {audit.verdict} (degraded={audit.degraded})\n"
         "Branch status: clean, ready for merge/PR.\n"
     )
 
 
-def _write_auto_run_audit(path: Path, payload: dict[str, object]) -> None:
-    """Write ``.claude/auto-run.json`` with a JSON-serialised payload.
+def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
+    """Write ``.claude/auto-run.json`` with ``payload`` validated.
 
-    Centralises the parent-dir creation, indentation, and encoding so
-    the main entry point stays linear. All audit-trail mutations go
-    through here to guarantee a single byte-identical layout across
-    successful runs, ``MAGIGateError`` gate blocks, and any future
-    failure modes that need to leave a breadcrumb.
+    Requires an :class:`AutoRunAudit` instance; the dict back-compat
+    branch was removed in Plan D iter 2 (Caspar WARNING) because it
+    silently bypassed schema validation. Since the plugin is pre-1.0
+    and all callers live inside this repo, the stricter signature is
+    safe. Task 17 grep-checks for regressions.
 
     Args:
         path: Absolute path to ``auto-run.json`` (parent is created).
-        payload: Mapping serialised via :func:`json.dumps` with indent=2.
+        payload: :class:`AutoRunAudit` instance, validated before write.
+
+    Raises:
+        TypeError: ``payload`` is not an :class:`AutoRunAudit` instance.
+        ValidationError: ``payload.validate_schema`` failed.
     """
+    if not isinstance(payload, AutoRunAudit):
+        raise TypeError(
+            f"_write_auto_run_audit requires AutoRunAudit, got {type(payload).__name__}"
+        )
+    payload.validate_schema()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(payload.to_dict(), indent=2), encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -459,7 +627,21 @@ def main(argv: list[str] | None = None) -> int:
     state, cfg = _phase1_preflight(ns)
     started = _now_iso()
     auto_run = ns.project_root / ".claude" / "auto-run.json"
-    _write_auto_run_audit(auto_run, {"auto_started_at": started})
+    _write_auto_run_audit(
+        auto_run,
+        AutoRunAudit(
+            schema_version=_AUTO_RUN_SCHEMA_VERSION,
+            auto_started_at=started,
+            auto_finished_at=None,
+            status="success",
+            verdict=None,
+            degraded=None,
+            accepted_conditions=0,
+            rejected_conditions=0,
+            tasks_completed=0,
+            error=None,
+        ),
+    )
     if state.current_phase != "done":
         state = _phase2_task_loop(ns, state, cfg)
     try:
@@ -471,19 +653,43 @@ def main(argv: list[str] | None = None) -> int:
         # STRONG_NO_GO (exit 8 requiring replan). Both map to exit 8 via
         # EXIT_CODES[MAGIGateError]; the status / error fields in
         # auto-run.json are the only signal that survives the exception.
+        tasks_completed = _read_audit_tasks_completed(auto_run)
         _write_auto_run_audit(
             auto_run,
-            {
-                "auto_started_at": started,
-                "auto_finished_at": _now_iso(),
-                "status": "magi_gate_blocked",
-                "error": str(exc),
-            },
+            AutoRunAudit(
+                schema_version=_AUTO_RUN_SCHEMA_VERSION,
+                auto_started_at=started,
+                auto_finished_at=_now_iso(),
+                status="magi_gate_blocked",
+                verdict=getattr(exc, "verdict", None),
+                degraded=None,
+                accepted_conditions=len(getattr(exc, "accepted_conditions", ()) or ()),
+                rejected_conditions=len(getattr(exc, "rejected_conditions", ()) or ()),
+                tasks_completed=tasks_completed,
+                error=str(exc),
+            ),
         )
         raise
     _phase4_checklist(ns.project_root, state, cfg)
     _phase5_report(ns.project_root, started, verdict)
     return 0
+
+
+def _read_audit_tasks_completed(path: Path) -> int:
+    """Return the last-persisted ``tasks_completed`` from auto-run.json, or 0.
+
+    Used by the MAGIGateError handler to recover the raise-safe partial
+    count that ``_phase2_task_loop`` writes after each task close (Plan D
+    iter 2 Caspar -- raise-safe audit). Missing or malformed file returns
+    0 (degraded but not corrupted).
+    """
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text("utf-8"))
+        return int(data.get("tasks_completed", 0))
+    except (json.JSONDecodeError, ValueError, OSError):
+        return 0
 
 
 run = main
