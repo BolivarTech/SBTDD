@@ -76,6 +76,53 @@ def test_plugin_local_template_loads_as_plugin_config():
         tmp.unlink()
 
 
+def test_claude_local_template_exists():
+    assert (TEMPLATES_DIR / "CLAUDE.local.md.template").exists()
+
+
+def test_claude_local_template_placeholders_present():
+    raw = (TEMPLATES_DIR / "CLAUDE.local.md.template").read_text(encoding="utf-8")
+    for placeholder in ("{Author}", "{ErrorType}", "{stack}"):
+        assert placeholder in raw, (
+            f"placeholder {placeholder} missing from CLAUDE.local.md.template"
+        )
+
+
+def test_claude_local_template_expands_without_residual_placeholders():
+    from templates import expand
+
+    raw = (TEMPLATES_DIR / "CLAUDE.local.md.template").read_text(encoding="utf-8")
+    out = expand(
+        raw,
+        {
+            "Author": "Julian Bolivar",
+            "ErrorType": "MyErr",
+            "stack": "python",
+            "verification_commands": "pytest / ruff / mypy",
+        },
+    )
+    assert "{Author}" not in out
+    assert "{ErrorType}" not in out
+    assert "{stack}" not in out
+    assert "Julian Bolivar" in out
+
+
+def test_claude_local_template_contains_no_uppercase_markers():
+    """INV-27 spec placeholder rejection applies to templates as well."""
+    import re
+
+    raw = (TEMPLATES_DIR / "CLAUDE.local.md.template").read_text(encoding="utf-8")
+    assert not re.search(r"\bTODO\b", raw)
+    assert not re.search(r"\bTODOS\b", raw)
+    assert not re.search(r"\bTBD\b", raw)
+
+
+def test_claude_local_template_references_verification_section():
+    raw = (TEMPLATES_DIR / "CLAUDE.local.md.template").read_text(encoding="utf-8")
+    # Must reference the verification commands section (sec.0.1 in destination).
+    assert "0.1" in raw or "verification" in raw.lower()
+
+
 def test_plugin_local_template_has_all_required_keys():
     raw = (TEMPLATES_DIR / "plugin.local.md.template").read_text(encoding="utf-8")
     required = [

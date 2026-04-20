@@ -1,0 +1,83 @@
+# CLAUDE.local.md — Project rules (stack: {stack})
+
+> Local project rules. Not tracked by git. Maintained by the developer; the
+> plugin reads and enforces but never edits this file.
+> Global standards in `~/.claude/CLAUDE.md` always take precedence (INV-0).
+
+---
+
+## 0. Mandatory Code Standards
+
+Read `~/.claude/CLAUDE.md` before writing any code. It is authoritative.
+
+### 0.1 Verification after each TDD phase
+
+Run these after closing each Red, Green, or Refactor phase
+({stack} stack):
+
+{verification_commands}
+
+### 0.2 Project-specific rules
+
+| Area | Rule |
+|------|------|
+| Author header | Every `.py` file starts with `# Author: {Author}`, `# Version: 1.0.0`, `# Date: YYYY-MM-DD` |
+| Error type | `{ErrorType}` is the project's root error type |
+| Stack | `{stack}` |
+| Line length | 100 |
+
+---
+
+## 1. Methodology
+
+SBTDD (Spec + Behavior + Test Driven Development). Read the plugin spec at
+`sbtdd/sbtdd-workflow-plugin-spec.md` for the full flow. Key docs:
+
+- `sbtdd/spec-behavior-base.md` — input to `/brainstorming`
+- `sbtdd/spec-behavior.md` — output of `/brainstorming`, input to `/writing-plans`
+- `planning/claude-plan-tdd-org.md` — raw plan (pre-MAGI)
+- `planning/claude-plan-tdd.md` — approved plan (post-MAGI Checkpoint 2)
+
+`/sbtdd init` has already bootstrapped the project. Use `/sbtdd spec` to
+start a feature, then `/sbtdd close-phase` after each Red/Green/Refactor,
+`/sbtdd close-task` at Refactor close, `/sbtdd pre-merge` when all tasks are
+complete, and `/sbtdd finalize` to wrap the branch.
+
+---
+
+## 2. Artefactos y fuentes de estado
+
+Three runtime state sources (sec.M.2 of the spec):
+
+1. `.claude/session-state.json` — canon del presente (TDD phase + task).
+2. Git commits — canon del pasado.
+3. `planning/claude-plan-tdd.md` — canon del futuro (checkboxes).
+
+On drift the plugin aborts with exit 3 (sec.S.9.2). Do not reconcile
+silently.
+
+---
+
+## 3. Ciclo TDD
+
+Red -> Green -> Refactor, enforced by TDD-Guard hooks (installed by
+`/sbtdd init`) plus `/test-driven-development`. Close phases via
+`/sbtdd close-phase` which runs verification (sec.0.1) then creates an
+atomic commit with the sec.M.5 prefix.
+
+---
+
+## 5. Git
+
+Follow `~/.claude/CLAUDE.md` Git section. Commits use the prefix map:
+
+| Context | Prefix |
+|---------|--------|
+| Red close | `test:` |
+| Green close | `feat:` or `fix:` |
+| Refactor close | `refactor:` |
+| Task close | `chore:` |
+
+Under an approved plan (`plan_approved_at` non-null in the state file) the
+plugin commits autonomously for the four authorised categories. Outside
+that window, commits require explicit user permission.
