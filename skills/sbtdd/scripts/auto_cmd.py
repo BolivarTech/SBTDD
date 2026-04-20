@@ -35,6 +35,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from config import PluginConfig, load_plugin_local
+from dependency_check import check_environment
+from errors import DependencyError, PreconditionError
+from state_file import SessionState
+from state_file import load as load_state
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """Return the argparse parser for ``sbtdd auto``."""
@@ -69,6 +75,48 @@ def _print_dry_run_preview(ns: argparse.Namespace) -> None:
     )
 
 
+def _phase1_preflight(ns: argparse.Namespace) -> tuple[SessionState, PluginConfig]:
+    """Run Phase 1 -- pre-flight dependency + state + plan_approved_at check.
+
+    Precondition order (deterministic for the user):
+
+    1. ``.claude/session-state.json`` exists (``PreconditionError`` otherwise).
+    2. ``state.plan_approved_at`` is not ``None`` -- auto requires an
+       approved plan so the "Excepcion bajo plan aprobado" from template
+       sec.5 is in effect.
+    3. All dependency checks green (Rust/Python/C++ toolchain, git,
+       tdd-guard, superpowers + magi plugins). Failures are reported in
+       full -- no short-circuit (INV-12 / sec.S.5.1.1).
+
+    Args:
+        ns: Parsed argparse namespace (provides ``project_root`` +
+            ``plugins_root``).
+
+    Returns:
+        A tuple ``(SessionState, PluginConfig)`` consumed by the
+        downstream phases.
+
+    Raises:
+        PreconditionError: Missing state file or ``plan_approved_at is None``.
+        DependencyError: Any pre-flight check reported non-OK status.
+    """
+    root: Path = ns.project_root
+    state_path = root / ".claude" / "session-state.json"
+    if not state_path.exists():
+        raise PreconditionError(f"state file not found: {state_path}")
+    state = load_state(state_path)
+    if state.plan_approved_at is None:
+        raise PreconditionError(
+            "plan_approved_at is null - run /sbtdd spec to approve a plan before /sbtdd auto"
+        )
+    cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
+    report = check_environment(cfg.stack, root, ns.plugins_root)
+    if not report.ok():
+        sys.stderr.write(report.format_report() + "\n")
+        raise DependencyError(f"{len(report.failed())} pre-flight checks failed")
+    return state, cfg
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd auto (shoot-and-forget full-cycle)."""
     parser = _build_parser()
@@ -80,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     if ns.dry_run:
         _print_dry_run_preview(ns)
         return 0
+    _phase1_preflight(ns)
     return 0
 
 
