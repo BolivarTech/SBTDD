@@ -293,3 +293,56 @@ def test_finalize_aborts_on_plan_with_open_tasks(
     monkeypatch.setattr(superpowers_dispatch, "finishing_a_development_branch", lambda **kw: None)
     with pytest.raises(ChecklistError):
         finalize_cmd.main(["--project-root", str(tmp_path)])
+
+
+# ---------------------------------------------------------------------------
+# Task 25 -- invoke /finishing-a-development-branch on success.
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_invokes_finishing_skill_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy path: /finishing-a-development-branch must be invoked once."""
+    import finalize_cmd
+    import superpowers_dispatch
+
+    _seed_clean_env(tmp_path, verdict="GO", degraded=False)
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", lambda **kw: None)
+
+    calls = {"finishing": 0}
+
+    def fake_finishing(**kw: object) -> object:
+        calls["finishing"] += 1
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "finishing_a_development_branch", fake_finishing)
+
+    rc = finalize_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+    assert calls["finishing"] == 1
+
+
+def test_finalize_does_not_invoke_finishing_on_checklist_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dirty tree fails checklist; /finishing-a-development-branch NOT called."""
+    import finalize_cmd
+    import superpowers_dispatch
+    from errors import ChecklistError
+
+    _seed_clean_env(tmp_path, verdict="GO", degraded=False)
+    (tmp_path / "stray.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(superpowers_dispatch, "verification_before_completion", lambda **kw: None)
+
+    calls = {"finishing": 0}
+
+    def fake_finishing(**kw: object) -> object:
+        calls["finishing"] += 1
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "finishing_a_development_branch", fake_finishing)
+
+    with pytest.raises(ChecklistError):
+        finalize_cmd.main(["--project-root", str(tmp_path)])
+    assert calls["finishing"] == 0

@@ -172,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, detail in failures:
             sys.stderr.write(f"  [FAIL] {name}: {detail}\n")
         raise ChecklistError(f"{len(failures)} checklist items failed")
+    superpowers_dispatch.finishing_a_development_branch(cwd=str(root))
     return 0
 
 
