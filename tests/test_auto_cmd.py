@@ -979,6 +979,73 @@ def test_auto_quota_exhaustion_propagates_exit_11(
     assert EXIT_CODES[QuotaExhaustedError] == 11
 
 
+def test_auto_pre_merge_conditions_pending_propagates_exit_8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 2 (Caspar): MAGIGateError from Phase 3 propagates to exit 8.
+
+    MAGI Loop 2 iter 3 redesign: ``pre_merge_cmd._loop2`` raises
+    :class:`MAGIGateError` ("conditions pending") when
+    ``/receiving-code-review`` accepts MAGI caveats that need
+    ``close-phase`` work. ``auto_cmd.main`` must propagate that exception
+    unchanged so the run_sbtdd dispatcher maps it to exit 8 via
+    ``EXIT_CODES[MAGIGateError]``, and the ``.claude/auto-run.json``
+    audit trail must record the blocking status with the MAGIGateError
+    message so operators can distinguish a "conditions pending" abort
+    from a STRONG_NO_GO abort post-hoc.
+    """
+    import auto_cmd
+    import pre_merge_cmd
+    import superpowers_dispatch
+    from errors import EXIT_CODES, MAGIGateError
+    from run_sbtdd import _exit_code_for
+
+    _seed_happy_path_env(tmp_path)
+    # Jump straight to Phase 3 by declaring the plan already done.
+    _seed_state(tmp_path, current_phase="done")
+
+    monkeypatch.setattr(auto_cmd, "check_environment", lambda *a, **k: _ok_report())
+    monkeypatch.setattr(
+        superpowers_dispatch, "test_driven_development", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "verification_before_completion", lambda **kw: None, raising=False
+    )
+    monkeypatch.setattr(auto_cmd, "detect_drift", lambda *a, **kw: None)
+    monkeypatch.setattr(pre_merge_cmd, "_loop1", lambda root: None)
+
+    def fake_loop2_blocks(root: Path, shadow: object, threshold: str | None) -> object:
+        raise MAGIGateError(
+            "MAGI iter 1 produced 1 accepted condition(s); apply them via "
+            "`sbtdd close-phase` and re-run `sbtdd pre-merge`."
+        )
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2", fake_loop2_blocks)
+
+    raised: MAGIGateError | None = None
+    try:
+        auto_cmd.main(["--project-root", str(tmp_path)])
+    except MAGIGateError as exc:
+        raised = exc
+    assert raised is not None, "auto_cmd.main must propagate MAGIGateError"
+    assert _exit_code_for(raised) == 8
+    assert EXIT_CODES[MAGIGateError] == 8
+
+    # Audit trail: .claude/auto-run.json must record the gate block so
+    # operators can distinguish "conditions pending" from STRONG_NO_GO.
+    import json as _json
+
+    audit = tmp_path / ".claude" / "auto-run.json"
+    assert audit.exists(), "auto-run.json audit trail must be written even on MAGIGateError"
+    data = _json.loads(audit.read_text(encoding="utf-8"))
+    assert data.get("status") == "magi_gate_blocked", (
+        f"auto-run.json must record status='magi_gate_blocked', got: {data}"
+    )
+    assert "conditions pending" in str(data.get("error", "")).lower() or "accepted condition" in str(
+        data.get("error", "")
+    ).lower(), f"auto-run.json error must reference the conditions pending reason: {data}"
+
+
 def test_auto_dry_run_prints_plan_without_side_effects(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
