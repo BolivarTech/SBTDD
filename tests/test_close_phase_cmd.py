@@ -393,3 +393,42 @@ def test_close_phase_refactor_returns_cascade_rc_on_failure(
     assert rc == 7
     err = capsys.readouterr().err
     assert "close-task cascade failed" in err
+
+
+def test_close_phase_verification_receives_project_root_as_cwd(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    """MAGI Loop 2 iter 1 Finding 4: _run_verification must pass cwd=root.
+
+    The skill wrapper for ``/verification-before-completion`` accepts a
+    ``cwd`` kwarg that the underlying subprocess uses as its working
+    directory. Without an explicit ``cwd=``, pytest (or any stack's test
+    runner) cannot locate tests when ``/sbtdd close-phase`` is invoked
+    from a subdirectory of the project root. The fix wires the
+    ``--project-root`` argument through to the skill wrapper.
+    """
+    import close_phase_cmd
+
+    _seed_state(tmp_path, current_phase="red")
+    captured_kwargs: dict[str, object] = {}
+
+    def spy_verification(*a, **kw):  # type: ignore[no-untyped-def]
+        captured_kwargs.update(kw)
+        return None
+
+    monkeypatch.setattr("close_phase_cmd.detect_drift", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "close_phase_cmd.superpowers_dispatch.verification_before_completion",
+        spy_verification,
+    )
+
+    from types import SimpleNamespace
+
+    def fake_run(cmd, timeout=0, cwd=None):  # type: ignore[no-untyped-def]
+        return SimpleNamespace(returncode=0, stdout="abc9999\n", stderr="")
+
+    monkeypatch.setattr("close_phase_cmd.subprocess_utils.run_with_timeout", fake_run)
+    monkeypatch.setattr("close_phase_cmd.commit_create", lambda prefix, message, cwd=None: "")
+
+    close_phase_cmd.main(["--project-root", str(tmp_path), "--message", "x"])
+    assert captured_kwargs.get("cwd") == str(tmp_path)
