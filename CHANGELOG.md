@@ -63,5 +63,65 @@ every post-v0.1 release.
   (`clippy`, `rustfmt`, `cargo-nextest-nextest`, `cargo-audit-audit`)
   instead of the loose `^\w+\s+\d+\.\d+` pattern.
 
+### Added (Milestone E -- distribution artifacts v0.1 ship)
+
+- `skills/sbtdd/SKILL.md` orchestrator skill following the seven-section
+  structure mandated by sec.S.6.3 (Overview -> Subcommand dispatch ->
+  Complexity gate -> Execution pipeline -> sbtdd-rules -> sbtdd-tdd-cycle
+  -> Fallback).
+- `.claude-plugin/plugin.json` at version `0.1.0` (name `sbtdd-workflow`,
+  dual license MIT OR Apache-2.0, `repository` field as a plain URL string
+  matching MAGI v2.1.3's form, pointing to
+  `github.com/BolivarTech/sbtdd-workflow`).
+- `.claude-plugin/marketplace.json` BolivarTech catalog entry at version
+  `0.1.0` synchronized with `plugin.json` (sec.S.3.3).
+- Public `README.md` with four static shields (Python 3.9+, license, ruff,
+  mypy), "Why SBTDD? Why multi-agent?" section, Installation (marketplace
+  + local dev), Usage (nine-subcommand table + end-to-end flow),
+  Architecture, and License sections (parity with MAGI `README.md`).
+- `CONTRIBUTING.md` contributor guide with commit-prefix reference,
+  pre-merge expectations, and invariant addition procedure.
+- Five new contract test files covering the distribution artifacts:
+  `tests/test_skill_md.py` (**19 tests**: see Task-by-task breakdown in the
+  Acceptance section), `tests/test_plugin_manifest.py` (**11 tests**,
+  includes 1 that skips when marketplace.json absent then asserts when
+  present), `tests/test_marketplace_manifest.py` (**9 tests**),
+  `tests/test_readme.py` (**22 tests**, 17 for README + 5 for
+  CONTRIBUTING.md), and `tests/test_distribution_coherence.py`
+  (**8 tests**: 6 cross-artifact + 2 MAGI-parity smoke — required-keys
+  subset check + `repository` field-form check, both decorated with
+  `@pytest.mark.skipif` when MAGI cache absent).
+  **Total new: 69 tests** (528 baseline). Reachable totals: **595** (CI
+  environment without MAGI cache installed — the 2 skipif-guarded MAGI
+  parity tests skip), **597** (local development with MAGI cache present
+  — every conditional test runs). Range reflects the skipif-guarded MAGI
+  parity tests. Skip-aware phrasing mandated by F2 MAGI iter 2 to make
+  the accounting exact.
+
+### Changed
+
+- `README.md`: rewrote from the previous single-line stub into the full
+  user-facing GitHub README.
+
+### Deferred (tracked for v0.2.0)
+
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) running `make verify`
+  on push and PR, with a live "tests passing" shield (Milestone E intentionally
+  ships without a `tests-passing` badge rather than publish a fake one — F2 of
+  MAGI Checkpoint 2 Plan E iter 1).
+- `schema_version` field in `plugin.local.md` (sec.S.13 item 5).
+- GoogleTest / Catch2 / bazel / meson adapters for C++ stack (sec.S.13 item 7).
+- Verify `marketplace.json` `$schema` URL
+  (`https://anthropic.com/claude-code/marketplace.schema.json`) resolves
+  post-push. Fallback: drop the field across both plugins in lockstep if
+  Anthropic removes it or Claude Code emits a warning (F6 MAGI iter 2).
+- MAGI-version coupling in parity tests — track for v0.2 if MAGI v2.2+
+  changes schema (Caspar iter 3 final recommendation). The two parity
+  tests in `test_distribution_coherence.py` (required-keys subset check
+  + `repository` field-form check) pin against MAGI v2.1.3 artifacts
+  cached locally; if MAGI evolves its manifest schema, these tests must
+  be refreshed against the new cache snapshot to remain meaningful.
+
 (Milestones A-C changelog is implied from the git log; post-v0.1
-releases will carry fully human-curated entries.)
+releases will carry fully human-curated entries. Milestone E is the last
+milestone before the `v0.1.0` public ship tag.)
