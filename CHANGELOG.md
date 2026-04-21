@@ -140,30 +140,36 @@ every post-v0.1 release.
   Scenario-4 class of defects (plan-level tests green but spec-level
   scenario uncovered) is the target; options 1-3 are mechanical,
   4-7 are semantic.
-- **Interactive escalation prompt on MAGI exhaustion** — v0.1 does NOT
-  prompt the user interactively when the safety valve (INV-11) exhausts.
-  It writes artifacts (`.claude/magi-conditions.md`, `.claude/magi-feedback.md`,
-  iter-report.json), emits stderr summary, and exits 8. User must re-invoke
-  manually. Deliberate for headless contexts (auto_cmd INV-22 sequential,
-  CI, non-TTY). But for interactive `spec_cmd` and `pre_merge_cmd`, a
-  guided prompt would materially improve UX. During Milestone D Checkpoint
-  2 iter 3 DEGRADED, the assistant-orchestrator presented options a/b/c/d
-  in chat and the user replied `a`; that conversation pattern could be
-  native to the plugin. Evaluate for v0.2: (1) `input()`-based prompt in
-  `spec_cmd`/`pre_merge_cmd` when `sys.stdin.isatty()` and no `--non-interactive`
-  flag, offering `(a)` INV-0 override, `(b)` retry iteration, `(c)` abandon,
-  `(d)` v0.1 behavior; (2) `--override-checkpoint --reason "<text>"` CLI
-  flag with mandatory reason string (paired with decision-record artifact
-  at `.claude/magi-escalations/<timestamp>.json` for audit trail); (3)
-  `.claude/magi-auto-policy.json` upfront config for `auto_cmd` headless
-  path (`{on_exhausted: "abort" | "override_strong_go_only" | "retry_once"}`,
-  default `abort`); (4) `resume_cmd` detects `.claude/magi-escalation-pending.md`
-  and prompts resume if user Ctrl+C-ed the original prompt. Design
-  invariants: skippable in non-TTY (EOFError wrap, same pattern as
-  `resume_cmd`), forbidden in `auto_cmd` (INV-22), every override produces
-  audit artifact, default behavior = v0.1 (backward compat), `--reason`
-  mandatory on override. Target: automate the chat-orchestrator
-  conversation pattern observed through Milestones A-E.
+- **Interactive escalation prompt on MAGI exhaustion — LOCKED v0.2.0
+  release blocker** — v0.1 does NOT prompt the user interactively when
+  the safety valve (INV-11) exhausts. It writes artifacts
+  (`.claude/magi-conditions.md`, `.claude/magi-feedback.md`, iter-report.json),
+  emits stderr summary, and exits 8. User must re-invoke manually. User
+  explicitly requested (session 2026-04-21) that v0.2 reproduce the
+  assistant-orchestrator conversation pattern observed through Milestones
+  A-E: on exhaustion, the plugin MUST emit a structured diagnostic message
+  (degraded analysis, per-agent verdicts, severity-classified findings,
+  root-cause inference, 4 context-aware options labeled a/b/c/d) and
+  accept a single-letter response to apply the decision. The canonical
+  message template is captured verbatim in `CLAUDE.md` "v0.2 requirement
+  (LOCKED)" section using the Plan D Checkpoint 2 iter 3 escalation as
+  the reference (historic example: DEGRADED / Caspar JSON failure
+  transient / 2/2 APPROVE unanime / 3 WARNINGs bajo-riesgo → user chose
+  option `a` override → commit `5d7bfc4`). v0.2 implementation scope:
+  (1) new module `escalation_prompt.py` with `build_escalation_context` /
+  `format_escalation_message` / `prompt_user` / `apply_decision`;
+  (2) root-cause inference classifying the failure (infra-transient,
+  plan-vs-spec gap, structural defect, spec ambiguity) to compose options
+  dynamically; (3) TTY-guarded `input()` with EOFError fallback + headless
+  policy file `.claude/magi-auto-policy.json` for `auto_cmd`; (4)
+  `--override-checkpoint --reason "<text>"` CLI flag with mandatory
+  reason; (5) audit artifact `.claude/magi-escalations/<timestamp>.json`;
+  (6) `resume_cmd` integration for Ctrl+C recovery; (7) golden-output
+  unit tests per root-cause class × context. Design invariants: never
+  runs inside `auto_cmd` (INV-22), every override produces audit artifact,
+  non-TTY always safe (EOFError), backward-compat default = v0.1 behavior,
+  language preserves Spanish + English mix matching session-observed
+  convention, template ≤40 lines emitted. See CLAUDE.md for full spec.
 
 (Milestones A-C changelog is implied from the git log; post-v0.1
 releases will carry fully human-curated entries. Milestone E is the last
