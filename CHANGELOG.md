@@ -121,6 +121,25 @@ every post-v0.1 release.
   + `repository` field-form check) pin against MAGI v2.1.3 artifacts
   cached locally; if MAGI evolves its manifest schema, these tests must
   be refreshed against the new cache snapshot to remain meaningful.
+- **Continuous spec-drift detection** — v0.1 verifies code-vs-spec
+  alignment only at two gates (Checkpoint 2 MAGI before code, pre-merge
+  Loop 2 MAGI after all code). Gaps can surface only at pre-merge (e.g.,
+  Milestone A caspar caught `detect_drift` missing Scenario 4). Evaluate
+  for v0.2 (full option matrix + decision rationale in local
+  `CLAUDE.md`; public-facing summary here): (1) `scenario_coverage_check.py`
+  parsing `sbtdd/spec-behavior.md §4` + enforcing at least one test
+  per scenario at `close-task`; (2) spec-snapshot diff check at
+  pre-merge entry via `planning/spec-snapshot.json`; (3) inverted
+  traceability matrix — per-task `Scenario coverage:` line in plan;
+  (4) per-phase MAGI-lite analysis on each `close-phase refactor`;
+  (5) auto-generated scenario test stubs from `/writing-plans`; (6)
+  `# Implements: spec-behavior.md §4.X` watermark comments + lint
+  rule; (7) LLM-based drift detector invoking `claude -p` at
+  `close-phase`. Recommended minimum: (1) + (5); (2) as audit; (4)/(7)
+  opt-in via `--spec-drift-check` flag. Rationale: Milestone A's
+  Scenario-4 class of defects (plan-level tests green but spec-level
+  scenario uncovered) is the target; options 1-3 are mechanical,
+  4-7 are semantic.
 
 (Milestones A-C changelog is implied from the git log; post-v0.1
 releases will carry fully human-curated entries. Milestone E is the last
