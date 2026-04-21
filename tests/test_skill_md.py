@@ -170,3 +170,78 @@ def test_skill_mentions_invariants() -> None:
     # At minimum reference the critical invariants mentioned throughout the plugin
     for inv in ("INV-0", "INV-27", "INV-28", "INV-29"):
         assert inv in text, f"SKILL.md must reference invariant '{inv}'"
+
+
+def test_skill_has_fallback_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+Fallback\s*$", text, flags=re.MULTILINE), (
+        "Fallback section required (sec.S.6.3 item 7)"
+    )
+
+
+def test_skill_sections_in_correct_order() -> None:
+    """sec.S.6.3: sections appear in the mandated order."""
+    text = _read_skill()
+    required_headers = [
+        "## Overview",
+        "## Subcommand dispatch",
+        "## Complexity gate",
+        "## Execution pipeline",
+        "## sbtdd-rules",
+        "## sbtdd-tdd-cycle",
+        "## Fallback",
+    ]
+    positions = []
+    for header in required_headers:
+        idx = text.find("\n" + header + "\n")
+        assert idx >= 0, f"missing header line: {header}"
+        positions.append(idx)
+    assert positions == sorted(positions), (
+        f"section headers are out of order: {positions} vs sorted {sorted(positions)}"
+    )
+
+
+def test_skill_has_nontrivial_body() -> None:
+    """Content-based non-triviality check (F7 MAGI iter 2).
+
+    An earlier draft of this test pinned a `>= 200 lines` floor. Line count
+    is an arbitrary proxy; we now assert the **content** property: every one
+    of the seven sections mandated by sec.S.6.3 must be present with a
+    non-empty body (at least one non-blank line after the header before the
+    next header or EOF). If each section has real content, line count is a
+    natural consequence (~300+ lines as shipped) and the prior floor adds
+    nothing.
+
+    This is independent of `test_skill_sections_in_correct_order` (which
+    pins ORDER) and of `test_skill_has_*_section` (which pin PRESENCE of
+    the header). This test pins that each section has a body.
+    """
+    text = _read_skill()
+    required_headers = [
+        "## Overview",
+        "## Subcommand dispatch",
+        "## Complexity gate",
+        "## Execution pipeline",
+        "## sbtdd-rules",
+        "## sbtdd-tdd-cycle",
+        "## Fallback",
+    ]
+    # Find each header's position; then check that the next non-blank line
+    # after the header is NOT another header (which would indicate an empty
+    # section).
+    for header in required_headers:
+        pattern = re.compile(rf"^{re.escape(header)}\s*$", flags=re.MULTILINE)
+        match = pattern.search(text)
+        assert match is not None, f"missing header: {header}"
+        # Slice from end of header to find the next non-blank line
+        body_start = match.end()
+        # Look at the next ~500 chars (enough for a real section body)
+        window = text[body_start : body_start + 500]
+        # Strip the immediate newline after the header and any blank lines
+        stripped = window.lstrip("\n \t")
+        assert stripped, f"section '{header}' has no body before EOF"
+        # Ensure the first non-blank line after the header is NOT another H2
+        first_line = stripped.split("\n", 1)[0]
+        assert not first_line.startswith("## "), (
+            f"section '{header}' is empty (immediately followed by another H2: '{first_line}')"
+        )

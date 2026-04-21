@@ -229,3 +229,46 @@ The agent should NOT attempt the three-step close by hand. Always invoke
 `/sbtdd close-phase` -- the Python command handles the drift check, invokes
 `/verification-before-completion`, runs `commits.create` with the validated
 prefix, and updates the state file atomically. Manual close = drift risk.
+
+## Fallback
+
+If Python is not available (e.g., unusual sandbox, bootstrapping environment,
+explicit "simulate" request), respond to the user with structured manual
+instructions matching the invoked subcommand:
+
+- **`init` fallback:** list the seven mandatory dependencies (sec.S.1.3) and
+  the five files `init` would generate. Ask the user to verify each dependency
+  and copy the template files manually from `templates/`.
+- **`spec` fallback:** walk the user through `/brainstorming` -> `/writing-plans`
+  -> MAGI Checkpoint 2 manually. Emit the canonical MAGI invocation
+  (`/magi:magi revisa @sbtdd/spec-behavior.md y @planning/claude-plan-tdd-org.md`)
+  with explicit iteration cap 3 (INV-11).
+- **`close-phase` fallback:** remind the user of the three-step close ritual
+  (verification -> atomic commit with prefix -> state update). Emit the exact
+  commit prefix from the commit prefix map above.
+- **`pre-merge` fallback:** instruct the user to run Loop 1
+  (`/requesting-code-review` until clean-to-go, cap 10 iter) followed by Loop 2
+  (`/magi:magi`, cap 3 iter, honor INV-28 and INV-29).
+- **`auto` fallback:** the auto mode is Python-exclusive (no manual analogue)
+  because it requires coordinated dispatch across six phases. If Python is not
+  available, tell the user to run the phases sequentially via manual invocations
+  of `spec`, `close-phase`, `close-task`, `pre-merge`, `finalize` (in that order).
+- **`resume` fallback:** walk the user through the diagnostic manually: read
+  `.claude/session-state.json`, inspect `git status`, inspect recent commit
+  messages, and determine the appropriate next subcommand based on
+  `current_phase`.
+
+In all fallback modes, honor INV-0 (global CLAUDE.md prevails), INV-5..8
+(commit discipline), INV-27 (spec-base placeholder rejection), INV-28 (MAGI
+degraded non-exit), and INV-29 (receiving-code-review gate) manually.
+
+## Notes
+
+- The plugin is pre-1.0 (`v0.1.x`); the schema of `session-state.json` and
+  `plugin.local.md` MAY change between minor versions. Consult `CHANGELOG.md`
+  before upgrading.
+- For the full functional contract, see
+  `sbtdd/sbtdd-workflow-plugin-spec-base.md` in the plugin repository.
+- Authoritative methodology lives in the destination project's `CLAUDE.local.md`
+  (installed by `sbtdd init`); the `sbtdd-rules` and `sbtdd-tdd-cycle` sections
+  above are summaries intended for in-skill reference, not redefinitions.
