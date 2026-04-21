@@ -349,4 +349,4 @@ Dual licensed under [MIT](LICENSE) OR [Apache-2.0](LICENSE-APACHE), at your opti
 
 The SBTDD methodology and plugin architecture are designed and maintained by Julian Bolivar (BolivarTech). The plugin operationalizes the Superpowers skill ecosystem (Obra Inc.) and integrates with the MAGI multi-perspective plugin (also BolivarTech).
 
-See `CLAUDE.md` for the full methodology reference and `sbtdd/sbtdd-workflow-plugin-spec-base.md` for the authoritative functional contract.
+See `sbtdd/sbtdd-workflow-plugin-spec-base.md` for the authoritative functional contract (2860 lines covering sec.S.0-14: architecture, manifest, parameterization, 9 subcomandos, skill/hook specifications, conventions, state-file contract, invariants INV-0..30, exit code taxonomy, acceptance criteria).
