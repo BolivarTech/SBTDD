@@ -76,3 +76,53 @@ def test_skill_has_main_title() -> None:
     assert re.search(r"^#\s+SBTDD", text, flags=re.MULTILINE), (
         "SKILL.md must have a top-level H1 starting with 'SBTDD'"
     )
+
+
+def test_skill_has_overview_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+Overview\s*$", text, flags=re.MULTILINE), (
+        "Overview section required (sec.S.6.3 item 1)"
+    )
+
+
+def test_skill_has_subcommand_dispatch_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+Subcommand dispatch\s*$", text, flags=re.MULTILINE), (
+        "Subcommand dispatch section required (sec.S.6.3 item 2)"
+    )
+
+
+def test_skill_mentions_all_nine_subcommands() -> None:
+    text = _read_skill()
+    for sub in NINE_SUBCOMMANDS:
+        assert sub in text, f"SKILL.md must reference subcommand '{sub}'"
+
+
+def test_skill_has_complexity_gate_section() -> None:
+    text = _read_skill()
+    assert re.search(r"^##\s+Complexity gate\s*$", text, flags=re.MULTILINE), (
+        "Complexity gate section required (sec.S.6.3 item 3)"
+    )
+
+
+def test_skill_has_no_skeleton_sentinel() -> None:
+    """F8 MAGI iter 2: reject SKILL.md shipping with the Task 1b skeleton sentinel.
+
+    Task 1b creates SKILL.md with an explicit `<!-- SKELETON: ... -->` comment
+    that flags the body as pending. Task 2 removes that comment as it populates
+    the first three sections. This test is introduced in Task 2 (alongside the
+    removal itself) so that the no-sentinel property is verified at the exact
+    moment the sentinel is deleted, eliminating the window between sentinel
+    removal and guard arming that would exist if this test were deferred to
+    Task 4 (Caspar iter 3 fix).
+
+    We match on the stable prefix of the comment (`<!-- SKELETON:` with the
+    literal text used in Task 1b) rather than an exact full-text match so that
+    a minor edit to the sentinel body in Task 1b does not require a matching
+    edit here.
+    """
+    text = _read_skill()
+    assert "<!-- SKELETON:" not in text, (
+        "SKILL.md still contains the Task 1b skeleton sentinel; "
+        "Task 2 must remove it while populating the first three sections"
+    )
