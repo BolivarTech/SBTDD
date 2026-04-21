@@ -123,23 +123,34 @@ every post-v0.1 release.
   be refreshed against the new cache snapshot to remain meaningful.
 - **Continuous spec-drift detection** — v0.1 verifies code-vs-spec
   alignment only at two gates (Checkpoint 2 MAGI before code, pre-merge
-  Loop 2 MAGI after all code). Gaps can surface only at pre-merge (e.g.,
-  Milestone A caspar caught `detect_drift` missing Scenario 4). Evaluate
-  for v0.2 (full option matrix + decision rationale in local
-  `CLAUDE.md`; public-facing summary here): (1) `scenario_coverage_check.py`
-  parsing `sbtdd/spec-behavior.md §4` + enforcing at least one test
-  per scenario at `close-task`; (2) spec-snapshot diff check at
-  pre-merge entry via `planning/spec-snapshot.json`; (3) inverted
-  traceability matrix — per-task `Scenario coverage:` line in plan;
-  (4) per-phase MAGI-lite analysis on each `close-phase refactor`;
-  (5) auto-generated scenario test stubs from `/writing-plans`; (6)
-  `# Implements: spec-behavior.md §4.X` watermark comments + lint
-  rule; (7) LLM-based drift detector invoking `claude -p` at
-  `close-phase`. Recommended minimum: (1) + (5); (2) as audit; (4)/(7)
-  opt-in via `--spec-drift-check` flag. Rationale: Milestone A's
-  Scenario-4 class of defects (plan-level tests green but spec-level
-  scenario uncovered) is the target; options 1-3 are mechanical,
-  4-7 are semantic.
+  Loop 2 MAGI after all code) + TDD discipline during execution. Per-task
+  spec drift surfaces only at pre-merge (e.g., Milestone A caspar caught
+  `detect_drift` missing Scenario 4 at the final MAGI gate, not at the
+  Task 14/15 close). **Key insight (session 2026-04-21)**: the superpowers
+  ecosystem already ships a per-task spec-compliance reviewer as part of
+  `superpowers:subagent-driven-development` (two-stage review: spec
+  compliance first, then code quality). Its prompt template catches
+  missing requirements + over-engineering + misunderstandings, with the
+  directive "verify by reading code, NOT by trusting report". SBTDD v0.1
+  does NOT integrate this primitive — `auto_cmd` dispatches implementers
+  but never spawns a dedicated spec-reviewer subagent per task. For v0.2,
+  **recommended primary integration path**: (8) `auto_cmd._phase2_task_loop`
+  and `close_task_cmd` gain an explicit spec-reviewer dispatch (using
+  the existing `superpowers:subagent-driven-development/spec-reviewer-prompt.md`
+  template) after the implementer reports DONE, before `mark_and_advance`.
+  `close-task --skip-spec-review` flag as escape valve. New subcommand
+  `/sbtdd review-spec-compliance <task-id>` for manual/executing-plans
+  flows. Trade-off: +1 `claude -p` call per task (~36 extra for a plan
+  the size of Milestone A). Mechanical complements: (1) `scenario_coverage_check.py`
+  parsing `sbtdd/spec-behavior.md §4` + enforcing 1+ test per scenario;
+  (5) auto-generated scenario test stubs from `/writing-plans` forcing
+  1:1 scenario-test mapping at Checkpoint 2. Audit extension: (2)
+  spec-snapshot diff at pre-merge entry vs `planning/spec-snapshot.json`
+  catches silent spec edits. Supersedes earlier options (4) per-phase
+  MAGI-lite and (7) bespoke LLM drift detector — option (8) already
+  covers semantic drift via the superpowers skill. Revised recommendation:
+  (8) + (1) + (5) minimum viable; (2) as audit. Full option matrix +
+  rationale in local `CLAUDE.md`.
 - **Interactive escalation prompt on MAGI exhaustion — LOCKED v0.2.0
   release blocker** — v0.1 does NOT prompt the user interactively when
   the safety valve (INV-11) exhausts. It writes artifacts
