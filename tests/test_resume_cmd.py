@@ -315,6 +315,91 @@ def test_resume_delegates_to_finalize_when_done_and_verdict_present() -> None:
     assert module == "finalize_cmd"
 
 
+def test_resume_detects_spec_review_pending_marker_before_auto_delegation() -> None:
+    """spec-review-pending.md present -> 'spec-review-pending' sentinel.
+
+    Regression for MAGI Loop 2 v0.2 pre-merge CRITICAL #4 (2026-04-24):
+    spec-review aborts (``SpecReviewError`` exit 12 in
+    ``auto_cmd._phase2_task_loop``) leave the operator with a manually
+    triaged task that resume needs to surface BEFORE re-delegating to
+    ``auto`` (which would just re-trip the reviewer on the same diff).
+    The marker file is written by future v0.2.1 work (B6 auto-feedback)
+    but the resume branch is wired now so v0.2 users who manually create
+    the file as a recovery checkpoint also get the right surface.
+    """
+    import resume_cmd
+
+    state = _FakeState("red", current_task_id="1")
+    module, extra = resume_cmd._decide_delegation(
+        state,
+        tree_dirty=False,
+        runtime={
+            "auto-run.json": True,  # auto WAS running
+            "magi-verdict.json": False,
+            "magi-escalation-pending.md": False,
+            "spec-review-pending.md": True,  # but reviewer aborted
+        },
+    )
+    assert module == "spec-review-pending"
+    assert extra == []
+
+
+def test_resume_diagnostic_includes_spec_review_pending_in_runtime_dict(tmp_path):
+    """``_report_diagnostic`` must list ``spec-review-pending.md`` even when absent.
+
+    Forward-compatibility hook: ``/sbtdd status`` and ``/sbtdd resume``
+    diagnose against a fixed runtime dict. Adding the marker key with
+    its presence boolean lets tooling reason about spec-review aborts
+    without future schema churn when v0.2.1 lands the writer.
+    """
+    import json
+
+    import resume_cmd
+
+    state_path = tmp_path / ".claude" / "session-state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "plan_path": "planning/claude-plan-tdd.md",
+                "current_task_id": None,
+                "current_task_title": None,
+                "current_phase": "done",
+                "phase_started_at_commit": "deadbeef",
+                "last_verification_at": None,
+                "last_verification_result": "passed",
+                "plan_approved_at": "2026-04-24T01:00:00Z",
+            }
+        )
+    )
+
+    # Stub the git status + show subprocess to keep the diagnostic
+    # offline -- the test focuses on the runtime dict shape, not git.
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    import subprocess_utils
+
+    original = subprocess_utils.run_with_timeout
+
+    def fake(cmd, *a, **kw):
+        if "show" in cmd:
+            r = _R()
+            r.stdout = "abc1234 chore: mark task X complete"
+            return r
+        return _R()
+
+    subprocess_utils.run_with_timeout = fake  # type: ignore[assignment]
+    try:
+        report = resume_cmd._report_diagnostic(tmp_path)
+    finally:
+        subprocess_utils.run_with_timeout = original  # type: ignore[assignment]
+    assert "spec-review-pending.md" in report["runtime"]
+    assert report["runtime"]["spec-review-pending.md"] is False
+
+
 def test_resume_prefers_auto_when_interrupted_mid_auto_at_done_phase() -> None:
     """MAGI Loop 2 iter 1 Finding 9: state=done + auto-run.json + no verdict -> auto.
 

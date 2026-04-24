@@ -96,6 +96,15 @@ def _report_diagnostic(root: Path) -> dict[str, Any]:
         "auto-run.json": (root / ".claude" / "auto-run.json").exists(),
         "magi-conditions.md": (root / ".claude" / "magi-conditions.md").exists(),
         "magi-escalation-pending.md": (root / ".claude" / "magi-escalation-pending.md").exists(),
+        # 2026-04-24 v0.2 hook: ``dispatch_spec_reviewer`` does NOT yet
+        # emit this marker (B6 auto-feedback loop is deferred to v0.2.1).
+        # The diagnostic still reports its absence so ``/sbtdd status`` and
+        # ``/sbtdd resume`` are forward-compatible: when v0.2.1 lands the
+        # mini-cycle TDD fix path in ``auto_cmd``, the dispatcher will
+        # write this file before raising ``SpecReviewError`` and resume
+        # picks it up via the dedicated delegation branch in
+        # ``_decide_delegation``.
+        "spec-review-pending.md": (root / ".claude" / "spec-review-pending.md").exists(),
     }
     sys.stdout.write("State file:\n")
     sys.stdout.write(f"  current_task_id:          {state.current_task_id}\n")
@@ -256,6 +265,16 @@ def _decide_delegation(
     # the user and decides whether conditions even apply.
     if runtime.get("magi-escalation-pending.md"):
         return ("magi-escalation-pending", [])
+    # MAGI Loop 2 v0.2 pre-merge CRITICAL #4 (2026-04-24): spec-review
+    # aborts (``SpecReviewError`` exit 12 in ``auto_cmd._phase2_task_loop``)
+    # leave the operator with a manually-triaged task that resume needs
+    # to surface BEFORE re-delegating to ``auto_cmd`` (which would just
+    # re-run the same task and re-trip the reviewer). The marker is
+    # written by future v0.2.1 work (B6 auto-feedback) but the resume
+    # branch is wired now so v0.2 users who manually create the file as
+    # a recovery checkpoint also get the right surface.
+    if runtime.get("spec-review-pending.md"):
+        return ("spec-review-pending", [])
     # Scope item 8: mid-pre-merge interruption leaves magi-conditions.md
     # behind. Surface to the user before any delegation -- running
     # `sbtdd pre-merge` again without applying conditions just produces
@@ -452,6 +471,30 @@ def main(argv: list[str] | None = None) -> int:
             "  2. For each condition, run `sbtdd close-phase` with a TDD\n"
             "     mini-cycle that addresses it.\n"
             "  3. Re-run `sbtdd pre-merge` once all conditions are applied.\n"
+        )
+        return 0
+    if module_name == "spec-review-pending":
+        # MAGI Loop 2 v0.2 pre-merge CRITICAL #4 (2026-04-24): the
+        # spec-reviewer aborted with SpecReviewError (exit 12) and left
+        # .claude/spec-review-pending.md behind. Surface to the user so
+        # they apply manual fixes before re-running the failing
+        # subcommand, instead of silently re-delegating to ``auto`` which
+        # would just re-trip the reviewer on the same diff.
+        sys.stdout.write(
+            "\nPending spec-reviewer abort detected in "
+            ".claude/spec-review-pending.md.\n"
+            "Feature B reviewer flagged at least one issue on the most\n"
+            "recent task close. Next step:\n"
+            "  1. Read .claude/spec-review-pending.md for the reviewer's\n"
+            "     accept/reject summary on the offending task.\n"
+            "  2. Apply the recommended diff edits OR re-run the failing\n"
+            "     subcommand with --skip-spec-review if you have manually\n"
+            "     verified the task against the spec.\n"
+            "  3. Delete .claude/spec-review-pending.md once resolved.\n"
+            "Note: v0.2 enforces INV-31 as a hard block. The "
+            "/receiving-code-review + mini-cycle TDD feedback loop that\n"
+            "would auto-recover this state is deferred to v0.2.1\n"
+            "(see CHANGELOG Unreleased Deferred section).\n"
         )
         return 0
     if module_name == "magi-escalation-pending":
