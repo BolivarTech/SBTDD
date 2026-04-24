@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
+import escalation_prompt
+import magi_dispatch
 import subprocess_utils
 import superpowers_dispatch
 from config import PluginConfig, load_plugin_local
@@ -24,6 +27,12 @@ from errors import ChecklistError, PreconditionError
 from models import verdict_meets_threshold
 from state_file import SessionState
 from state_file import load as load_state
+
+#: Exact name of the MAGI gate item in :func:`_checklist`. The override
+#: path filters this item out of ``failures`` when ``--override-checkpoint
+#: --reason`` is supplied; keeping it as a constant makes both producer
+#: and consumer share the same identifier (sec.S.10 INV-28 escape valve).
+_MAGI_GATE_ITEM_NAME: str = "MAGI verdict >= threshold AND not degraded"
 
 
 def _verdict_is_stale(state: SessionState, magi_verdict_path: Path) -> bool:
@@ -44,7 +53,67 @@ def _build_parser() -> argparse.ArgumentParser:
     """Return the argparse parser for ``sbtdd finalize``."""
     p = argparse.ArgumentParser(prog="sbtdd finalize")
     p.add_argument("--project-root", type=Path, default=Path.cwd())
+    p.add_argument(
+        "--override-checkpoint",
+        action="store_true",
+        help="Override MAGI gate per INV-0 on degraded verdict; requires --reason",
+    )
+    p.add_argument(
+        "--reason",
+        type=str,
+        default=None,
+        help="Mandatory when --override-checkpoint is set",
+    )
     return p
+
+
+def _plan_id_from_path(name: str) -> str:
+    """Extract plan id suffix from filename (``claude-plan-tdd-A.md`` -> ``"A"``).
+
+    Returns ``"X"`` when the filename has no ``-<ID>.md`` suffix (the plain
+    finalize default ``claude-plan-tdd.md``). Mirrors the helper of the same
+    name in :mod:`spec_cmd` and :mod:`pre_merge_cmd` so audit artifacts use
+    a consistent ``plan_id`` field across the three escalation contexts.
+    """
+    m = re.search(r"-([A-Z0-9]+)\.md$", name)
+    return m.group(1) if m else "X"
+
+
+def _override_magi_gate(
+    root: Path,
+    state: SessionState,
+    magi_verdict_path: Path,
+    reason: str,
+) -> None:
+    """Apply ``--override-checkpoint`` per INV-0 user authority (audit only).
+
+    Synthesises a single-iteration :class:`magi_dispatch.MAGIVerdict` from
+    the on-disk ``.claude/magi-verdict.json`` (the artifact pre-merge wrote
+    when the gate failed), wraps it in an :class:`escalation_prompt.EscalationContext`,
+    and routes through :func:`escalation_prompt.apply_decision` so the
+    audit trail under ``.claude/magi-escalations/`` matches the ``spec_cmd``
+    and ``pre_merge_cmd`` overrides byte-for-byte (same payload schema).
+
+    The synthesised history is intentionally one entry: ``finalize`` is a
+    re-evaluation of the verdict pre-merge already produced -- there is no
+    iteration loop to summarise.
+    """
+    data = json.loads(magi_verdict_path.read_text(encoding="utf-8"))
+    synthetic = magi_dispatch.MAGIVerdict(
+        verdict=data["verdict"],
+        degraded=bool(data.get("degraded", False)),
+        conditions=tuple(data.get("conditions", [])),
+        findings=tuple(data.get("findings", [])),
+        raw_output="",
+    )
+    ctx = escalation_prompt.build_escalation_context(
+        iterations=[synthetic],
+        plan_id=_plan_id_from_path(Path(state.plan_path).name),
+        context="pre-merge",
+    )
+    options = escalation_prompt._compose_options(ctx)
+    decision = escalation_prompt._decision_for(options, "override", reason)
+    escalation_prompt.apply_decision(decision, ctx, root)
 
 
 def _preflight(root: Path) -> tuple[SessionState, Path]:
@@ -173,6 +242,18 @@ def main(argv: list[str] | None = None) -> int:
     state, magi_verdict_path = _preflight(root)
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
     items = _checklist(root, state, magi_verdict_path, cfg)
+
+    # --override-checkpoint short-circuits the INV-28 degraded reject for
+    # the MAGI gate item only. ``--reason`` is mandatory up front (no
+    # anonymous overrides; the audit artifact is the trail). Other
+    # checklist failures (missing spec, dirty git, open tasks) still
+    # raise -- the override is scoped to the gate, not a global bypass.
+    if ns.override_checkpoint:
+        if not ns.reason:
+            raise ChecklistError("--override-checkpoint requires --reason")
+        _override_magi_gate(root, state, magi_verdict_path, ns.reason)
+        items = [(name, ok, detail) for (name, ok, detail) in items if name != _MAGI_GATE_ITEM_NAME]
+
     failures = [(name, detail) for (name, ok, detail) in items if not ok]
     if failures:
         for name, detail in failures:
