@@ -62,6 +62,11 @@ class UserDecision:
     reason: str
 
 
+def _finding_severity(finding: Any, default: str = "INFO") -> str:
+    """Normalize a finding's ``severity`` field to an uppercase string."""
+    return str(finding.get("severity", default)).upper()
+
+
 def _classify_root_cause(iterations: list[MAGIVerdict]) -> _RootCause:
     """Infer the dominant failure mode across iterations."""
     if any(v.verdict == "STRONG_NO_GO" for v in iterations):
@@ -70,8 +75,7 @@ def _classify_root_cause(iterations: list[MAGIVerdict]) -> _RootCause:
     if degraded_count >= 2 and degraded_count >= len(iterations) / 2:
         return _RootCause.INFRA_TRANSIENT
     critical_across = [
-        any(str(f.get("severity", "")).upper() == "CRITICAL" for f in v.findings)
-        for v in iterations
+        any(_finding_severity(f, default="") == "CRITICAL" for f in v.findings) for v in iterations
     ]
     if sum(critical_across) >= 2:
         return _RootCause.PLAN_VS_SPEC
@@ -95,9 +99,7 @@ def build_escalation_context(
     )
     per_agent: tuple[tuple[str, str], ...] = ()  # v0.2: MAGI does not expose per-agent breakdown
     findings = tuple(
-        (str(f.get("severity", "INFO")).upper(), str(f.get("text", f)))
-        for v in iterations
-        for f in v.findings
+        (_finding_severity(f), str(f.get("text", f))) for v in iterations for f in v.findings
     )
     return EscalationContext(
         iterations=snapshots,
