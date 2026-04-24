@@ -175,7 +175,7 @@ git commit --allow-empty -m "refactor: no-op; _semver_key reviewed, clean"
 **Files:**
 - Modify: `tests/test_distribution_coherence.py:78-97`
 
-- [ ] **Step 1 (Red): add test asserting latest-version selection**
+- [x] **Step 1 (Red): add test asserting latest-version selection**
 
 Append:
 
@@ -219,21 +219,21 @@ def test_resolve_magi_plugin_json_graceful_when_cache_missing(tmp_path, monkeypa
     assert not result.is_file()  # triggers existing skipif gate
 ```
 
-- [ ] **Step 2: run tests, confirm FAIL (resolver still hardcodes 2.1.3, no `_magi_cache_base` symbol)**
+- [x] **Step 2: run tests, confirm FAIL (resolver still hardcodes 2.1.3, no `_magi_cache_base` symbol)**
 
 ```bash
 python -m pytest tests/test_distribution_coherence.py -k "resolve_magi" -v
 ```
 Expected: FAIL.
 
-- [ ] **Step 3 (Red commit)**
+- [x] **Step 3 (Red commit)**
 
 ```bash
 git add tests/test_distribution_coherence.py
 git commit -m "test: add failing tests for MAGI auto-resolver"
 ```
 
-- [ ] **Step 4 (Green): rewrite `_resolve_magi_plugin_json`**
+- [x] **Step 4 (Green): rewrite `_resolve_magi_plugin_json`**
 
 Replace the existing function in `tests/test_distribution_coherence.py` (current lines 78-97):
 
@@ -271,28 +271,28 @@ def _resolve_magi_plugin_json() -> Path:
     return cache_base / latest / ".claude-plugin" / "plugin.json"
 ```
 
-- [ ] **Step 5: run new + existing tests, confirm PASS**
+- [x] **Step 5: run new + existing tests, confirm PASS**
 
 ```bash
 python -m pytest tests/test_distribution_coherence.py -v
 ```
 Expected: all PASS (or skip when cache absent, which is the graceful path).
 
-- [ ] **Step 6 (Green commit)**
+- [x] **Step 6 (Green commit)**
 
 ```bash
 git add tests/test_distribution_coherence.py
 git commit -m "feat: auto-resolve MAGI cache to latest semver version"
 ```
 
-- [ ] **Step 7 (Refactor): verify + ensure `MAGI_PLUGIN_JSON` module-level still computes correctly**
+- [x] **Step 7 (Refactor): verify + ensure `MAGI_PLUGIN_JSON` module-level still computes correctly**
 
 ```bash
 make verify
 ```
 If `MAGI_PLUGIN_JSON` at module top-level now points to a real path on your dev machine (2.1.4 installed), the two `@pytest.mark.skipif` parity tests should run, not skip.
 
-- [ ] **Step 8 (Refactor commit)**
+- [x] **Step 8 (Refactor commit)**
 
 ```bash
 git commit --allow-empty -m "refactor: keep _resolve_magi_plugin_json pure; cache base extracted for test patching"
