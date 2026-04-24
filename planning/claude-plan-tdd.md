@@ -1017,7 +1017,7 @@ git commit --allow-empty -m "refactor: apply_decision reviewed"
 - Modify: `skills/sbtdd/scripts/spec_cmd.py`
 - Create: `tests/test_spec_cmd_escalation.py`
 
-- [ ] **Step 1 (Red): test escalation fires on exhaustion**
+- [x] **Step 1 (Red): test escalation fires on exhaustion**
 
 `tests/test_spec_cmd_escalation.py`:
 
@@ -1051,14 +1051,14 @@ def test_spec_cmd_override_flag_skips_prompt_and_writes_audit(tmp_path) -> None:
 
 Replace the `...` placeholders by lifting fixture setup from existing `tests/test_spec_cmd.py`. (Do NOT ship literal `...` — that would be a placeholder per skill rules.) The exact fixture setup uses `_make_project_fixture(tmp_path)` analogous to what test_spec_cmd already does.
 
-- [ ] **Step 2-3 (Red commit)**
+- [x] **Step 2-3 (Red commit)**
 
 ```bash
 git add tests/test_spec_cmd_escalation.py
 git commit -m "test: add spec_cmd safety-valve escalation wiring tests"
 ```
 
-- [ ] **Step 4 (Green): wire escalation into `spec_cmd`**
+- [x] **Step 4 (Green): wire escalation into `spec_cmd`**
 
 In `skills/sbtdd/scripts/spec_cmd.py`:
 
@@ -1135,9 +1135,9 @@ def _plan_id_from_path(name: str) -> str:
 
 Pass `ns` to `_run_magi_checkpoint2(root, cfg, ns)` from `main(argv)`.
 
-- [ ] **Step 5: tests PASS**
+- [x] **Step 5: tests PASS**
 
-- [ ] **Step 6-8 (Green + Refactor commits)**
+- [x] **Step 6-8 (Green + Refactor commits)**
 
 ```bash
 git add skills/sbtdd/scripts/spec_cmd.py tests/test_spec_cmd_escalation.py
