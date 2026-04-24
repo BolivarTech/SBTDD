@@ -8,6 +8,57 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## Unreleased (Deferred — tracked for v0.2.1)
+
+### B6 auto-feedback loop — LOCKED v0.2.1 release blocker
+
+Flagged by MAGI Loop 2 v0.2 pre-merge 2026-04-24 (CRITICAL #4/#14,
+WARNING #13). Spec-base §2.2 of v0.2 promised that on spec-reviewer
+`issues` the loop routes through `/receiving-code-review` + mini-cycle
+TDD fix + re-dispatch up to the safety valve. v0.2 shipped the
+scope-relaxed version: `dispatch_spec_reviewer` raises
+`SpecReviewError` (exit 12) on non-approval and the caller aborts.
+Consequences: on a 36-task `/sbtdd auto` run, one reviewer
+false-positive at task 15 kills the whole autonomous execution; the
+3-iter safety valve is dead code because nothing mutates the
+reviewer input between iterations (default was pinned to 1 in v0.2
+to reflect this — see CHANGELOG §0.2.0 → Fixed).
+
+**v0.2.1 locked deliverables**:
+
+- Extend `auto_cmd._phase2_task_loop` + `close_task_cmd` with the
+  `/receiving-code-review` INV-29 route: reviewer `issues` map to
+  accepted/rejected list via the existing
+  `_RECEIVING_REVIEW_FORMAT_CONTRACT` pattern from `pre_merge_cmd`.
+- On accepted findings, run a mini-cycle TDD fix (`test:` → `fix:` →
+  `refactor:`) per finding, then re-dispatch the reviewer.
+- Restore `dispatch_spec_reviewer` default `max_iterations=3` so the
+  loop can exercise the newly-mutated diff across iterations.
+- Tighten the INV-31 docstring in `CLAUDE.md` to "MUST pass reviewer
+  approval OR reach safety valve with documented rejections".
+- Add a mini-cycle-per-finding regression test mirroring
+  `test_auto_phase2_recovers_when_implementer_precommitted_phase`.
+
+Estimated scope: ~200 LOC + ~6 regression tests. Target: ship before
+any v0.3 scope is opened so INV-31 honors its original contract.
+
+### Other items deferred from v0.2 pre-merge findings
+
+WARNING #11 (cost/latency guardrail): add
+`auto_max_spec_review_seconds` config (default 3600) with graceful
+`--skip-spec-review` fallback when exceeded. Small (~30 LOC); tracked
+for v0.2.1 alongside B6.
+
+WARNING #12 (INV-31 default-on surprise risk): v0.2 ships with
+spec-review default-on per the original INV-31 wording; field data
+from v0.2/v0.2.1 will drive whether v0.3 flips to opt-in or keeps
+the default. Document the operational impact more prominently in the
+v0.2.0 CHANGELOG BREAKING section (follow-up).
+
+WARNING #17 (pending-marker race): atomic rename pattern for
+`.claude/magi-escalation-pending.md` write. ~20 LOC in
+`escalation_prompt.prompt_user`. Low-severity; v0.2.1 polish.
+
 ## 0.1.7 - 2026-04-24
 
 ### Fixed
