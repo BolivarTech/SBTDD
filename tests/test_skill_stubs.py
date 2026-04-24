@@ -4,9 +4,11 @@
 # Date: 2026-04-19
 """Tests for the shared ``tests/fixtures/skill_stubs.py`` integration fixture.
 
-Guarantees the stubs consumed by Tasks 47-50 behave as their contract
-promises: StubSuperpowers records invocations, StubMAGI consumes its
-FIFO verdict sequence, make_verdict is a convenience factory.
+Guarantees the stubs consumed by Tasks 47-50 and Feature B behave as their
+contract promises: StubSuperpowers records invocations, StubMAGI consumes
+its FIFO verdict sequence, StubSpecReviewer consumes its FIFO approval
+sequence and emits a synthetic MISSING issue on rejection, and
+make_verdict is a convenience factory.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ def test_skill_stubs_module_importable():
 
     assert hasattr(skill_stubs, "StubSuperpowers")
     assert hasattr(skill_stubs, "StubMAGI")
+    assert hasattr(skill_stubs, "StubSpecReviewer")
 
 
 def test_stub_superpowers_records_invocations(tmp_path):

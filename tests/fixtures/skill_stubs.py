@@ -22,6 +22,15 @@ StubMAGI:
     present in the second call's ``context_paths`` but absent in the first.
   - Raises IndexError on exhaustion so runaway loops fail loud, not silent.
 
+StubSpecReviewer:
+  - ``sequence: list[bool]`` is consumed FIFO per dispatch call:
+    ``True`` yields an approved :class:`SpecReviewResult`, ``False`` yields
+    a one-issue ``MISSING`` result addressed to the caller's ``task_id``.
+  - Records each call's ``task_id`` and ``max_iterations`` in ``self.calls``
+    so Feature B integration tests can assert dispatch ordering.
+  - Raises IndexError on exhaustion so runaway loops fail loud, matching
+    :class:`StubMAGI`.
+
 make_verdict(verdict, conditions=(), findings=(), degraded=False) -> MAGIVerdict:
   - Convenience constructor so tests read declaratively.
 """
