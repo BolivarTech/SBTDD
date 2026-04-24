@@ -117,6 +117,13 @@ Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase
 | `finalize` | Run sec.M.7 checklist + `/finishing-a-development-branch` | `/sbtdd finalize` |
 | `auto` | Shoot-and-forget full cycle (task loop + pre-merge + checklist), stops before finalize | `/sbtdd auto` or `/sbtdd auto --dry-run` |
 | `resume` | Diagnose interrupted runs and delegate recovery | `/sbtdd resume` or `/sbtdd resume --discard-uncommitted` |
+| `review-spec-compliance` | Per-task spec-reviewer dispatch for manual flows (Feature B, new in v0.2). Exit 0 on approve, exit 12 on issues. | `/sbtdd review-spec-compliance <task-id>` |
+
+### New in v0.2
+
+- `--override-checkpoint --reason "<text>"` (on `spec`, `pre-merge`, `finalize`) -- INV-0 escape valve when a MAGI safety valve (INV-11) exhausts. `--reason` is mandatory; reason + verdict are persisted under `.claude/magi-escalations/`.
+- `--non-interactive` (on `spec`, `pre-merge`) -- force the headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
+- `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
 
 ### Typical end-to-end flow
 

@@ -105,6 +105,21 @@ def test_readme_mentions_all_nine_subcommands() -> None:
         assert re.search(rf"\b{re.escape(sub)}\b", text), f"README must mention subcommand '{sub}'"
 
 
+def test_readme_usage_documents_review_spec_compliance() -> None:
+    """Task I1b (D3): Usage section references the new v0.2 subcommand."""
+    text = _read_readme()
+    assert "review-spec-compliance" in text, (
+        "README must document new v0.2 subcommand review-spec-compliance"
+    )
+
+
+def test_readme_usage_documents_v02_flags() -> None:
+    """Task I1b (D3): Usage section documents the four new v0.2 flags."""
+    text = _read_readme()
+    for flag in ("--override-checkpoint", "--reason", "--non-interactive", "--skip-spec-review"):
+        assert flag in text, f"README must document v0.2 flag '{flag}'"
+
+
 def test_readme_end_to_end_flow() -> None:
     text = _read_readme()
     # Must describe the typical flow init -> spec -> close-phase -> pre-merge -> finalize

@@ -201,6 +201,41 @@ def test_skill_sections_in_correct_order() -> None:
     )
 
 
+def test_skill_subcommand_dispatch_table_has_ten_rows() -> None:
+    """Task I1b (D2/D3): dispatch table documents 10 subcommands in v0.2.
+
+    v0.1 shipped nine subcommands (init, spec, close-phase, close-task, status,
+    pre-merge, finalize, auto, resume). v0.2 Feature B adds a tenth
+    (review-spec-compliance) for manual/executing-plans flows. The table in
+    the ``## Subcommand dispatch`` section must grow to ten data rows.
+    """
+    text = _read_skill()
+    section = re.search(
+        r"^## Subcommand dispatch\s*$(.*?)^##\s",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert section, "Subcommand dispatch section missing"
+    body = section.group(1)
+    data_rows = [ln for ln in body.splitlines() if re.match(r"^\|\s*`[^`]+`", ln)]
+    assert len(data_rows) == 10, f"expected 10 dispatch rows (v0.2), found {len(data_rows)}"
+
+
+def test_skill_lists_review_spec_compliance_subcommand() -> None:
+    """Task I1b (D3): SKILL.md mentions the new v0.2 subcommand."""
+    text = _read_skill()
+    assert "review-spec-compliance" in text, (
+        "SKILL.md must mention review-spec-compliance (v0.2 Feature B)"
+    )
+
+
+def test_skill_documents_v02_flags() -> None:
+    """Task I1b (D3): SKILL.md documents the four new v0.2 flags."""
+    text = _read_skill()
+    for flag in ("--override-checkpoint", "--reason", "--non-interactive", "--skip-spec-review"):
+        assert flag in text, f"SKILL.md must document v0.2 flag '{flag}'"
+
+
 def test_skill_has_nontrivial_body() -> None:
     """Content-based non-triviality check (F7 MAGI iter 2).
 

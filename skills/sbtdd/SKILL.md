@@ -53,9 +53,16 @@ logic lives in `scripts/run_sbtdd.py` and the nine `{subcommand}_cmd.py` modules
 | `finalize` | Run the sec.M.7 checklist + invoke `/finishing-a-development-branch` | After `pre-merge` returns exit 0 |
 | `auto` | Shoot-and-forget full cycle: task loop + pre-merge + checklist (stops before `/finishing-a-development-branch`) | When the user wants unattended execution of an approved plan |
 | `resume` | Diagnose interrupted runs (quota exhaustion, crash, reboot) and delegate recovery | After an `auto` run aborted mid-flight, or after any interruption |
+| `review-spec-compliance` | Per-task spec-reviewer dispatch for manual flows (`/executing-plans`, ad-hoc). Runs `superpowers:subagent-driven-development/spec-reviewer-prompt.md` over the task diff; returns exit 0 on approve, exit 12 on issues. New in v0.2 (Feature B). | To verify a single task's compliance before a manual `close-task` |
 
 Invocation pattern: `/sbtdd <subcommand> [args...]`. Under the hood, every
 subcommand routes through `run_sbtdd.py` (see `## Execution pipeline` below).
+
+### v0.2 flags
+
+- `--override-checkpoint --reason "<text>"` (on `spec`, `pre-merge`, `finalize`) -- INV-0 escape valve when a MAGI safety valve (INV-11) exhausts. `--reason` is mandatory; reason + verdict are persisted under `.claude/magi-escalations/`.
+- `--non-interactive` (on `spec`, `pre-merge`) -- force headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
+- `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
 
 ## Complexity gate
 

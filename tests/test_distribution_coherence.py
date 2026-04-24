@@ -283,3 +283,23 @@ def test_resolve_magi_plugin_json_graceful_when_cache_missing(tmp_path, monkeypa
     )
     result = _resolve_magi_plugin_json()
     assert not result.is_file()  # triggers existing skipif gate
+
+
+# ---------------------------------------------------------------------------
+# Task I1b (D2/D3): v0.2 subcommand + flag documentation coherence -------
+# ---------------------------------------------------------------------------
+
+
+def test_skill_md_lists_review_spec_compliance_subcommand() -> None:
+    """D3: SKILL.md must document new v0.2 subcommand review-spec-compliance."""
+    skill = SKILL_MD.read_text(encoding="utf-8")
+    assert "review-spec-compliance" in skill, (
+        "D3: SKILL.md must document new v0.2 subcommand review-spec-compliance"
+    )
+
+
+def test_readme_documents_v02_flags() -> None:
+    """D3: README.md must document the four new v0.2 flags."""
+    readme = README_MD.read_text(encoding="utf-8")
+    for flag in ("--override-checkpoint", "--reason", "--non-interactive", "--skip-spec-review"):
+        assert flag in readme, f"D3: README.md must document {flag}"
