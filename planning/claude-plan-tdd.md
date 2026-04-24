@@ -1209,9 +1209,9 @@ Accumulate `_verdict_history` inside the existing `for iteration in range(...)` 
 - Modify: `skills/sbtdd/scripts/resume_cmd.py`
 - Create: `tests/test_resume_cmd_escalation_recovery.py`
 
-- [ ] **Step 1-3 (Red)**: test that `resume_cmd` detects `.claude/magi-escalation-pending.md` and re-enters the prompt.
+- [x] **Step 1-3 (Red)**: test that `resume_cmd` detects `.claude/magi-escalation-pending.md` and re-enters the prompt.
 
-- [ ] **Step 4 (Green)**: in `resume_cmd._preflight_diagnose` (or equivalent entry point), check for `.claude/magi-escalation-pending.md`. When present, read the serialized `EscalationContext` JSON inside it, compose options, call `prompt_user`, `apply_decision`, delete the pending marker, then delegate to the original subcommand (`spec` or `pre-merge`) based on the stored context. In parallel, modify `prompt_user` to write the pending marker BEFORE the first `input()` call so Ctrl+C recovery works:
+- [x] **Step 4 (Green)**: in `resume_cmd._preflight_diagnose` (or equivalent entry point), check for `.claude/magi-escalation-pending.md`. When present, read the serialized `EscalationContext` JSON inside it, compose options, call `prompt_user`, `apply_decision`, delete the pending marker, then delegate to the original subcommand (`spec` or `pre-merge`) based on the stored context. In parallel, modify `prompt_user` to write the pending marker BEFORE the first `input()` call so Ctrl+C recovery works:
 
 ```python
 # inside prompt_user, right before input():
@@ -1228,7 +1228,7 @@ if pending.is_file():
     pending.unlink()
 ```
 
-- [ ] **Step 5-8**: tests + commits.
+- [x] **Step 5-8**: tests + commits.
 
 ### Task G9b: A8 invariant — Feature A never invoked from `auto_cmd`
 
