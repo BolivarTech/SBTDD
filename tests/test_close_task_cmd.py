@@ -281,6 +281,52 @@ def test_close_task_updates_phase_started_at_commit_to_chore_sha(
     assert state["phase_started_at_commit"] == "deadbee"
 
 
+def test_mark_and_advance_skips_commit_when_plan_already_fully_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """flip_task_checkboxes no-op -> skip git add/commit, still advance state.
+
+    Regression for the 2026-04-24 edge case: if the implementer subagent
+    has already flipped ``- [ ]`` -> ``- [x]`` inside the current task
+    section as part of its phase work, ``flip_task_checkboxes`` returns
+    identical bytes. The previous code unconditionally ran ``os.replace``
+    + ``git add`` + ``commit_create``, which produced a ``CommitError``
+    (nothing to commit). Post-fix, mark_and_advance detects the no-op
+    flip, skips the write/stage/commit, and still advances the session
+    state so bookkeeping doesn't stall.
+    """
+    import close_task_cmd
+
+    _seed_state(tmp_path, current_phase="refactor")
+    # Pre-flip ONLY Task 2's section (leave Task 3 open) so
+    # ``flip_task_checkboxes(text, "2")`` produces bytes-identical output.
+    plan_path = tmp_path / "planning" / "claude-plan-tdd.md"
+    plan_text = plan_path.read_text(encoding="utf-8")
+    task2_start = plan_text.index("### Task 2:")
+    task3_start = plan_text.index("### Task 3:")
+    pre_flipped = (
+        plan_text[:task2_start]
+        + plan_text[task2_start:task3_start].replace("- [ ]", "- [x]")
+        + plan_text[task3_start:]
+    )
+    plan_path.write_text(pre_flipped, encoding="utf-8")
+
+    captured: dict[str, object] = {"new_sha": "cafe123"}
+    _install_happy_path_patches(monkeypatch, captured)
+    from state_file import load as load_state
+
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    new_state = close_task_cmd.mark_and_advance(state, tmp_path)
+
+    # Commit MUST NOT have been called because plan was a no-op flip.
+    calls = captured["commit_calls"]
+    assert isinstance(calls, list)
+    assert len(calls) == 0
+    # State still advances to next task despite the skipped commit.
+    assert new_state.current_task_id == "3"
+    assert new_state.current_phase == "red"
+
+
 def test_mark_and_advance_is_public_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Iter-2 W1 guard: ``mark_and_advance`` must be a public function.
 

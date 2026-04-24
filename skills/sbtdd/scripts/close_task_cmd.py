@@ -96,15 +96,22 @@ def mark_and_advance(state: SessionState, root: Path) -> SessionState:
     plan_path = root / state.plan_path
     plan_text = plan_path.read_text(encoding="utf-8")
     new_plan = _plan_ops.flip_task_checkboxes(plan_text, state.current_task_id)
-    tmp = plan_path.with_suffix(plan_path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(new_plan, encoding="utf-8")
-    os.replace(tmp, plan_path)
-    subprocess_utils.run_with_timeout(
-        ["git", "add", str(plan_path.relative_to(root))],
-        timeout=10,
-        cwd=str(root),
-    )
-    commit_create("chore", f"mark task {state.current_task_id} complete", cwd=str(root))
+    if new_plan != plan_text:
+        # Only write + stage + commit when the flip actually changed bytes.
+        # If the implementer subagent already flipped the checkboxes as
+        # part of its phase work, the plan is already at the final state
+        # and a chore commit here would fail with "nothing to commit".
+        tmp = plan_path.with_suffix(plan_path.suffix + f".tmp.{os.getpid()}")
+        tmp.write_text(new_plan, encoding="utf-8")
+        os.replace(tmp, plan_path)
+        subprocess_utils.run_with_timeout(
+            ["git", "add", str(plan_path.relative_to(root))],
+            timeout=10,
+            cwd=str(root),
+        )
+        commit_create("chore", f"mark task {state.current_task_id} complete", cwd=str(root))
+    # else: plan already reflects task completion; the state advance below
+    # still runs so the session bookkeeping moves to the next open task.
     new_sha = _current_head_sha(root)
     next_id, next_title = _plan_ops.next_task(new_plan, state.current_task_id)
     new_state = SessionState(
