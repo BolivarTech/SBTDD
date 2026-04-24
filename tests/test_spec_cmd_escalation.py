@@ -151,9 +151,7 @@ def test_spec_cmd_escalates_on_safety_valve_exhaustion(
 
     _seed_spec_flow_env(tmp_path, monkeypatch)
 
-    def fake_magi(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
-    ) -> object:
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
         return _make_verdict("HOLD", degraded=False)
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
@@ -175,9 +173,7 @@ def test_spec_cmd_escalates_on_safety_valve_exhaustion(
                 "project_root": project_root,
             }
         )
-        return UserDecision(
-            chosen_option="d", action="abandon", reason="user chose abandon"
-        )
+        return UserDecision(chosen_option="d", action="abandon", reason="user chose abandon")
 
     monkeypatch.setattr(escalation_prompt, "prompt_user", spy_prompt_user)
 
@@ -194,9 +190,7 @@ def test_spec_cmd_escalates_on_safety_valve_exhaustion(
     # audit artifact under .claude/magi-escalations/.
     audit_dir = tmp_path / ".claude" / "magi-escalations"
     audits = list(audit_dir.glob("*.json")) if audit_dir.is_dir() else []
-    assert audits, (
-        f"expected >= 1 audit artifact under {audit_dir}, found {audits!r}"
-    )
+    assert audits, f"expected >= 1 audit artifact under {audit_dir}, found {audits!r}"
 
 
 def test_spec_cmd_override_flag_skips_prompt_and_writes_audit(
@@ -216,17 +210,13 @@ def test_spec_cmd_override_flag_skips_prompt_and_writes_audit(
 
     _seed_spec_flow_env(tmp_path, monkeypatch)
 
-    def fake_magi(
-        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
-    ) -> object:
+    def fake_magi(context_paths: list[str], timeout: int = 1800, cwd: str | None = None) -> object:
         return _make_verdict("HOLD", degraded=False)
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_magi)
 
     def boom_prompt_user(*args: object, **kwargs: object) -> object:
-        raise AssertionError(
-            "prompt_user must NOT be called when --override-checkpoint is set"
-        )
+        raise AssertionError("prompt_user must NOT be called when --override-checkpoint is set")
 
     monkeypatch.setattr(escalation_prompt, "prompt_user", boom_prompt_user)
 

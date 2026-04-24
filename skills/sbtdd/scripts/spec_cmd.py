@@ -20,6 +20,7 @@ from pathlib import Path
 
 import _plan_ops
 import commits
+import escalation_prompt
 import magi_dispatch
 import state_file
 import subprocess_utils
@@ -79,7 +80,33 @@ def _build_parser() -> argparse.ArgumentParser:
     """Return the argument parser for ``/sbtdd spec``."""
     p = argparse.ArgumentParser(prog="sbtdd spec")
     p.add_argument("--project-root", type=Path, default=Path.cwd())
+    p.add_argument(
+        "--override-checkpoint",
+        action="store_true",
+        help="Override MAGI gate per INV-0 on safety-valve exhaustion; requires --reason",
+    )
+    p.add_argument(
+        "--reason",
+        type=str,
+        default=None,
+        help="Mandatory when --override-checkpoint is set",
+    )
+    p.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Force headless path on safety-valve exhaustion (apply .claude/magi-auto-policy.json)",
+    )
     return p
+
+
+def _plan_id_from_path(name: str) -> str:
+    """Extract plan id suffix from filename (``claude-plan-tdd-A.md`` -> ``"A"``).
+
+    Returns ``"X"`` when the filename has no ``-<ID>.md`` suffix (the plain
+    Checkpoint 2 default ``claude-plan-tdd.md``).
+    """
+    m = re.search(r"-([A-Z0-9]+)\.md$", name)
+    return m.group(1) if m else "X"
 
 
 def _run_spec_flow(root: Path) -> None:
@@ -134,28 +161,39 @@ def _first_open_task(plan: Path) -> tuple[str, str]:
     return _plan_ops.first_open_task(plan.read_text(encoding="utf-8"))
 
 
-def _run_magi_checkpoint2(root: Path, cfg: object) -> magi_dispatch.MAGIVerdict:
+def _run_magi_checkpoint2(
+    root: Path, cfg: object, ns: argparse.Namespace
+) -> magi_dispatch.MAGIVerdict:
     """Run the Checkpoint 2 MAGI loop honoring INV-28 degraded handling.
+
+    On INV-11 safety-valve exhaustion, route to :mod:`escalation_prompt`
+    (Feature A). ``--override-checkpoint --reason`` bypasses the prompt and
+    accepts the last verdict; ``--non-interactive`` forces the headless
+    policy; otherwise ``prompt_user`` is invoked interactively.
 
     Args:
         root: Project root.
         cfg: :class:`config.PluginConfig` carrying threshold + iteration cap.
+        ns: Parsed argparse namespace carrying escalation flags.
 
     Returns:
         The ``MAGIVerdict`` that passed the gate (full, non-degraded,
-        >= threshold).
+        >= threshold) or the last observed verdict under override.
 
     Raises:
-        MAGIGateError: STRONG_NO_GO at any iteration, or non-convergence
-            after ``cfg.magi_max_iterations`` iterations.
+        MAGIGateError: STRONG_NO_GO at any iteration, ``--override-checkpoint``
+            without ``--reason``, retry-iter failure, or the user chose to
+            abandon the flow.
     """
     spec = root / "sbtdd" / "spec-behavior.md"
     plan_org = root / "planning" / "claude-plan-tdd-org.md"
     plan = root / "planning" / "claude-plan-tdd.md"
     max_iter = int(getattr(cfg, "magi_max_iterations"))
     threshold = str(getattr(cfg, "magi_threshold"))
+    verdict_history: list[magi_dispatch.MAGIVerdict] = []
     for iteration in range(1, max_iter + 1):
         verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
+        verdict_history.append(verdict)
         if magi_dispatch.verdict_is_strong_no_go(verdict):
             raise MAGIGateError(
                 f"MAGI returned STRONG_NO_GO at iter {iteration}. Refine spec-behavior-base.md."
@@ -165,7 +203,33 @@ def _run_magi_checkpoint2(root: Path, cfg: object) -> magi_dispatch.MAGIVerdict:
             continue  # INV-28: degraded never exits.
         if magi_dispatch.verdict_passes_gate(verdict, threshold):
             return verdict
-    raise MAGIGateError(f"MAGI did not converge to full {threshold}+ after {max_iter} iterations")
+    # Exhaustion path: build context + escalate (Feature A).
+    ctx = escalation_prompt.build_escalation_context(
+        iterations=list(verdict_history),
+        plan_id=_plan_id_from_path(plan.name),
+        context="checkpoint2",
+    )
+    options = escalation_prompt._compose_options(ctx)
+    if ns.override_checkpoint:
+        if not ns.reason:
+            raise MAGIGateError("--override-checkpoint requires --reason")
+        decision = escalation_prompt.UserDecision(
+            chosen_option="a", action="override", reason=ns.reason
+        )
+    else:
+        decision = escalation_prompt.prompt_user(
+            ctx, options, non_interactive=ns.non_interactive, project_root=root
+        )
+    code = escalation_prompt.apply_decision(decision, ctx, root)
+    if code == 0 and decision.action == "override":
+        return verdict_history[-1]
+    if code == 0 and decision.action == "retry":
+        verdict = magi_dispatch.invoke_magi(context_paths=[str(spec), str(plan_org)], cwd=str(root))
+        _write_plan_tdd(root, verdict, plan_org, plan)
+        if magi_dispatch.verdict_passes_gate(verdict, threshold):
+            return verdict
+        raise MAGIGateError("retry iter also failed gate")
+    raise MAGIGateError(f"user chose '{decision.action}' on safety-valve exhaustion")
 
 
 def _create_state_file(root: Path, cfg: object, plan: Path) -> None:
@@ -236,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     _validate_spec_base_no_placeholders(root / "sbtdd" / "spec-behavior-base.md")
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
     _run_spec_flow(root)
-    _run_magi_checkpoint2(root, cfg)
+    _run_magi_checkpoint2(root, cfg, ns)
     # State file MUST be persisted BEFORE the artifacts commit so that
     # plan_approved_at is visible to any follow-on subcommand even if
     # the commit itself fails mid-way (state = canon of the present;
