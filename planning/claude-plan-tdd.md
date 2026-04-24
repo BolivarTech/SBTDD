@@ -1693,7 +1693,7 @@ def dispatch_spec_reviewer(
 - Modify: `tests/fixtures/skill_stubs.py`
 - Modify: `tests/test_skill_stubs.py`
 
-- [ ] **Step 1 (Red)**: tests for the stub.
+- [x] **Step 1 (Red)**: tests for the stub.
 
 ```python
 def test_stub_spec_reviewer_sequence_consumed_fifo() -> None:
@@ -1711,9 +1711,9 @@ def test_stub_spec_reviewer_empty_raises() -> None:
         stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None)
 ```
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: append to `tests/fixtures/skill_stubs.py`:
+- [x] **Step 4 (Green)**: append to `tests/fixtures/skill_stubs.py`:
 
 ```python
 from spec_review_dispatch import SpecIssue, SpecReviewResult
@@ -1747,7 +1747,7 @@ class StubSpecReviewer:
         )
 ```
 
-- [ ] **Step 5-8**: tests pass, commits.
+- [x] **Step 5-8**: tests pass, commits.
 
 ### Task H5: `close_task_cmd --skip-spec-review` flag
 
