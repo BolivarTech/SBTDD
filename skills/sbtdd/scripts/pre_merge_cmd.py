@@ -409,15 +409,40 @@ def _write_magi_feedback_file(root: Path, rejections: list[str]) -> Path:
     return path
 
 
+#: Instruction prepended to every /receiving-code-review dispatch. The
+#: superpowers skill is prose-only -- it teaches how to RESPOND to
+#: feedback but does not define a machine-parseable output format. Without
+#: this instruction the subagent produces free-form analysis that
+#: :func:`_parse_receiving_review` cannot extract decisions from,
+#: triggering ``ValidationError: /receiving-code-review produced no
+#: decisions``. Observed v0.2 pre-merge Loop 2 2026-04-24. The instruction
+#: gives the subagent an explicit contract while still allowing the
+#: skill's technical-evaluation discipline (the forbidden-responses
+#: rules in the skill prevent lazy blanket-accept output).
+_RECEIVING_REVIEW_FORMAT_CONTRACT = (
+    "After technical evaluation of the MAGI findings below, your reply "
+    "MUST end with EXACTLY these two markdown sections (and nothing "
+    "else after them): ``## Accepted`` followed by ``- <verbatim "
+    "finding text>`` lines for findings you accept, and "
+    "``## Rejected`` followed by ``- <verbatim finding text> "
+    "(rationale: ...)`` lines for findings you reject. Every finding "
+    "MUST appear under exactly one section. Findings to evaluate:"
+)
+
+
 def _conditions_to_skill_args(conditions: tuple[str, ...]) -> list[str]:
     """Serialise MAGI conditions as CLI args for /receiving-code-review.
 
-    The skill accepts findings as quoted positional arguments via
-    ``claude -p /receiving-code-review "<finding1>" "<finding2>" ...``
-    (consistent with the ``_make_wrapper`` pattern in
-    :mod:`superpowers_dispatch`).
+    The skill accepts findings as positional arguments embedded in the
+    ``claude -p`` prompt. A leading instruction (see
+    :data:`_RECEIVING_REVIEW_FORMAT_CONTRACT`) forces the subagent to
+    emit output in the ``## Accepted`` / ``## Rejected`` markdown shape
+    that :func:`_parse_receiving_review` parses -- the skill itself is
+    prose-only and would otherwise return free-form analysis the parser
+    cannot extract decisions from.
     """
-    return [c for c in conditions]
+    quoted = [f'"{c}"' for c in conditions]
+    return [_RECEIVING_REVIEW_FORMAT_CONTRACT, *quoted]
 
 
 def _handle_safety_valve_exhaustion(

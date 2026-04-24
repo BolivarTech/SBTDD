@@ -716,6 +716,46 @@ def test_parse_receiving_review_empty_stdout_returns_empty_lists(
         pre_merge_cmd.main(["--project-root", str(tmp_path)])
 
 
+def test_conditions_to_skill_args_injects_format_contract() -> None:
+    """/receiving-code-review prompt MUST lead with the format contract.
+
+    The superpowers skill is prose-only -- it teaches how to respond to
+    feedback but does not define a machine-parseable output format.
+    Without an explicit instruction the subagent emits free-form
+    analysis that ``_parse_receiving_review`` cannot decode, which raises
+    ``ValidationError: /receiving-code-review produced no decisions``.
+    Observed 2026-04-24 during v0.2 pre-merge Loop 2. The fix prepends
+    a contract instruction to the skill args so the subagent emits the
+    ``## Accepted`` / ``## Rejected`` markdown shape the parser needs.
+    """
+    import pre_merge_cmd
+
+    args = pre_merge_cmd._conditions_to_skill_args(("finding-1", "finding-2"))
+    # First arg is the contract instruction (non-empty, references the
+    # two mandatory section headers). Subsequent args are the quoted
+    # findings verbatim.
+    assert len(args) == 3
+    contract = args[0]
+    assert "## Accepted" in contract
+    assert "## Rejected" in contract
+    assert args[1] == '"finding-1"'
+    assert args[2] == '"finding-2"'
+
+
+def test_conditions_to_skill_args_handles_empty_conditions() -> None:
+    """With zero conditions the args list is just the contract instruction.
+
+    The helper is still safe to call when MAGI returns no conditions
+    (Loop 2 would normally short-circuit that path, but the helper
+    must remain safe to call for robustness).
+    """
+    import pre_merge_cmd
+
+    args = pre_merge_cmd._conditions_to_skill_args(())
+    assert len(args) == 1
+    assert "## Accepted" in args[0]
+
+
 def test_loop2_writes_magi_feedback_file_when_rejections_accumulate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
