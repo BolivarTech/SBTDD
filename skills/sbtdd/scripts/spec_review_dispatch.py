@@ -2,39 +2,59 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-24
-"""Spec-reviewer dispatch dataclasses for the sbtdd-workflow plugin.
+"""Spec-reviewer dispatch for the sbtdd-workflow plugin (v0.2 Feature B).
 
-Green phase of task H2 (v0.2 Feature B — superpowers spec-reviewer
-integration per task). This module currently exposes only the immutable
-result types consumed by higher layers; the actual dispatch logic
-(``dispatch_spec_reviewer``, artifact writing, reviewer-output parsing)
-lands in later tasks (H3+) per the approved plan.
+This module implements INV-31 of the SBTDD methodology: every task close in
+``auto_cmd`` and ``close_task_cmd`` (interactive) MUST pass a spec-reviewer
+approval before ``mark_and_advance`` advances state, unless the
+``--skip-spec-review`` flag is set or a stub fixture is injected.
 
-The two dataclasses mirror the contract declared in
-``sbtdd/spec-behavior.md`` §2.2 / §4 F20 and in ``CLAUDE.md`` under
-"v0.2 requirement (LOCKED) — superpowers spec-reviewer integration per
-task":
+The dispatcher invokes the superpowers
+``subagent-driven-development/spec-reviewer-prompt.md`` subagent for one task
+at a time, passing the task text extracted from the approved plan plus the
+diff of commits produced for that task. The subagent classifies findings
+into three defect classes (missing requirements, extra/unneeded work,
+misunderstandings) and returns a JSON payload parsed by
+:func:`_parse_reviewer_output`.
 
-* :class:`SpecIssue` — one finding raised by the reviewer, classified by
-  severity against the three defect classes documented in the superpowers
-  ``spec-reviewer-prompt.md`` template (missing requirements, extra/unneeded
-  work, misunderstandings).
-* :class:`SpecReviewResult` — aggregate outcome returned by
-  ``dispatch_spec_reviewer`` (to be implemented in H3+): approval flag,
-  tuple of issues, iteration count, and path to the audit artifact written
-  under ``.claude/spec-reviews/``.
+Public contract:
 
-Both dataclasses are ``frozen=True`` so they honour the immutability rule
-from ``CLAUDE.local.md`` §0.2 "Inmutabilidad".
+* :class:`SpecIssue` / :class:`SpecReviewResult` — immutable result types
+  consumed by ``auto_cmd._phase2_task_loop`` and ``close_task_cmd``.
+* :func:`dispatch_spec_reviewer` — runs the reviewer with an N-iteration
+  safety valve (default 3 per task, matching the Checkpoint 2 pattern)
+  and writes one audit artifact per dispatch under
+  ``.claude/spec-reviews/<task-id>-<timestamp>.json``.
+
+Exit-code mapping (via :data:`errors.EXIT_CODES`):
+
+* :class:`SpecReviewError` → 12 (``SPEC_REVIEW_ISSUES``), raised when the
+  safety valve is exhausted with issues still outstanding.
+* :class:`QuotaExhaustedError` → 11, raised when
+  :mod:`quota_detector` matches the reviewer subprocess stderr.
+* :class:`ValidationError` → 1, raised when the reviewer stdout is not a
+  well-formed JSON payload.
 """
 
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+import quota_detector
+import subprocess_utils
+from errors import QuotaExhaustedError, SpecReviewError, ValidationError
 
 _SeverityLit = Literal["MISSING", "EXTRA", "MISUNDERSTANDING"]
+
+#: Skill reference passed to ``claude -p`` when invoking the reviewer
+#: subagent. Kept as a module-level constant so the stubbed integration
+#: tests can monkeypatch it (mirrors the ``magi_dispatch`` pattern).
+_REVIEWER_SKILL_REF = "/superpowers:subagent-driven-development/spec-reviewer-prompt.md"
 
 
 @dataclass(frozen=True)
@@ -76,3 +96,245 @@ class SpecReviewResult:
     issues: tuple[SpecIssue, ...]
     reviewer_iter: int
     artifact_path: Path | None
+
+
+def _parse_reviewer_output(raw: str) -> tuple[bool, tuple[SpecIssue, ...]]:
+    """Decode the reviewer subagent's JSON payload.
+
+    Args:
+        raw: The raw stdout string emitted by the reviewer subprocess.
+
+    Returns:
+        A ``(approved, issues)`` tuple. ``approved`` is ``True`` when the
+        reviewer raised no blocking findings; ``issues`` is an immutable
+        tuple of :class:`SpecIssue` — empty when ``approved`` is ``True``.
+
+    Raises:
+        ValidationError: If ``raw`` is not valid JSON, or if the ``issues``
+            field is present but not a list.
+    """
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"spec-reviewer output is not valid JSON: {exc}") from exc
+    approved = bool(payload.get("approved", False))
+    issues_raw = payload.get("issues", []) or []
+    if not isinstance(issues_raw, list):
+        raise ValidationError("spec-reviewer 'issues' must be a list")
+    issues = tuple(
+        SpecIssue(
+            severity=str(i.get("severity", "MISSING")).upper(),  # type: ignore[arg-type]
+            text=str(i.get("text", "")),
+        )
+        for i in issues_raw
+    )
+    return approved, issues
+
+
+def _write_artifact(
+    result_payload: dict[str, Any],
+    repo_root: Path,
+    task_id: str,
+) -> Path:
+    """Persist one reviewer dispatch as a JSON audit artifact.
+
+    Creates ``<repo_root>/.claude/spec-reviews/`` if missing. The filename
+    is ``<task_id>-<iso-timestamp>.json`` with colons replaced by dashes
+    so Windows filesystems accept it.
+
+    Args:
+        result_payload: Dict with ``task_id``, ``approved``, ``iter_history``,
+            and ``final_issues`` keys.
+        repo_root: Destination project root.
+        task_id: Plan task id used as filename prefix.
+
+    Returns:
+        Absolute path of the written artifact.
+    """
+    directory = repo_root / ".claude" / "spec-reviews"
+    directory.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z").replace(":", "-")
+    artifact = directory / f"{task_id}-{ts}.json"
+    artifact.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
+    return artifact
+
+
+def _extract_task_text(plan_text: str, task_id: str) -> str:
+    """Return the slice of the plan that describes the named task.
+
+    The plan format (``planning/claude-plan-tdd.md``) uses
+    ``### Task <id>: <title>`` headers. This helper scans for the matching
+    header and returns content up to the next ``### Task`` header (or EOF).
+    Parsing is intentionally forgiving — if no match is found, the whole
+    plan is returned so the reviewer still has context.
+
+    Args:
+        plan_text: Full content of the approved plan.
+        task_id: Plan task id to locate (e.g. ``"H3"``, ``"1"``).
+
+    Returns:
+        The task's section text, or the whole plan when no match is found.
+    """
+    marker = f"### Task {task_id}:"
+    start = plan_text.find(marker)
+    if start == -1:
+        return plan_text
+    end = plan_text.find("### Task ", start + len(marker))
+    if end == -1:
+        return plan_text[start:]
+    return plan_text[start:end]
+
+
+def _collect_task_diff(repo_root: Path, task_id: str) -> str:
+    """Return the diff of the commits produced for ``task_id``.
+
+    v0.2 baseline uses the last three commits of ``HEAD`` as a proxy for
+    the task's Red/Green/Refactor trio; that matches the per-task commit
+    cadence enforced by the SBTDD methodology (sec.5). Git failures are
+    swallowed so the dispatcher stays operational in test fixtures that
+    don't construct a real repo.
+
+    Args:
+        repo_root: Destination project root.
+        task_id: Plan task id, forwarded only to the error-path comment.
+
+    Returns:
+        ``git diff`` output as text, or an empty string when the command
+        fails (no repo, empty history, ...). The reviewer handles missing
+        diff context gracefully.
+    """
+    del task_id  # Reserved for future commit-range inference.
+    try:
+        result = subprocess_utils.run_with_timeout(
+            ["git", "-C", str(repo_root), "log", "-p", "-n", "3", "HEAD"],
+            timeout=30,
+            capture=True,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout or ""
+
+
+def dispatch_spec_reviewer(
+    *,
+    task_id: str,
+    plan_path: Path,
+    repo_root: Path,
+    max_iterations: int = 3,
+    timeout: int = 900,
+) -> SpecReviewResult:
+    """Run the spec-reviewer for ONE task with a bounded retry budget.
+
+    The reviewer subagent is invoked via ``claude -p`` on
+    ``spec-reviewer-prompt.md`` with the task text extracted from the
+    approved plan plus the last three commits of ``HEAD``. The reviewer
+    returns a JSON verdict consumed by :func:`_parse_reviewer_output`.
+
+    The loop short-circuits on approval and writes a single audit artifact
+    summarising the iteration history under ``.claude/spec-reviews/``.
+    When the safety valve is exhausted (``max_iterations`` reached with
+    issues still outstanding), the artifact is still written for
+    post-mortem before :class:`SpecReviewError` is raised — this mirrors
+    the MAGI Loop 2 convention where verdict artifacts precede the
+    dispatcher exception.
+
+    Args:
+        task_id: Plan task id whose diff will be reviewed.
+        plan_path: Path to the approved plan (``planning/claude-plan-tdd.md``).
+        repo_root: Destination project root; used both as git cwd and as
+            audit-artifact base.
+        max_iterations: Safety valve cap (default 3, matching Checkpoint 2).
+        timeout: Per-call subprocess timeout in seconds (default 900, the
+            reviewer budget prescribed by ``CLAUDE.md`` v0.2 Feature B).
+
+    Returns:
+        :class:`SpecReviewResult` with ``approved=True`` on success; the
+        ``artifact_path`` points at the just-written JSON audit record.
+
+    Raises:
+        SpecReviewError: Safety valve exhausted, reviewer process exited
+            non-zero without a matching quota pattern, or the subprocess
+            timed out.
+        QuotaExhaustedError: :mod:`quota_detector` matched a pattern in
+            the reviewer subprocess stderr.
+        ValidationError: Reviewer stdout could not be parsed as the
+            expected JSON shape.
+    """
+    plan_text = plan_path.read_text(encoding="utf-8")
+    task_text = _extract_task_text(plan_text, task_id)
+    diff_text = _collect_task_diff(repo_root, task_id)
+    iter_history: list[dict[str, Any]] = []
+    for iteration in range(1, max_iterations + 1):
+        prompt = (
+            f"Task: {task_id}\n\n"
+            f"Task text:\n{task_text}\n\n"
+            f"Diff:\n{diff_text}\n\n"
+            "Verify by reading code, NOT by trusting implementer report."
+        )
+        cmd = ["claude", "-p", _REVIEWER_SKILL_REF, prompt]
+        try:
+            result = subprocess_utils.run_with_timeout(
+                cmd,
+                timeout=timeout,
+                capture=True,
+                cwd=str(repo_root),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SpecReviewError(
+                f"spec-reviewer timed out at iter {iteration} for task {task_id}",
+                task_id=task_id,
+                iteration=iteration,
+            ) from exc
+        if result.returncode != 0:
+            exhaustion = quota_detector.detect(result.stderr or "")
+            if exhaustion is not None:
+                raise QuotaExhaustedError(f"{exhaustion.kind}: {exhaustion.raw_message}")
+            raise SpecReviewError(
+                f"spec-reviewer exited {result.returncode} at iter {iteration} for task {task_id}",
+                task_id=task_id,
+                iteration=iteration,
+            )
+        approved, issues = _parse_reviewer_output(result.stdout or "")
+        iter_history.append({"iter": iteration, "approved": approved, "n_issues": len(issues)})
+        if approved:
+            artifact = _write_artifact(
+                {
+                    "task_id": task_id,
+                    "approved": True,
+                    "iter_history": iter_history,
+                    "final_issues": [],
+                },
+                repo_root,
+                task_id,
+            )
+            return SpecReviewResult(
+                approved=True,
+                issues=(),
+                reviewer_iter=iteration,
+                artifact_path=artifact,
+            )
+        if iteration == max_iterations:
+            artifact = _write_artifact(
+                {
+                    "task_id": task_id,
+                    "approved": False,
+                    "iter_history": iter_history,
+                    "final_issues": [{"severity": i.severity, "text": i.text} for i in issues],
+                },
+                repo_root,
+                task_id,
+            )
+            raise SpecReviewError(
+                f"spec-reviewer safety valve exhausted for task {task_id} "
+                f"after {iteration} iterations ({len(issues)} issues)",
+                task_id=task_id,
+                iteration=iteration,
+                issues=tuple(i.text for i in issues),
+            )
+    raise SpecReviewError(
+        f"unreachable: max_iterations must be >= 1 for task {task_id}",
+        task_id=task_id,
+        iteration=0,
+    )
