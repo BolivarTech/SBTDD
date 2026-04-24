@@ -2243,16 +2243,16 @@ git commit -m "docs: archive shipped v0.2 blockers to CHANGELOG"
 
 ### Task I5: final full test sweep + close plan
 
-- [ ] **Step 1**: run full `make verify` at repo root.
+- [x] **Step 1**: run full `make verify` at repo root.
 
 ```bash
 make verify
 ```
 Expected: pytest ≥ 597 baseline + ~40-80 new tests all PASS; ruff clean; mypy clean.
 
-- [ ] **Step 2**: mark Milestone I complete; plan [x] all.
+- [x] **Step 2**: mark Milestone I complete; plan [x] all.
 
-- [ ] **Step 3**: close-plan:
+- [x] **Step 3**: close-plan:
 
 ```bash
 git commit --allow-empty -m "chore: mark task I complete"
