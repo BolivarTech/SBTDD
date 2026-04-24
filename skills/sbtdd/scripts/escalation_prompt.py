@@ -25,10 +25,10 @@ from typing import Any, Literal
 
 
 class _RootCause(enum.Enum):
-    INFRA_TRANSIENT = "infra_transient"       # same agent fails across iters
-    PLAN_VS_SPEC = "plan_vs_spec"             # CRITICAL findings persist
-    STRUCTURAL_DEFECT = "structural_defect"   # STRONG_NO_GO from >=1 agent
-    SPEC_AMBIGUITY = "spec_ambiguity"         # confidence trending down
+    INFRA_TRANSIENT = "infra_transient"  # same agent fails across iters
+    PLAN_VS_SPEC = "plan_vs_spec"  # CRITICAL findings persist
+    STRUCTURAL_DEFECT = "structural_defect"  # STRONG_NO_GO from >=1 agent
+    SPEC_AMBIGUITY = "spec_ambiguity"  # confidence trending down
 
 
 _ContextLit = Literal["checkpoint2", "pre-merge", "auto"]
@@ -37,19 +37,19 @@ _ActionLit = Literal["override", "retry", "abandon", "alternative"]
 
 @dataclass(frozen=True)
 class EscalationOption:
-    letter: str       # 'a' | 'b' | 'c' | 'd'
+    letter: str  # 'a' | 'b' | 'c' | 'd'
     action: _ActionLit
-    rationale: str    # shown in the menu after the action verb
+    rationale: str  # shown in the menu after the action verb
     caveat: str = ""  # optional consequence / tradeoff line
 
 
 @dataclass(frozen=True)
 class EscalationContext:
-    iterations: tuple[dict[str, Any], ...]     # per-iter verdict snapshots
+    iterations: tuple[dict[str, Any], ...]  # per-iter verdict snapshots
     plan_id: str
     context: _ContextLit
     per_agent_verdicts: tuple[tuple[str, str], ...]  # (agent_name, verdict)
-    findings: tuple[tuple[str, str], ...]            # (severity, text)
+    findings: tuple[tuple[str, str], ...]  # (severity, text)
     root_cause: _RootCause
 
 
