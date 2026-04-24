@@ -243,31 +243,107 @@ def _build_artifact_payload(
     }
 
 
-def _collect_task_diff(repo_root: Path, task_id: str) -> str:
-    """Return the diff of the commits produced for ``task_id``.
+_CHORE_PREFIX: str = "chore: mark task "
+_CHORE_SUFFIX: str = " complete"
 
-    v0.2 baseline uses the last three commits of ``HEAD`` as a proxy for
-    the task's Red/Green/Refactor trio; that matches the per-task commit
-    cadence enforced by the SBTDD methodology (sec.5). Git failures are
-    swallowed so the dispatcher stays operational in test fixtures that
-    don't construct a real repo.
+
+def _log_subject_lines(repo_root: Path, ref: str) -> list[tuple[str, str]]:
+    """Return ``[(sha, subject), ...]`` walking ``ref`` in reverse-chron order.
+
+    Empty list on any git failure (timeout or non-zero rc). This keeps
+    callers simple: they iterate results without ``try/except`` plumbing.
+    """
+    try:
+        result = subprocess_utils.run_with_timeout(
+            ["git", "-C", str(repo_root), "log", "--format=%H %s", ref],
+            timeout=10,
+            capture=True,
+        )
+    except subprocess.TimeoutExpired:
+        return []
+    if result.returncode != 0:
+        return []
+    out: list[tuple[str, str]] = []
+    for line in (result.stdout or "").splitlines():
+        sha, _, subject = line.partition(" ")
+        out.append((sha, subject))
+    return out
+
+
+def _find_task_chore_sha(repo_root: Path, task_id: str) -> str:
+    """Return SHA of ``chore: mark task {task_id} complete``, or ``""``.
+
+    Exact-match on the commit subject (CLAUDE.local.md sec.5 commit prefix
+    convention pins the subject to this literal string). Avoids the
+    substring false-matches of the v0.2 baseline implementation: for
+    ``task_id="1"`` the old grep matched any commit mentioning ``1``
+    (task 10, 11, 12, "phase 1", SHAs containing 1). Now the subject
+    must equal ``chore: mark task 1 complete`` exactly.
+    """
+    target = f"{_CHORE_PREFIX}{task_id}{_CHORE_SUFFIX}"
+    for sha, subject in _log_subject_lines(repo_root, "HEAD"):
+        if subject == target:
+            return sha
+    return ""
+
+
+def _find_most_recent_chore_before(repo_root: Path, ref: str) -> str:
+    """Return SHA of the most-recent ``chore: mark task * complete`` in ``ref``'s ancestry.
+
+    ``ref`` is either the current task's chore SHA + ``~1`` (look strictly
+    before) when the current task is already closed, or ``HEAD`` when the
+    current task is in-flight. Empty string when no prior chore exists
+    (first task in the plan -- typical only during Milestone F1).
+    """
+    for sha, subject in _log_subject_lines(repo_root, ref):
+        if subject.startswith(_CHORE_PREFIX) and subject.endswith(_CHORE_SUFFIX):
+            return sha
+    return ""
+
+
+def _collect_task_diff(repo_root: Path, task_id: str) -> str:
+    """Return ``git diff`` for the commit range covering ``task_id``.
+
+    Correlation strategy (replacement for the v0.2 baseline's last-3-HEAD
+    heuristic flagged by MAGI Loop 2 v0.2 pre-merge 2026-04-24 -- CRITICAL
+    #1/#5, WARNING #10):
+
+    1. Locate ``chore: mark task {id} complete`` via exact-subject match.
+       If found -> ``end = that sha`` (task already closed); otherwise
+       ``end = HEAD`` (task still in flight, e.g. called from
+       ``auto_cmd._phase2_task_loop`` between the refactor commit and
+       ``mark_and_advance``).
+    2. Locate the most recent ``chore: mark task * complete`` strictly
+       before ``end``. If found -> ``start = that sha``; otherwise
+       ``start = ""`` (this is the first task in the plan).
+    3. When ``start`` is non-empty, emit ``git diff start..end``.
+       When empty, emit ``git log -p end`` so the reviewer still sees
+       the first task's work (full history up to end).
+
+    Git failures fail-quiet (empty string) so the dispatcher stays
+    operational in test fixtures that don't construct a real repo.
 
     Args:
         repo_root: Destination project root.
-        task_id: Plan task id, forwarded only to the error-path comment.
+        task_id: Plan task id whose diff range to emit.
 
     Returns:
-        ``git diff`` output as text, or an empty string when the command
-        fails (no repo, empty history, ...). The reviewer handles missing
-        diff context gracefully.
+        Diff text, or empty string when git failures prevent construction.
     """
-    del task_id  # Reserved for future commit-range inference.
+    this_chore = _find_task_chore_sha(repo_root, task_id)
+    end = this_chore or "HEAD"
+    # When ``this_chore`` is the end anchor, look for the previous chore
+    # strictly in its ancestry via ``~1`` so we don't re-match ``end``
+    # itself. When ``end=HEAD`` (task in flight), no subtraction needed.
+    ref_for_prev = f"{end}~1" if this_chore else end
+    prev_chore = _find_most_recent_chore_before(repo_root, ref_for_prev)
+
+    if prev_chore:
+        diff_cmd = ["git", "-C", str(repo_root), "diff", f"{prev_chore}..{end}"]
+    else:
+        diff_cmd = ["git", "-C", str(repo_root), "log", "-p", end]
     try:
-        result = subprocess_utils.run_with_timeout(
-            ["git", "-C", str(repo_root), "log", "-p", "-n", "3", "HEAD"],
-            timeout=30,
-            capture=True,
-        )
+        result = subprocess_utils.run_with_timeout(diff_cmd, timeout=30, capture=True)
     except subprocess.TimeoutExpired:
         return ""
     if result.returncode != 0:
