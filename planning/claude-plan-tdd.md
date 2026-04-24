@@ -2232,9 +2232,9 @@ git commit -m "chore: bump plugin + marketplace to v0.2.0"
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1**: remove the three `## v0.2 requirement (LOCKED) — ...` sections from `CLAUDE.md` now that they shipped. Replace with a single `## v0.2 release notes` pointer to `CHANGELOG.md [0.2.0]`.
+- [x] **Step 1**: remove the three `## v0.2 requirement (LOCKED) — ...` sections from `CLAUDE.md` now that they shipped. Replace with a single `## v0.2 release notes` pointer to `CHANGELOG.md [0.2.0]`.
 
-- [ ] **Step 2 (commit)**:
+- [x] **Step 2 (commit)**:
 
 ```bash
 git add CLAUDE.md
