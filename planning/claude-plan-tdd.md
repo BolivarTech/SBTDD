@@ -2199,7 +2199,7 @@ def test_changelog_v02_section_references_features() -> None:
 - Modify: `.claude-plugin/plugin.json`
 - Modify: `.claude-plugin/marketplace.json`
 
-- [ ] **Step 1**: existing test `test_plugin_and_marketplace_versions_match` will fail immediately once either file changes without the other. Use that as the red signal:
+- [x] **Step 1**: existing test `test_plugin_and_marketplace_versions_match` will fail immediately once either file changes without the other. Use that as the red signal:
 
 ```bash
 # Edit plugin.json only first
@@ -2207,20 +2207,20 @@ python -m pytest tests/test_distribution_coherence.py::test_plugin_and_marketpla
 ```
 Expected: FAIL with version mismatch.
 
-- [ ] **Step 2 (Green)**: edit both files in one commit:
+- [x] **Step 2 (Green)**: edit both files in one commit:
 
 `.claude-plugin/plugin.json`: change `"version": "0.1.0"` → `"version": "0.2.0"`.
 
 `.claude-plugin/marketplace.json`: change BOTH the top-level `"version"` AND the plugin entry `"version"` to `"0.2.0"`.
 
-- [ ] **Step 3 (verify)**:
+- [x] **Step 3 (verify)**:
 
 ```bash
 python -m pytest tests/test_distribution_coherence.py -v
 ```
 Expected: all PASS.
 
-- [ ] **Step 4 (Green commit)**:
+- [x] **Step 4 (Green commit)**:
 
 ```bash
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
