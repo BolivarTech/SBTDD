@@ -14,6 +14,9 @@ Covers Plan D Phase 4 Tasks 14-16:
 - Task 16: ``init_cmd._mkdir_tracked`` documents the TOCTOU window
   between ``_collect_created_dirs`` and ``mkdir(exist_ok=False)`` as
   acceptable for the single-user ``/sbtdd init`` invocation pattern.
+- Plan I Task I1: CLAUDE.md Invariants Summary and spec-base sec.S.10
+  register INV-31 (spec-reviewer gate at task close) with the canonical
+  bold-bullet format shared with INV-22..INV-30.
 
 These tests are pure contract pins -- they assert that the documentation
 is present, not that any runtime behavior changed.
@@ -22,6 +25,7 @@ is present, not that any runtime behavior changed.
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 
 import auto_cmd
@@ -30,6 +34,27 @@ import pre_merge_cmd
 import resume_cmd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _assert_inv_bullet_documented(path: Path, inv_pattern: str, artifact_label: str) -> None:
+    """Assert ``path`` contains an INV bullet matching ``inv_pattern`` and mentions
+    'spec-reviewer' in its body.
+
+    Args:
+        path: Absolute path to the markdown artifact under inspection.
+        inv_pattern: Multiline regex matching the canonical bold-bullet form
+            (e.g. ``r"^- \\*\\*INV-31\\*\\*"``).
+        artifact_label: Human-readable label embedded in the assertion
+            messages so test failures identify which artifact lacks the
+            bullet.
+    """
+    text = path.read_text(encoding="utf-8")
+    assert re.search(inv_pattern, text, re.MULTILINE), (
+        f"{artifact_label} must contain the matching INV bullet"
+    )
+    assert "spec-reviewer" in text.lower(), (
+        f"{artifact_label} INV bullet must mention spec-reviewer"
+    )
 
 
 def test_auto_cmd_docstring_references_inv24_semantics() -> None:
@@ -67,24 +92,19 @@ def test_inv31_documented_in_claude_md() -> None:
     Invariants Summary -- not merely as a prose reference in the v0.2 LOCKED
     section. The canonical bullet format is `- **INV-31** ...`.
     """
-    import re
-
-    text = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    assert re.search(r"^- \*\*INV-31\*\*", text, re.MULTILINE), (
-        "CLAUDE.md Invariants Summary must contain the INV-31 bullet"
+    _assert_inv_bullet_documented(
+        REPO_ROOT / "CLAUDE.md",
+        r"^- \*\*INV-31\*\*",
+        "CLAUDE.md Invariants Summary",
     )
-    # The bullet must reference the spec-reviewer gate concept.
-    assert "spec-reviewer" in text.lower(), "CLAUDE.md INV-31 bullet must mention spec-reviewer"
 
 
 def test_inv31_documented_in_spec_base() -> None:
     """INV-31 must be registered in sbtdd/sbtdd-workflow-plugin-spec-base.md
     sec.S.10 using the same bold bullet format used for INV-22..INV-30.
     """
-    import re
-
-    text = (REPO_ROOT / "sbtdd" / "sbtdd-workflow-plugin-spec-base.md").read_text(encoding="utf-8")
-    assert re.search(r"^- \*\*INV-31\b", text, re.MULTILINE), (
-        "spec-base sec.S.10 must register INV-31 with a bold bullet"
+    _assert_inv_bullet_documented(
+        REPO_ROOT / "sbtdd" / "sbtdd-workflow-plugin-spec-base.md",
+        r"^- \*\*INV-31\b",
+        "spec-base sec.S.10",
     )
-    assert "spec-reviewer" in text.lower(), "spec-base INV-31 entry must mention spec-reviewer"
