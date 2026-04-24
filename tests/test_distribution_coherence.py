@@ -86,23 +86,32 @@ def _semver_key(v: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def _magi_cache_base() -> Path:
+    """Default MAGI cache base directory under Claude Code plugin cache."""
+    return Path.home() / ".claude" / "plugins" / "cache" / "bolivartech-plugins" / "magi"
+
+
 def _resolve_magi_plugin_json() -> Path:
-    """Resolve the path to MAGI's plugin.json, honoring MAGI_PLUGIN_ROOT override."""
+    """Resolve MAGI's plugin.json, honoring MAGI_PLUGIN_ROOT env override.
+
+    When the env var is unset, enumerate versions under `_magi_cache_base()`
+    and pick the highest semver so the parity tests track the latest cached
+    MAGI automatically (avoids hardcoding a patch version).
+
+    Falls back to a non-existent path when the cache is missing or empty so
+    the existing `@pytest.mark.skipif` gate on the parity tests triggers.
+    """
     magi_root_env = os.environ.get("MAGI_PLUGIN_ROOT")
     if magi_root_env:
         return Path(magi_root_env) / ".claude-plugin" / "plugin.json"
-    # Default cache location used by Claude Code on Windows/POSIX.
-    return (
-        Path.home()
-        / ".claude"
-        / "plugins"
-        / "cache"
-        / "bolivartech-plugins"
-        / "magi"
-        / "2.1.3"
-        / ".claude-plugin"
-        / "plugin.json"
-    )
+    base = _magi_cache_base()
+    if not base.is_dir():
+        return base / "missing" / ".claude-plugin" / "plugin.json"
+    versions = [p.name for p in base.iterdir() if p.is_dir()]
+    if not versions:
+        return base / "missing" / ".claude-plugin" / "plugin.json"
+    latest = max(versions, key=_semver_key)
+    return base / latest / ".claude-plugin" / "plugin.json"
 
 
 MAGI_PLUGIN_JSON = _resolve_magi_plugin_json()
@@ -234,6 +243,7 @@ def test_semver_key_handles_mixed_version_strings() -> None:
 
 def test_resolve_magi_plugin_json_picks_latest_semver(tmp_path, monkeypatch) -> None:
     from tests.test_distribution_coherence import _resolve_magi_plugin_json
+
     # Build synthetic cache with 2.1.3 and 2.1.4
     for v in ("2.1.3", "2.1.4"):
         d = tmp_path / "bolivartech-plugins" / "magi" / v / ".claude-plugin"
@@ -255,6 +265,7 @@ def test_resolve_magi_plugin_json_picks_latest_semver(tmp_path, monkeypatch) -> 
 
 def test_resolve_magi_plugin_json_honors_env_override(tmp_path, monkeypatch) -> None:
     from tests.test_distribution_coherence import _resolve_magi_plugin_json
+
     monkeypatch.setenv("MAGI_PLUGIN_ROOT", str(tmp_path))
     result = _resolve_magi_plugin_json()
     assert result == tmp_path / ".claude-plugin" / "plugin.json"
@@ -262,6 +273,7 @@ def test_resolve_magi_plugin_json_honors_env_override(tmp_path, monkeypatch) -> 
 
 def test_resolve_magi_plugin_json_graceful_when_cache_missing(tmp_path, monkeypatch) -> None:
     from tests.test_distribution_coherence import _resolve_magi_plugin_json
+
     monkeypatch.delenv("MAGI_PLUGIN_ROOT", raising=False)
     monkeypatch.setattr(
         "tests.test_distribution_coherence._magi_cache_base",
