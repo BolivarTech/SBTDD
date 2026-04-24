@@ -8,6 +8,23 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.7 - 2026-04-24
+
+### Fixed
+
+- `/test-driven-development` subprocess timeout default raised from
+  600s to 1800s via `_SKILL_TIMEOUT_OVERRIDES`. Empirical v0.2 auto
+  run G2 green phase (2026-04-24): the implementer subagent's combined
+  read-plan + write-tests + implement + run-verify pass exceeded the
+  600s default on a substantial task (root-cause classifier +
+  `build_escalation_context`). Same pattern as the v0.1.2 bump for
+  `/writing-plans`.
+
+### Added
+
+- 1 new regression test pins the `/test-driven-development` default
+  timeout at 1800s (mirrors the existing `/writing-plans` test).
+
 ## 0.1.6 - 2026-04-24
 
 ### Fixed
