@@ -1883,7 +1883,7 @@ from errors import (
 - Modify: `tests/test_run_sbtdd.py`
 - Create: `tests/test_review_spec_compliance_cmd.py`
 
-- [ ] **Step 1 (Red)**: tests:
+- [x] **Step 1 (Red)**: tests:
 
 ```python
 # tests/test_models.py — extend
@@ -1909,9 +1909,9 @@ def test_review_spec_compliance_issues_exits_12(tmp_path, monkeypatch):
     ...
 ```
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: 
+- [x] **Step 4 (Green)**: 
 
 In `models.py`:
 
@@ -2011,7 +2011,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
 }
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [x] **Step 5-8**: verify + commits.
 
 ### Task H8: close-task Milestone H
 
