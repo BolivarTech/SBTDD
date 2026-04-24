@@ -483,7 +483,7 @@ git commit --allow-empty -m "refactor: escalation_prompt skeleton reviewed, clea
 - Modify: `skills/sbtdd/scripts/escalation_prompt.py`
 - Modify: `tests/test_escalation_prompt.py`
 
-- [ ] **Step 1 (Red): tests for classifier**
+- [x] **Step 1 (Red): tests for classifier**
 
 Append to `tests/test_escalation_prompt.py`:
 
@@ -528,20 +528,20 @@ def test_build_escalation_context_checkpoint2_returns_frozen_struct() -> None:
     assert ctx.root_cause in set(_RootCause)
 ```
 
-- [ ] **Step 2: run, confirm FAIL**
+- [x] **Step 2: run, confirm FAIL**
 
 ```bash
 python -m pytest tests/test_escalation_prompt.py -v
 ```
 
-- [ ] **Step 3 (Red commit)**
+- [x] **Step 3 (Red commit)**
 
 ```bash
 git add tests/test_escalation_prompt.py
 git commit -m "test: add classifier + build_escalation_context tests"
 ```
 
-- [ ] **Step 4 (Green): implement classifier + builder**
+- [x] **Step 4 (Green): implement classifier + builder**
 
 Append to `skills/sbtdd/scripts/escalation_prompt.py`:
 
@@ -596,7 +596,7 @@ def build_escalation_context(
     )
 ```
 
-- [ ] **Step 5: run tests, PASS**
+- [x] **Step 5: run tests, PASS**
 
 - [ ] **Step 6 (Green commit)**
 

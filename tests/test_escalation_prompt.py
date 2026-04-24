@@ -12,8 +12,11 @@ from escalation_prompt import (
     EscalationContext,
     EscalationOption,
     UserDecision,
+    _classify_root_cause,
     _RootCause,
+    build_escalation_context,
 )
+from magi_dispatch import MAGIVerdict
 
 
 def test_escalation_context_is_frozen() -> None:
@@ -43,15 +46,12 @@ def test_escalation_option_has_letter_action_rationale() -> None:
     assert opt.action == "override"
 
 
-from escalation_prompt import (
-    build_escalation_context,
-    _classify_root_cause,
-)
-from magi_dispatch import MAGIVerdict
-
-
-def _mkv(verdict: str, degraded: bool = False, findings: tuple = (), conds: tuple = ()) -> MAGIVerdict:
-    return MAGIVerdict(verdict=verdict, degraded=degraded, conditions=conds, findings=findings, raw_output="")
+def _mkv(
+    verdict: str, degraded: bool = False, findings: tuple = (), conds: tuple = ()
+) -> MAGIVerdict:
+    return MAGIVerdict(
+        verdict=verdict, degraded=degraded, conditions=conds, findings=findings, raw_output=""
+    )
 
 
 def test_classify_infra_transient_when_degraded_repeats() -> None:

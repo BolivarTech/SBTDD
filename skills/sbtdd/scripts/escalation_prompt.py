@@ -23,6 +23,8 @@ import enum
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from magi_dispatch import MAGIVerdict
+
 
 class _RootCause(enum.Enum):
     INFRA_TRANSIENT = "infra_transient"  # same agent fails across iters
@@ -58,3 +60,50 @@ class UserDecision:
     chosen_option: str
     action: _ActionLit
     reason: str
+
+
+def _classify_root_cause(iterations: list[MAGIVerdict]) -> _RootCause:
+    """Infer the dominant failure mode across iterations."""
+    if any(v.verdict == "STRONG_NO_GO" for v in iterations):
+        return _RootCause.STRUCTURAL_DEFECT
+    degraded_count = sum(1 for v in iterations if v.degraded)
+    if degraded_count >= 2 and degraded_count >= len(iterations) / 2:
+        return _RootCause.INFRA_TRANSIENT
+    critical_across = [
+        any(str(f.get("severity", "")).upper() == "CRITICAL" for f in v.findings)
+        for v in iterations
+    ]
+    if sum(critical_across) >= 2:
+        return _RootCause.PLAN_VS_SPEC
+    return _RootCause.SPEC_AMBIGUITY
+
+
+def build_escalation_context(
+    iterations: list[MAGIVerdict],
+    plan_id: str,
+    context: _ContextLit,
+) -> EscalationContext:
+    """Collect iter history + classify root cause."""
+    snapshots = tuple(
+        {
+            "verdict": v.verdict,
+            "degraded": v.degraded,
+            "n_conditions": len(v.conditions),
+            "n_findings": len(v.findings),
+        }
+        for v in iterations
+    )
+    per_agent: tuple[tuple[str, str], ...] = ()  # v0.2: MAGI does not expose per-agent breakdown
+    findings = tuple(
+        (str(f.get("severity", "INFO")).upper(), str(f.get("text", f)))
+        for v in iterations
+        for f in v.findings
+    )
+    return EscalationContext(
+        iterations=snapshots,
+        plan_id=plan_id,
+        context=context,
+        per_agent_verdicts=per_agent,
+        findings=findings,
+        root_cause=_classify_root_cause(iterations),
+    )
