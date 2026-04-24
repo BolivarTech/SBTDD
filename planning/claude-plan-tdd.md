@@ -2059,7 +2059,7 @@ Spec-base §6.6 acceptance criteria D2 (cross-artifact coherence tests updated f
 - Modify: `tests/test_skill_md.py`
 - Modify: `tests/test_readme.py`
 
-- [ ] **Step 1 (Red): extend coherence tests for the new subcommand + flags**
+- [x] **Step 1 (Red): extend coherence tests for the new subcommand + flags**
 
 Append to `tests/test_distribution_coherence.py`:
 
@@ -2081,21 +2081,21 @@ Extend `tests/test_skill_md.py` contract: the subcommand dispatch table must hav
 
 Extend `tests/test_readme.py` contract: the usage section must reference `review-spec-compliance` and the four new flags.
 
-- [ ] **Step 2: run tests, confirm Red**
+- [x] **Step 2: run tests, confirm Red**
 
 ```bash
 python -m pytest tests/test_distribution_coherence.py tests/test_skill_md.py tests/test_readme.py -v
 ```
 Expected: three new test cases FAIL with assertion errors on missing strings.
 
-- [ ] **Step 3 (Red commit)**
+- [x] **Step 3 (Red commit)**
 
 ```bash
 git add tests/test_distribution_coherence.py tests/test_skill_md.py tests/test_readme.py
 git commit -m "test: add D2/D3 coherence tests for v0.2 subcommand + flags"
 ```
 
-- [ ] **Step 4 (Green): update SKILL.md**
+- [x] **Step 4 (Green): update SKILL.md**
 
 Locate the subcommand dispatch table in `skills/sbtdd/SKILL.md` (section "Subcommand dispatch", sec.S.6.3). Add a new row between `finalize` and `auto` (keeping alphabetical-free v0.1 order + new subcommand grouped with its conceptual neighbor `close-task`):
 
@@ -2113,25 +2113,25 @@ In the same SKILL.md, under the "Fallback" section (or equivalent flag-summary s
 - `--skip-spec-review` (on `close-task`) — bypass Feature B reviewer for manual flows where compliance is verified by hand.
 ```
 
-- [ ] **Step 5 (Green): update README.md**
+- [x] **Step 5 (Green): update README.md**
 
 In `README.md` under the "Usage" section (subcommands table), add a row for `/sbtdd review-spec-compliance <task-id>` with one-line purpose. Below the table, in the "New in v0.2" (or equivalent) subsection, list the four flags with the same one-line descriptions as SKILL.md.
 
-- [ ] **Step 6: run tests, confirm PASS**
+- [x] **Step 6: run tests, confirm PASS**
 
 ```bash
 make verify
 ```
 Expected: all coherence tests PASS; mypy clean; ruff clean.
 
-- [ ] **Step 7 (Green commit)**
+- [x] **Step 7 (Green commit)**
 
 ```bash
 git add skills/sbtdd/SKILL.md README.md
 git commit -m "docs: document review-spec-compliance subcommand and v0.2 flags"
 ```
 
-- [ ] **Step 8 (Refactor)**
+- [x] **Step 8 (Refactor)**
 
 ```bash
 git commit --allow-empty -m "refactor: SKILL.md + README v0.2 docs reviewed"
