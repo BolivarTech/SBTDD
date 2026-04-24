@@ -2142,7 +2142,7 @@ git commit --allow-empty -m "refactor: SKILL.md + README v0.2 docs reviewed"
 **Files:**
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1 (Red)**: new test asserting 0.2.0 entry exists AND references the three features:
+- [x] **Step 1 (Red)**: new test asserting 0.2.0 entry exists AND references the three features:
 
 ```python
 def test_changelog_v02_section_references_features() -> None:
@@ -2153,9 +2153,9 @@ def test_changelog_v02_section_references_features() -> None:
     assert "semver" in t.lower() or "auto-resolve" in t.lower()
 ```
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: in `CHANGELOG.md`, promote `[Unreleased]` to `[0.2.0] - 2026-04-XX`:
+- [x] **Step 4 (Green)**: in `CHANGELOG.md`, promote `[Unreleased]` to `[0.2.0] - 2026-04-XX`:
 
 ```markdown
 ## [0.2.0] - 2026-04-XX
@@ -2191,7 +2191,7 @@ def test_changelog_v02_section_references_features() -> None:
   default headless policy.
 ```
 
-- [ ] **Step 5-8**: verify + commits.
+- [x] **Step 5-8**: verify + commits.
 
 ### Task I3: version bump 0.1.0 → 0.2.0
 
