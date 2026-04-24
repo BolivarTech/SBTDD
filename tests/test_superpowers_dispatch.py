@@ -184,6 +184,27 @@ def test_wrapper_monkeypatch_propagates_through_module_attr(monkeypatch):
     )
 
 
+def test_requesting_code_review_default_timeout_is_1800s(monkeypatch):
+    """``/requesting-code-review`` subprocess must default to 1800s.
+
+    Empirical v0.2 pre-merge Loop 1 (2026-04-24): reviewing the full
+    accumulated v0.2 diff (27 tasks worth of code + ~1500 lines of new
+    tests) exceeded the 600s default. Same bucket as ``/writing-plans``
+    and ``/test-driven-development``.
+    """
+    from superpowers_dispatch import SkillResult, requesting_code_review
+
+    captured: dict = {}
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        captured["timeout"] = timeout
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    requesting_code_review()
+    assert captured["timeout"] == 1800
+
+
 def test_test_driven_development_default_timeout_is_1800s(monkeypatch):
     """``/test-driven-development`` subprocess must default to 1800s.
 

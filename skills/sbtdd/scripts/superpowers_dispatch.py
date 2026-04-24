@@ -143,6 +143,12 @@ _DEFAULT_TIMEOUT = 600
 _SKILL_TIMEOUT_OVERRIDES: dict[str, int] = {
     "writing-plans": 1800,
     "test-driven-development": 1800,
+    # ``/requesting-code-review`` raised to 1800s empirically (v0.2
+    # pre-merge Loop 1 2026-04-24): reviewing the full accumulated v0.2
+    # diff (27 tasks worth of new/modified code across 6 modules +
+    # ~1500 lines of new tests) exceeded 600s. Same pattern as the
+    # other two skills -- large v0.2-scale inputs need more budget.
+    "requesting-code-review": 1800,
 }
 
 
