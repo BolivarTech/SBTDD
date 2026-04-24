@@ -134,3 +134,22 @@ def test_dispatch_table_has_all_nine_subcommands():
     from run_sbtdd import SUBCOMMAND_DISPATCH
 
     assert set(SUBCOMMAND_DISPATCH.keys()) == set(VALID_SUBCOMMANDS)
+
+
+def test_dispatch_review_spec_compliance_routes_to_cmd(monkeypatch):
+    """Feature B, Task H7: `review-spec-compliance` dispatches to its cmd handler.
+
+    The handler is expected to be registered under that exact name in
+    ``SUBCOMMAND_DISPATCH``; the positional task id passes through as argv tail.
+    """
+    import run_sbtdd
+
+    called: list[list[str]] = []
+
+    def fake(argv: list[str]) -> int:
+        called.append(argv)
+        return 0
+
+    monkeypatch.setitem(run_sbtdd.SUBCOMMAND_DISPATCH, "review-spec-compliance", fake)
+    assert run_sbtdd.main(["review-spec-compliance", "3"]) == 0
+    assert called == [["3"]]

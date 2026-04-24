@@ -66,10 +66,10 @@ def test_valid_subcommands_is_tuple():
     assert isinstance(VALID_SUBCOMMANDS, tuple)
 
 
-def test_valid_subcommands_has_nine():
+def test_valid_subcommands_has_ten():
     from models import VALID_SUBCOMMANDS
 
-    assert len(VALID_SUBCOMMANDS) == 9
+    assert len(VALID_SUBCOMMANDS) == 10
 
 
 def test_valid_subcommands_contents():
@@ -85,8 +85,16 @@ def test_valid_subcommands_contents():
         "finalize",
         "auto",
         "resume",
+        "review-spec-compliance",
     )
     assert VALID_SUBCOMMANDS == expected
+
+
+def test_valid_subcommands_includes_review_spec_compliance():
+    """Feature B, Task H7: /sbtdd review-spec-compliance <task-id> is dispatchable."""
+    from models import VALID_SUBCOMMANDS
+
+    assert "review-spec-compliance" in VALID_SUBCOMMANDS
 
 
 def test_valid_subcommands_rejects_mutation():
