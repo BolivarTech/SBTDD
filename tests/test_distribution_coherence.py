@@ -86,6 +86,10 @@ def _semver_key(v: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+# Relative path to a plugin's manifest under MAGI's cache layout convention.
+_PLUGIN_JSON_REL = Path(".claude-plugin") / "plugin.json"
+
+
 def _magi_cache_base() -> Path:
     """Default MAGI cache base directory under Claude Code plugin cache."""
     return Path.home() / ".claude" / "plugins" / "cache" / "bolivartech-plugins" / "magi"
@@ -103,15 +107,13 @@ def _resolve_magi_plugin_json() -> Path:
     """
     magi_root_env = os.environ.get("MAGI_PLUGIN_ROOT")
     if magi_root_env:
-        return Path(magi_root_env) / ".claude-plugin" / "plugin.json"
+        return Path(magi_root_env) / _PLUGIN_JSON_REL
     base = _magi_cache_base()
-    if not base.is_dir():
-        return base / "missing" / ".claude-plugin" / "plugin.json"
-    versions = [p.name for p in base.iterdir() if p.is_dir()]
+    versions = [p.name for p in base.iterdir() if p.is_dir()] if base.is_dir() else []
     if not versions:
-        return base / "missing" / ".claude-plugin" / "plugin.json"
+        return base / "missing" / _PLUGIN_JSON_REL
     latest = max(versions, key=_semver_key)
-    return base / latest / ".claude-plugin" / "plugin.json"
+    return base / latest / _PLUGIN_JSON_REL
 
 
 MAGI_PLUGIN_JSON = _resolve_magi_plugin_json()
