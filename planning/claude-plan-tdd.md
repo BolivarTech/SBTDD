@@ -763,7 +763,7 @@ git commit --allow-empty -m "refactor: template render reviewed, ≤40 lines"
 - Modify: `skills/sbtdd/scripts/escalation_prompt.py`
 - Modify: `tests/test_escalation_prompt.py`
 
-- [ ] **Step 1 (Red): TTY + headless tests**
+- [x] **Step 1 (Red): TTY + headless tests**
 
 Append to `tests/test_escalation_prompt.py`:
 
@@ -804,14 +804,14 @@ def test_prompt_user_invalid_letter_reprompts(monkeypatch) -> None:
     assert decision.chosen_option == "a"
 ```
 
-- [ ] **Step 2-3 (Red commit)**
+- [x] **Step 2-3 (Red commit)**
 
 ```bash
 git add tests/test_escalation_prompt.py
 git commit -m "test: add prompt_user TTY + headless + re-prompt tests"
 ```
 
-- [ ] **Step 4 (Green): implement `prompt_user`**
+- [x] **Step 4 (Green): implement `prompt_user`**
 
 Append to `skills/sbtdd/scripts/escalation_prompt.py`:
 
@@ -898,13 +898,13 @@ def prompt_user(
     return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
 ```
 
-- [ ] **Step 5: tests PASS**
+- [x] **Step 5: tests PASS**
 
 ```bash
 python -m pytest tests/test_escalation_prompt.py -v
 ```
 
-- [ ] **Step 6-8**
+- [x] **Step 6-8**
 
 ```bash
 git add skills/sbtdd/scripts/escalation_prompt.py
