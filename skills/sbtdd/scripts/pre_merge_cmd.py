@@ -424,7 +424,6 @@ def _handle_safety_valve_exhaustion(
     root: Path,
     cfg: PluginConfig,
     verdict_history: list[magi_dispatch.MAGIVerdict],
-    last_verdict: magi_dispatch.MAGIVerdict | None,
     last_accepted: tuple[str, ...],
     last_rejected: tuple[str, ...],
     ns: argparse.Namespace,
@@ -434,8 +433,8 @@ def _handle_safety_valve_exhaustion(
     Mirror of ``spec_cmd._handle_safety_valve_exhaustion`` for pre-merge
     Loop 2. Terminal outcomes:
 
-    * ``override`` (or ``--override-checkpoint --reason``): return
-      ``last_verdict``, letting the caller proceed per INV-0 user authority.
+    * ``override`` (or ``--override-checkpoint --reason``): return the last
+      observed verdict, letting the caller proceed per INV-0 user authority.
     * ``abandon`` or any other action: raise :class:`MAGIGateError` carrying
       the iteration cap and the rejected/accepted conditions seen across the
       loop (mirrors the MAGIGateError payload of the v0.1 raise path).
@@ -445,14 +444,18 @@ def _handle_safety_valve_exhaustion(
 
     Raises:
         MAGIGateError: ``--override-checkpoint`` without ``--reason``, no
-            ``last_verdict`` observed while overriding, or the user chose to
-            abandon the flow.
+            verdict observed while overriding, or the user chose to abandon
+            the flow.
     """
+    last_verdict = verdict_history[-1] if verdict_history else None
     ctx = escalation_prompt.build_escalation_context(
         iterations=list(verdict_history),
         plan_id=_plan_id_from_path(Path(cfg.plan_path).name),
         context="pre-merge",
     )
+    # _compose_options is a semi-public helper (also consumed by tests in
+    # test_escalation_prompt.py); promoting it to a public name is scoped
+    # out to keep this mirror aligned with spec_cmd's equivalent helper.
     options = escalation_prompt._compose_options(ctx)
     if ns.override_checkpoint:
         if not ns.reason:
@@ -568,14 +571,12 @@ def _loop2(
     rejections: list[str] = []
     last_accepted: tuple[str, ...] = ()
     last_rejected: tuple[str, ...] = ()
-    last_verdict: magi_dispatch.MAGIVerdict | None = None
     verdict_history: list[magi_dispatch.MAGIVerdict] = []
     for iteration in range(1, cfg.magi_max_iterations + 1):
         iter_paths = list(diff_paths)
         if rejections:
             iter_paths.append(str(_write_magi_feedback_file(root, rejections)))
         verdict = magi_dispatch.invoke_magi(context_paths=iter_paths, cwd=str(root))
-        last_verdict = verdict
         verdict_history.append(verdict)
         if magi_dispatch.verdict_is_strong_no_go(verdict):
             raise MAGIGateError(
@@ -631,6 +632,7 @@ def _loop2(
     # reaching ``escalation_prompt.prompt_user``. Only ``main`` wires the
     # Feature A flags through ``ns``.
     if ns is None:
+        last_verdict = verdict_history[-1] if verdict_history else None
         raise MAGIGateError(
             f"MAGI did not converge to full {threshold}+ after "
             f"{cfg.magi_max_iterations} iterations",
@@ -640,7 +642,7 @@ def _loop2(
             iteration=cfg.magi_max_iterations,
         )
     return _handle_safety_valve_exhaustion(
-        root, cfg, verdict_history, last_verdict, last_accepted, last_rejected, ns
+        root, cfg, verdict_history, last_accepted, last_rejected, ns
     )
 
 
