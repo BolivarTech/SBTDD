@@ -1419,7 +1419,7 @@ Add to `_EXIT_CODES_MUTABLE`:
 - Create: `skills/sbtdd/scripts/spec_review_dispatch.py`
 - Create: `tests/test_spec_review_dispatch.py`
 
-- [ ] **Step 1 (Red)**: dataclass shape tests mirroring Task G1 pattern.
+- [x] **Step 1 (Red)**: dataclass shape tests mirroring Task G1 pattern.
 
 ```python
 def test_spec_review_result_is_frozen() -> None:
@@ -1435,9 +1435,9 @@ def test_spec_issue_carries_severity_and_text() -> None:
     assert i.severity == "MISSING"
 ```
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: create `skills/sbtdd/scripts/spec_review_dispatch.py`:
+- [x] **Step 4 (Green)**: create `skills/sbtdd/scripts/spec_review_dispatch.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -1530,7 +1530,7 @@ def _collect_task_diff(repo_root: Path, task_id: str, n_commits: int = 4) -> str
     return diff.stdout
 ```
 
-- [ ] **Step 5-8**: tests pass, commits.
+- [x] **Step 5-8**: tests pass, commits.
 
 ### Task H3: `dispatch_spec_reviewer` core
 
