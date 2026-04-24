@@ -31,11 +31,13 @@ explicit ``R`` response in interactive mode.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time as _time
 from pathlib import Path
 from typing import Any
 
+import escalation_prompt
 import subprocess_utils
 from config import load_plugin_local
 from dependency_check import check_environment
@@ -93,6 +95,7 @@ def _report_diagnostic(root: Path) -> dict[str, Any]:
         "magi-verdict.json": (root / ".claude" / "magi-verdict.json").exists(),
         "auto-run.json": (root / ".claude" / "auto-run.json").exists(),
         "magi-conditions.md": (root / ".claude" / "magi-conditions.md").exists(),
+        "magi-escalation-pending.md": (root / ".claude" / "magi-escalation-pending.md").exists(),
     }
     sys.stdout.write("State file:\n")
     sys.stdout.write(f"  current_task_id:          {state.current_task_id}\n")
@@ -246,6 +249,13 @@ def _decide_delegation(
         ``"magi-conditions-pending"`` signals scope item 8 (pre-merge
         interrupted after accepted conditions).
     """
+    # Task G9: an escalation prompt interrupted mid-input() leaves
+    # .claude/magi-escalation-pending.md behind (prompt_user writes it
+    # before input() so Ctrl+C is recoverable). Checked before the
+    # magi-conditions.md branch because the escalation flow re-prompts
+    # the user and decides whether conditions even apply.
+    if runtime.get("magi-escalation-pending.md"):
+        return ("magi-escalation-pending", [])
     # Scope item 8: mid-pre-merge interruption leaves magi-conditions.md
     # behind. Surface to the user before any delegation -- running
     # `sbtdd pre-merge` again without applying conditions just produces
@@ -275,6 +285,58 @@ def _decide_delegation(
             return ("pre_merge_cmd", [])
         return ("finalize_cmd", [])
     return (None, [])
+
+
+def _resume_escalation(root: Path, pending: Path) -> int:
+    """Re-enter the MAGI escalation prompt after a Ctrl+C recovery.
+
+    Reads the serialized ``EscalationContext`` from ``pending``,
+    reconstructs a minimal context (per-agent verdicts + findings are
+    not persisted — they are only needed at the first exhaustion, not
+    on resume), re-invokes :func:`escalation_prompt.prompt_user` +
+    :func:`escalation_prompt.apply_decision`, removes the marker, and
+    delegates to the original subcommand (``spec_cmd`` for
+    ``context == 'checkpoint2'`` / ``pre_merge_cmd`` for
+    ``context == 'pre-merge'``). ``abandon`` decisions short-circuit
+    with the ``apply_decision`` exit code instead of delegating.
+
+    Args:
+        root: Project root directory.
+        pending: Path to ``.claude/magi-escalation-pending.md``.
+
+    Returns:
+        ``apply_decision`` exit code on abandon; otherwise the delegated
+        subcommand's return code.
+    """
+    data = json.loads(pending.read_text(encoding="utf-8"))
+    context = data.get("context", "checkpoint2")
+    plan_id = data.get("plan_id", "?")
+    root_cause_raw = data.get("root_cause", "spec_ambiguity")
+    iterations = tuple(data.get("iterations", ()))
+    try:
+        root_cause = escalation_prompt._RootCause(root_cause_raw)
+    except ValueError:
+        root_cause = escalation_prompt._RootCause.SPEC_AMBIGUITY
+    ctx = escalation_prompt.EscalationContext(
+        iterations=iterations,
+        plan_id=plan_id,
+        context=context,
+        per_agent_verdicts=(),
+        findings=(),
+        root_cause=root_cause,
+    )
+    options = escalation_prompt._compose_options(ctx)
+    decision = escalation_prompt.prompt_user(ctx, options, non_interactive=False, project_root=root)
+    rc = escalation_prompt.apply_decision(decision, ctx, root)
+    if pending.is_file():
+        pending.unlink()
+    if decision.action == "abandon":
+        return rc
+    if context == "checkpoint2":
+        return _delegate("spec_cmd", root, [])
+    if context == "pre-merge":
+        return _delegate("pre_merge_cmd", root, [])
+    return rc
 
 
 def _delegate(module_name: str, root: Path, extra: list[str]) -> int:
@@ -392,6 +454,16 @@ def main(argv: list[str] | None = None) -> int:
             "  3. Re-run `sbtdd pre-merge` once all conditions are applied.\n"
         )
         return 0
+    if module_name == "magi-escalation-pending":
+        pending = root / ".claude" / "magi-escalation-pending.md"
+        if ns.dry_run:
+            sys.stdout.write(
+                "Would re-enter MAGI escalation prompt from "
+                "magi-escalation-pending.md and delegate to the original "
+                "subcommand based on stored context.\n"
+            )
+            return 0
+        return _resume_escalation(root, pending)
     if ns.dry_run:
         sys.stdout.write(f"Would delegate to: {module_name} with args {extra}\n")
         return 0

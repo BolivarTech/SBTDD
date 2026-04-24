@@ -103,6 +103,7 @@ _MENU_LETTERS = ("a", "b", "c", "d")
 
 _HEADLESS_POLICY_FILE = ".claude/magi-auto-policy.json"
 _AUDIT_DIR = ".claude/magi-escalations"
+_PENDING_MARKER = ".claude/magi-escalation-pending.md"
 
 
 def _finding_severity(finding: Any, default: str = "INFO") -> str:
@@ -265,12 +266,41 @@ def prompt_user(
         if policy == "retry_once" and any(o.action == "retry" for o in options):
             return _decision_for(options, "retry", "headless policy: retry_once")
         return _decision_for(options, "abandon", "headless policy: abort (default)")
+
+    # TTY path: persist a pending-marker BEFORE the first input() so a Ctrl+C
+    # between marker-write and decision-return leaves a recoverable checkpoint
+    # for resume_cmd. KeyboardInterrupt bypasses the normal-exit cleanup
+    # (no try/finally) so the marker survives process kill; EOFError and
+    # successful decisions both exit through _finish which removes the marker.
+    root = project_root or Path.cwd()
+    pending = root / _PENDING_MARKER
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text(
+        json.dumps(
+            {
+                "plan_id": ctx.plan_id,
+                "context": ctx.context,
+                "root_cause": ctx.root_cause.value,
+                "iterations": list(ctx.iterations),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def _finish(decision: UserDecision) -> UserDecision:
+        if pending.is_file():
+            pending.unlink()
+        return decision
+
     valid = {o.letter: o for o in options}
     while True:
         try:
             choice = input("Option (a/b/c/d): ").strip().lower()
         except EOFError:
-            return _decision_for(options, "abandon", "EOFError during prompt; headless default")
+            return _finish(
+                _decision_for(options, "abandon", "EOFError during prompt; headless default")
+            )
         if choice in valid:
             break
         sys.stderr.write(f"Invalid choice '{choice}'; expected one of {sorted(valid)}.\n")
@@ -282,9 +312,11 @@ def prompt_user(
             reason = ""
         if not reason:
             sys.stderr.write("Override requires non-empty --reason; falling back to abandon.\n")
-            return _decision_for(options, "abandon", "override requested without reason")
-        return UserDecision(chosen_option=choice, action="override", reason=reason)
-    return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
+            return _finish(_decision_for(options, "abandon", "override requested without reason"))
+        return _finish(UserDecision(chosen_option=choice, action="override", reason=reason))
+    return _finish(
+        UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
+    )
 
 
 def apply_decision(decision: UserDecision, ctx: EscalationContext, project_root: Path) -> int:
