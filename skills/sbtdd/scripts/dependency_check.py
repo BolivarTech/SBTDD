@@ -189,8 +189,18 @@ def check_git() -> DependencyCheck:
 
 
 def check_tdd_guard_binary() -> DependencyCheck:
-    """Verify tdd-guard binary is in PATH and responds (sec.S.1.3 item 3)."""
-    if shutil.which("tdd-guard") is None:
+    """Verify tdd-guard binary is in PATH and responds (sec.S.1.3 item 3).
+
+    ``npm install -g @nizos/tdd-guard`` installs ``tdd-guard.cmd`` on Windows
+    (a .cmd shim, not a .exe). Python's :func:`subprocess.run` with
+    ``shell=False`` does NOT apply PATHEXT and therefore cannot launch a bare
+    ``tdd-guard`` argv entry on Windows -- only :func:`shutil.which` does the
+    PATHEXT-aware lookup. We resolve the full path first and pass it as
+    ``argv[0]`` so the invocation works across platforms without needing
+    ``shell=True``.
+    """
+    resolved = shutil.which("tdd-guard")
+    if resolved is None:
         return DependencyCheck(
             name="tdd-guard",
             status="MISSING",
@@ -198,7 +208,7 @@ def check_tdd_guard_binary() -> DependencyCheck:
             remediation="npm install -g @nizos/tdd-guard",
         )
     try:
-        result = subprocess_utils.run_with_timeout(["tdd-guard", "--version"], timeout=5)
+        result = subprocess_utils.run_with_timeout([resolved, "--version"], timeout=5)
     except subprocess.TimeoutExpired:
         return DependencyCheck(
             name="tdd-guard",

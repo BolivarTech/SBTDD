@@ -163,6 +163,40 @@ def test_check_tdd_guard_binary_missing(monkeypatch):
     assert "npm install -g" in (chk.remediation or "")
 
 
+def test_check_tdd_guard_binary_passes_resolved_path_to_subprocess(monkeypatch):
+    """Windows: subprocess must receive the ``.cmd``-resolved path, not bare name.
+
+    ``npm install -g @nizos/tdd-guard`` installs ``tdd-guard.cmd`` on Windows.
+    Python's ``subprocess.run([...], shell=False)`` does not apply PATHEXT, so
+    passing bare ``"tdd-guard"`` as argv[0] raises ``FileNotFoundError``
+    (WinError 2) even when ``shutil.which("tdd-guard")`` succeeds. The check
+    must resolve the path via ``shutil.which`` and forward the full path.
+    Regression observed 2026-04-24 when ``/sbtdd auto`` preflight crashed on
+    Windows.
+    """
+    from dependency_check import check_tdd_guard_binary
+
+    resolved_path = r"C:\Users\jbolivarg\AppData\Roaming\npm\tdd-guard.CMD"
+    monkeypatch.setattr("shutil.which", lambda name: resolved_path if name == "tdd-guard" else None)
+    captured: dict = {}
+
+    class FakeProc:
+        returncode = 0
+        stdout = "tdd-guard v2.0.0"
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    chk = check_tdd_guard_binary()
+    assert chk.status == "OK"
+    # The resolved full path must travel as argv[0]; never the bare name.
+    assert captured["cmd"][0] == resolved_path
+    assert captured["cmd"][1] == "--version"
+
+
 def test_check_tdd_guard_data_dir_writable(tmp_path):
     from dependency_check import check_tdd_guard_data_dir
 
