@@ -152,3 +152,37 @@ def test_prompt_user_invalid_letter_reprompts(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
     decision = prompt_user(ctx, opts, non_interactive=False)
     assert decision.chosen_option == "a"
+
+
+def test_apply_decision_writes_audit_artifact(tmp_path) -> None:
+    from escalation_prompt import apply_decision, _compose_options
+
+    iters = [_mkv("HOLD", degraded=True)] * 3
+    ctx = build_escalation_context(iters, plan_id="D", context="checkpoint2")
+    opts = _compose_options(ctx)
+    assert opts  # menu composed
+    decision = UserDecision(chosen_option="a", action="override", reason="caspar bug")
+    code = apply_decision(decision, ctx, project_root=tmp_path)
+    assert code == 0
+    audits = list((tmp_path / ".claude" / "magi-escalations").glob("*.json"))
+    assert len(audits) == 1
+    import json
+
+    data = json.loads(audits[0].read_text(encoding="utf-8"))
+    assert data["decision"] == "override"
+    assert data["chosen_option"] == "a"
+    assert data["reason"] == "caspar bug"
+    assert data["plan_id"] == "D"
+    assert data["magi_context"] == "checkpoint2"
+
+
+def test_apply_decision_abandon_returns_exit_8(tmp_path) -> None:
+    from escalation_prompt import apply_decision
+
+    iters = [_mkv("HOLD_TIE")] * 3
+    ctx = build_escalation_context(iters, plan_id="X", context="pre-merge")
+    decision = UserDecision(
+        chosen_option="d", action="abandon", reason="headless policy"
+    )
+    code = apply_decision(decision, ctx, project_root=tmp_path)
+    assert code == 8
