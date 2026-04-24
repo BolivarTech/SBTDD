@@ -17,6 +17,7 @@ exceptions surface with traceback and exit 1 (bug report channel per
 sec.S.11.2).
 
 In Milestone C, all 9 entries point to the real subcomando implementations.
+v0.2 Feature B (Task H7) adds ``review-spec-compliance`` for a 10-entry table.
 """
 
 from __future__ import annotations
