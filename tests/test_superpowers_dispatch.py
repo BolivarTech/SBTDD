@@ -221,6 +221,42 @@ def test_brainstorming_default_timeout_is_600s(monkeypatch):
     assert captured["timeout"] == 600
 
 
+def test_invoke_skill_packs_args_into_claude_p_prompt_string(monkeypatch):
+    """Skill args MUST travel inside the claude -p prompt, not as separate argv.
+
+    ``claude -p`` only understands its own CLI flags; skill-specific tokens
+    like ``--phase=red`` or ``@file.md`` belong to the skill being invoked
+    and have to live inside the prompt string so the sub-session forwards
+    them. Appending them as separate argv after ``-p /<skill>`` causes
+    ``claude`` to reject with ``error: unknown option '<flag>'``. Observed
+    2026-04-24 when ``/sbtdd auto`` crashed at the first
+    ``/test-driven-development --phase=red`` dispatch.
+    """
+    from superpowers_dispatch import invoke_skill
+
+    captured: dict = {}
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, timeout, capture=True, cwd=None):
+        captured["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", fake_run)
+    invoke_skill("test-driven-development", args=["--phase=red", "@task.md"])
+    # argv must be exactly ["claude", "-p", "<single-prompt-string>"].
+    assert captured["cmd"][:2] == ["claude", "-p"]
+    assert len(captured["cmd"]) == 3, f"expected 3 argv entries, got {captured['cmd']!r}"
+    prompt = captured["cmd"][2]
+    # The prompt string must embed the slash command + both args.
+    assert "/test-driven-development" in prompt
+    assert "--phase=red" in prompt
+    assert "@task.md" in prompt
+
+
 def test_writing_plans_explicit_timeout_still_overrides(monkeypatch):
     """Caller-provided ``timeout=`` kwarg still wins over the per-skill default."""
     from superpowers_dispatch import SkillResult, writing_plans

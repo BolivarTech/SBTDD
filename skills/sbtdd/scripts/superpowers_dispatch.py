@@ -49,13 +49,21 @@ class SkillResult:
 def _build_skill_cmd(skill: str, args: list[str] | None) -> list[str]:
     """Build the argv list for ``claude -p`` invoking ``skill``.
 
-    Centralised so ``invoke_skill`` and future callers (e.g. a direct
-    pipeline driver) stay in sync.
+    The slash command and its args MUST be packed into the single prompt
+    string passed to ``claude -p``. ``claude`` itself does not parse
+    skill-specific flags like ``--phase=red`` or ``@file`` refs -- those
+    belong to the skill being invoked and have to travel inside the prompt
+    so the sub-session forwards them. Appending them as separate argv
+    tokens after ``-p <skill>`` causes ``claude`` to reject them with
+    ``error: unknown option '<flag>'``.
+
+    Same pattern as :func:`magi_dispatch._build_magi_cmd` (sec.S.0.2
+    cross-plugin dispatch contract).
     """
-    cmd = ["claude", "-p", f"/{skill}"]
+    prompt_parts = [f"/{skill}"]
     if args:
-        cmd.extend(args)
-    return cmd
+        prompt_parts.extend(args)
+    return ["claude", "-p", " ".join(prompt_parts)]
 
 
 def invoke_skill(
