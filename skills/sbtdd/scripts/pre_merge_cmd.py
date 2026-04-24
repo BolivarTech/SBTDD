@@ -646,6 +646,17 @@ def _loop2(
     except FileNotFoundError:
         pass
     diff_paths = [str(root / cfg.plan_path)]
+    # Pre-existing ``magi-feedback.md`` (operator-curated context for the
+    # sterile-loop breaker) gets included in iter 1 so MAGI receives the
+    # operator's framing before it builds its own rejection list. The
+    # subsequent ``_write_magi_feedback_file`` calls overwrite the file
+    # with the in-memory rejections so subsequent iters get the
+    # accumulated picture; the operator's seed lives only in iter 1.
+    # Observed v0.2 pre-merge 2026-04-24 (CRITICAL #1/#3/#12 + #2/#5/#6
+    # were re-flagged in iter 1 even after code-side fixes had landed
+    # because MAGI only saw the plan markdown, not the new HEAD).
+    operator_feedback = root / ".claude" / _MAGI_FEEDBACK_FILENAME
+    seed_feedback_path = str(operator_feedback) if operator_feedback.exists() else None
     rejections: list[str] = []
     last_accepted: tuple[str, ...] = ()
     last_rejected: tuple[str, ...] = ()
@@ -654,6 +665,8 @@ def _loop2(
         iter_paths = list(diff_paths)
         if rejections:
             iter_paths.append(str(_write_magi_feedback_file(root, rejections)))
+        elif seed_feedback_path is not None and iteration == 1:
+            iter_paths.append(seed_feedback_path)
         verdict = magi_dispatch.invoke_magi(context_paths=iter_paths, cwd=str(root))
         verdict_history.append(verdict)
         if magi_dispatch.verdict_is_strong_no_go(verdict):
