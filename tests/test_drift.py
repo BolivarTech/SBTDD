@@ -313,6 +313,82 @@ def test_all_task_steps_complete_returns_open_when_task_missing():
     assert _all_task_steps_complete(plan, "99") == "[ ]"
 
 
+def test_plan_all_tasks_complete_returns_x_when_all_flipped():
+    """No ``- [ ]`` anywhere in any ``### Task`` section -> fully complete."""
+    from drift import _plan_all_tasks_complete
+
+    plan = "### Task 1: foo\n- [x] step 1\n\n### Task 2: bar\n- [x] step 1\n- [x] step 2\n"
+    assert _plan_all_tasks_complete(plan) == "[x]"
+
+
+def test_plan_all_tasks_complete_returns_open_when_any_section_has_box():
+    """One open ``- [ ]`` in any task section -> plan is not fully complete."""
+    from drift import _plan_all_tasks_complete
+
+    plan = "### Task 1: foo\n- [x] step 1\n\n### Task 2: bar\n- [ ] step 1\n- [x] step 2\n"
+    assert _plan_all_tasks_complete(plan) == "[x]" if False else _plan_all_tasks_complete(plan)
+    assert _plan_all_tasks_complete(plan) == "[ ]"
+
+
+def test_plan_all_tasks_complete_returns_x_when_no_task_headers():
+    """Malformed / empty plan -> conservative ``[x]`` (no false drift)."""
+    from drift import _plan_all_tasks_complete
+
+    assert _plan_all_tasks_complete("") == "[x]"
+    assert _plan_all_tasks_complete("no task headers here") == "[x]"
+
+
+def test_detect_drift_done_with_no_current_task_and_all_tasks_complete(tmp_path, monkeypatch):
+    """state=done + current_task_id=None + plan fully flipped -> no drift.
+
+    Regression for the 2026-04-24 false-positive: after a successful v0.2
+    auto task loop (all 28 chores landed, every task section flipped to
+    ``[x]``), two infrastructure-fix commits landed on top. The
+    pre-merge drift check flagged false drift because the old hard-coded
+    ``plan_task_state = "[ ]"`` fallback (when ``current_task_id`` is
+    None) made ``_evaluate_drift`` report "state is done but plan still
+    has open tasks". Fix: inspect the plan and compute the real
+    all-complete signal via ``_plan_all_tasks_complete``.
+    """
+    import json
+
+    from drift import detect_drift
+
+    state_path = tmp_path / ".claude" / "session-state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "plan_path": "planning/claude-plan-tdd.md",
+                "current_task_id": None,
+                "current_task_title": None,
+                "current_phase": "done",
+                "phase_started_at_commit": "deadbeef",
+                "last_verification_at": None,
+                "last_verification_result": "passed",
+                "plan_approved_at": "2026-04-19T10:00:00Z",
+            }
+        )
+    )
+    plan_path = tmp_path / "planning" / "claude-plan-tdd.md"
+    plan_path.parent.mkdir(parents=True)
+    # Every task section fully flipped.
+    plan_path.write_text(
+        "### Task 1: alpha\n- [x] step 1\n\n### Task 2: beta\n- [x] step 1\n- [x] step 2\n"
+    )
+
+    class _Result:
+        returncode = 0
+        stdout = "fix: some post-plan infrastructure change\n"
+        stderr = ""
+
+    import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", lambda *a, **kw: _Result())
+
+    assert detect_drift(state_file_path=state_path, plan_path=plan_path, repo_root=tmp_path) is None
+
+
 def test_detect_drift_io_wrapper_returns_none_when_consistent(tmp_path, monkeypatch):
     import json
 

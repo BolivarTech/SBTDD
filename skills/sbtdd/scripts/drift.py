@@ -179,11 +179,25 @@ def detect_drift(
     match = re.match(r"^([a-z]+):", subject)
     last_commit_prefix = match.group(1) if match else ""
 
-    # Parse plan checkbox for the active task
+    # Parse plan checkbox for the active task.
+    #
+    # Fallback when current_task_id is None (terminal ``done`` state):
+    # inspect the plan directly to determine whether every task section
+    # has zero remaining ``- [ ]``. The previous hard-coded ``"[ ]"``
+    # fallback produced a false-positive drift when:
+    #   state.current_phase == "done"
+    #   state.current_task_id is None (set by close_task_cmd at plan end)
+    #   plan is actually fully flipped (all 28 chores landed)
+    #   last HEAD commit is a post-plan infrastructure fix (prefix=fix/chore)
+    # Observed 2026-04-24 after v0.2 auto task-loop completed + two
+    # infra-fix commits landed on top. ``_plan_all_tasks_complete`` walks
+    # every ``### Task <id>:`` section and returns ``"[x]"`` iff every
+    # section is fully flipped.
     plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
-    plan_task_state = (
-        _all_task_steps_complete(plan_text, current_task_id) if current_task_id else "[ ]"
-    )
+    if current_task_id:
+        plan_task_state = _all_task_steps_complete(plan_text, current_task_id)
+    else:
+        plan_task_state = _plan_all_tasks_complete(plan_text)
 
     return _evaluate_drift(current_phase, last_commit_prefix, plan_task_state)
 
@@ -223,3 +237,34 @@ def _all_task_steps_complete(plan_text: str, task_id: str) -> str:
     if "- [x]" in section:
         return "[x]"
     return "[ ]"
+
+
+def _plan_all_tasks_complete(plan_text: str) -> str:
+    """Return ``"[x]"`` iff every ``### Task <id>:`` section is fully flipped.
+
+    Walks every task header in the plan and checks that the text between
+    it and the next task header contains NO ``- [ ]`` markers. Used by
+    :func:`detect_drift` when the state file has ``current_task_id=None``
+    (terminal ``done`` state) to distinguish between:
+
+    * ``state=done, all chores landed`` -> every section ``[x]`` -> ``"[x]"``
+      -> no drift (terminal).
+    * ``state=done, some task advance skipped`` -> at least one section
+      still has ``- [ ]`` -> ``"[ ]"`` -> drift reported (the
+      ``state-done-plan-open`` branch of ``_evaluate_drift``).
+
+    When the plan has no ``### Task`` headers at all (malformed or
+    empty), return ``"[x]"`` to avoid false-positive drift; the check is
+    conservative in the other direction (phase=done with open-task
+    evidence is real drift, but phase=done with a planless repo is not a
+    useful signal).
+    """
+    headers = list(_ANY_TASK_HEADER.finditer(plan_text))
+    if not headers:
+        return "[x]"
+    for i, match in enumerate(headers):
+        start = match.end()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
+        if "- [ ]" in plan_text[start:end]:
+            return "[ ]"
+    return "[x]"
