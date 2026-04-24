@@ -1,0 +1,17 @@
+MAGI iter 3 FINAL (checkpoint2): veredicto 'HOLD' degraded=True.
+Causa raiz inferida: transient-infra (agent degraded repite).
+Safety valve INV-11 exhausted tras 3 iter.
+
+Escalando al usuario per INV-11 + INV-18:
+
+Estado plan D:
+- Iteraciones: 3
+- Findings residuales: 0
+
+Opciones per INV-0 (user authority):
+- (a) override: Override INV-0 (user authority). requires --reason; audit artifact written.
+- (b) retry: Re-invocar MAGI una iter mas (safety valve +1). consume iter extra; INV-0 override del INV-11.
+- (c) abandon: Exit 8 (v0.1 behavior) + artefactos para review manual. default en non-TTY.
+- (d) abandon: Exit 8 (v0.1 behavior) + artefactos para review manual. default en non-TTY.
+
+¿Cuál?
