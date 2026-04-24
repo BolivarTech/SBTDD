@@ -185,6 +185,64 @@ def _extract_task_text(plan_text: str, task_id: str) -> str:
     return plan_text[start:end]
 
 
+def _build_reviewer_prompt(task_id: str, task_text: str, diff_text: str) -> str:
+    """Compose the reviewer subagent prompt for one task.
+
+    The prompt embeds the directive ``"Verify by reading code, NOT by
+    trusting implementer report."`` verbatim from the
+    ``spec-reviewer-prompt.md`` skill — that line is the contract the
+    reviewer subagent enforces against optimistic implementer reports
+    (rationale: ``CLAUDE.md`` v0.2 Feature B section).
+
+    Args:
+        task_id: Plan task id; surfaces in the prompt header for the
+            reviewer's traceability.
+        task_text: Task section text extracted from the approved plan.
+        diff_text: ``git diff`` output for the task's commits.
+
+    Returns:
+        The fully assembled prompt string passed to ``claude -p``.
+    """
+    return (
+        f"Task: {task_id}\n\n"
+        f"Task text:\n{task_text}\n\n"
+        f"Diff:\n{diff_text}\n\n"
+        "Verify by reading code, NOT by trusting implementer report."
+    )
+
+
+def _build_artifact_payload(
+    task_id: str,
+    *,
+    approved: bool,
+    iter_history: list[dict[str, Any]],
+    issues: tuple[SpecIssue, ...],
+) -> dict[str, Any]:
+    """Compose the audit-artifact JSON body for a finalized dispatch.
+
+    Both the approval and safety-valve-exhaustion paths persist the same
+    schema, differing only in the ``approved`` flag and the (possibly
+    empty) ``final_issues`` list. Centralising the shape here keeps the
+    two call sites in :func:`dispatch_spec_reviewer` from drifting.
+
+    Args:
+        task_id: Plan task id, copied into the artifact body.
+        approved: Final reviewer verdict for the dispatch.
+        iter_history: Per-iteration tally accumulated during the loop.
+        issues: Outstanding findings for the exhaustion path; empty
+            tuple for the approval path.
+
+    Returns:
+        A ``dict`` ready to be serialised by :func:`_write_artifact`.
+    """
+    return {
+        "task_id": task_id,
+        "approved": approved,
+        "iter_history": iter_history,
+        "final_issues": [{"severity": i.severity, "text": i.text} for i in issues],
+    }
+
+
 def _collect_task_diff(repo_root: Path, task_id: str) -> str:
     """Return the diff of the commits produced for ``task_id``.
 
@@ -265,15 +323,10 @@ def dispatch_spec_reviewer(
     plan_text = plan_path.read_text(encoding="utf-8")
     task_text = _extract_task_text(plan_text, task_id)
     diff_text = _collect_task_diff(repo_root, task_id)
+    prompt = _build_reviewer_prompt(task_id, task_text, diff_text)
+    cmd = ["claude", "-p", _REVIEWER_SKILL_REF, prompt]
     iter_history: list[dict[str, Any]] = []
     for iteration in range(1, max_iterations + 1):
-        prompt = (
-            f"Task: {task_id}\n\n"
-            f"Task text:\n{task_text}\n\n"
-            f"Diff:\n{diff_text}\n\n"
-            "Verify by reading code, NOT by trusting implementer report."
-        )
-        cmd = ["claude", "-p", _REVIEWER_SKILL_REF, prompt]
         try:
             result = subprocess_utils.run_with_timeout(
                 cmd,
@@ -300,12 +353,9 @@ def dispatch_spec_reviewer(
         iter_history.append({"iter": iteration, "approved": approved, "n_issues": len(issues)})
         if approved:
             artifact = _write_artifact(
-                {
-                    "task_id": task_id,
-                    "approved": True,
-                    "iter_history": iter_history,
-                    "final_issues": [],
-                },
+                _build_artifact_payload(
+                    task_id, approved=True, iter_history=iter_history, issues=()
+                ),
                 repo_root,
                 task_id,
             )
@@ -317,12 +367,9 @@ def dispatch_spec_reviewer(
             )
         if iteration == max_iterations:
             artifact = _write_artifact(
-                {
-                    "task_id": task_id,
-                    "approved": False,
-                    "iter_history": iter_history,
-                    "final_issues": [{"severity": i.severity, "text": i.text} for i in issues],
-                },
+                _build_artifact_payload(
+                    task_id, approved=False, iter_history=iter_history, issues=issues
+                ),
                 repo_root,
                 task_id,
             )
