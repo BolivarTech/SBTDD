@@ -109,3 +109,95 @@ def build_escalation_context(
         findings=findings,
         root_cause=_classify_root_cause(iterations),
     )
+
+
+def _compose_options(ctx: EscalationContext) -> tuple[EscalationOption, ...]:
+    """Build a context-aware menu (<=4 options) keyed by root cause.
+
+    STRUCTURAL_DEFECT only exposes (d) abandon; every other root cause
+    exposes override, retry, alternative, abandon so the canonical
+    template emits four sequential letters.
+    """
+    opts: list[EscalationOption] = []
+    if ctx.root_cause != _RootCause.STRUCTURAL_DEFECT:
+        opts.append(
+            EscalationOption(
+                letter="a",
+                action="override",
+                rationale="Override INV-0 (user authority)",
+                caveat="requires --reason; audit artifact written.",
+            )
+        )
+        opts.append(
+            EscalationOption(
+                letter="b",
+                action="retry",
+                rationale="Re-invocar MAGI una iter mas (safety valve +1)",
+                caveat="consume iter extra; INV-0 override del INV-11.",
+            )
+        )
+        opts.append(
+            EscalationOption(
+                letter="c",
+                action="alternative",
+                rationale="Replan: split spec o ajustar scope",
+                caveat="reinicia flujo desde sec.1.",
+            )
+        )
+    opts.append(
+        EscalationOption(
+            letter="d",
+            action="abandon",
+            rationale="Exit 8 (v0.1 behavior) + artefactos para review manual",
+            caveat="default en non-TTY.",
+        )
+    )
+    letters = ("a", "b", "c", "d")
+    return tuple(
+        EscalationOption(
+            letter=letters[i],
+            action=o.action,
+            rationale=o.rationale,
+            caveat=o.caveat,
+        )
+        for i, o in enumerate(opts[:4])
+    )
+
+
+def format_escalation_message(ctx: EscalationContext) -> str:
+    """Render the canonical escalation template (<=40 lines).
+
+    Output mirrors the precedent from Milestone D Checkpoint 2 iter 3
+    escalation (commit 5d7bfc4): root-cause hint, iter counter, findings
+    tally, and the dynamic option menu followed by the Spanish prompt.
+    """
+    n = len(ctx.iterations)
+    last = ctx.iterations[-1] if ctx.iterations else {"verdict": "?", "degraded": False}
+    root_label = {
+        _RootCause.INFRA_TRANSIENT: "transient-infra (agent degraded repite)",
+        _RootCause.PLAN_VS_SPEC: "plan-vs-spec gap (CRITICAL findings persisten)",
+        _RootCause.STRUCTURAL_DEFECT: "defecto estructural (STRONG_NO_GO)",
+        _RootCause.SPEC_AMBIGUITY: "spec ambiguity (confidence trending down)",
+    }[ctx.root_cause]
+    opts = _compose_options(ctx)
+    lines = [
+        f"MAGI iter {n} FINAL ({ctx.context}): veredicto '{last['verdict']}' degraded={last['degraded']}.",
+        f"Causa raiz inferida: {root_label}.",
+        f"Safety valve INV-11 exhausted tras {n} iter.",
+        "",
+        "Escalando al usuario per INV-11 + INV-18:",
+        "",
+        f"Estado plan {ctx.plan_id}:",
+        f"- Iteraciones: {n}",
+        f"- Findings residuales: {len(ctx.findings)}",
+        "",
+        "Opciones per INV-0 (user authority):",
+    ]
+    for o in opts:
+        line = f"- ({o.letter}) {o.action}: {o.rationale}."
+        if o.caveat:
+            line += f" {o.caveat}"
+        lines.append(line)
+    lines.append("")
+    lines.append("¿Cuál?")
+    return "\n".join(lines)

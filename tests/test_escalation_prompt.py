@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from escalation_prompt import (
@@ -17,6 +19,8 @@ from escalation_prompt import (
     build_escalation_context,
 )
 from magi_dispatch import MAGIVerdict
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "magi-escalations"
 
 
 def test_escalation_context_is_frozen() -> None:
@@ -81,11 +85,6 @@ def test_build_escalation_context_checkpoint2_returns_frozen_struct() -> None:
     assert ctx.context == "checkpoint2"
     assert len(ctx.iterations) == 3
     assert ctx.root_cause in set(_RootCause)
-
-
-from pathlib import Path
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "magi-escalations"
 
 
 def test_format_escalation_message_matches_golden_checkpoint2_infra() -> None:
