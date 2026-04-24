@@ -75,6 +75,17 @@ def test_changelog_still_present_and_references_v0_1() -> None:
     assert "Unreleased" in changelog or "0.1" in changelog
 
 
+def _semver_key(v: str) -> tuple[int, ...]:
+    """Convert '2.1.4' -> (2, 1, 4); non-numeric segments sort last (-1)."""
+    parts: list[int] = []
+    for seg in v.split("."):
+        try:
+            parts.append(int(seg))
+        except ValueError:
+            parts.append(-1)
+    return tuple(parts)
+
+
 def _resolve_magi_plugin_json() -> Path:
     """Resolve the path to MAGI's plugin.json, honoring MAGI_PLUGIN_ROOT override."""
     magi_root_env = os.environ.get("MAGI_PLUGIN_ROOT")
