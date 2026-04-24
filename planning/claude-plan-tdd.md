@@ -92,7 +92,7 @@ Spec-base §2.2 ("Entrega v0.2") describes a full reviewer-feedback loop: on `is
 **Files:**
 - Modify: `tests/test_distribution_coherence.py:78-97`
 
-- [ ] **Step 1 (Red): add failing tests for `_semver_key`**
+- [x] **Step 1 (Red): add failing tests for `_semver_key`**
 
 Append to `tests/test_distribution_coherence.py`:
 
@@ -113,21 +113,21 @@ def test_semver_key_handles_mixed_version_strings() -> None:
     assert _semver_key("2.1.3") == _semver_key("2.1.3")
 ```
 
-- [ ] **Step 2: run tests, confirm ImportError on `_semver_key`**
+- [x] **Step 2: run tests, confirm ImportError on `_semver_key`**
 
 ```bash
 python -m pytest tests/test_distribution_coherence.py::test_semver_key_orders_patch_bump -v
 ```
 Expected: FAIL — `ImportError: cannot import name '_semver_key'`.
 
-- [ ] **Step 3 (Red commit)**
+- [x] **Step 3 (Red commit)**
 
 ```bash
 git add tests/test_distribution_coherence.py
 git commit -m "test: add failing _semver_key ordering tests"
 ```
 
-- [ ] **Step 4 (Green): implement `_semver_key`**
+- [x] **Step 4 (Green): implement `_semver_key`**
 
 Insert BEFORE `_resolve_magi_plugin_json` in `tests/test_distribution_coherence.py`:
 
@@ -143,28 +143,28 @@ def _semver_key(v: str) -> tuple[int, ...]:
     return tuple(parts)
 ```
 
-- [ ] **Step 5: run the two new tests, confirm PASS**
+- [x] **Step 5: run the two new tests, confirm PASS**
 
 ```bash
 python -m pytest tests/test_distribution_coherence.py -k semver_key -v
 ```
 Expected: 2 PASSED.
 
-- [ ] **Step 6 (Green commit)**
+- [x] **Step 6 (Green commit)**
 
 ```bash
 git add tests/test_distribution_coherence.py
 git commit -m "feat: add _semver_key helper for MAGI version resolution"
 ```
 
-- [ ] **Step 7 (Refactor + verify)**
+- [x] **Step 7 (Refactor + verify)**
 
 ```bash
 make verify
 ```
 Expected: pytest 0 fail, ruff clean, mypy 0 errors. If any, fix before commit.
 
-- [ ] **Step 8 (Refactor commit if any cleanup landed)**
+- [x] **Step 8 (Refactor commit if any cleanup landed)**
 
 ```bash
 git commit --allow-empty -m "refactor: no-op; _semver_key reviewed, clean"
