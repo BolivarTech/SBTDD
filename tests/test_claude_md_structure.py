@@ -1,14 +1,13 @@
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-24
-"""Structural tests for CLAUDE.md after v0.2 ship.
+"""Structural tests for CLAUDE.md release-notes archival convention.
 
-Plan I Task I4: once the v0.2 release-blocker work landed, the three
-``## v0.2 requirement (LOCKED) -- ...`` sections in CLAUDE.md are archived
-to ``CHANGELOG.md [0.2.0]`` and replaced by a single
-``## v0.2 release notes`` pointer. These tests pin that transition and
-catch regressions where a future edit reintroduces a v0.2 blocker
-heading under the archived label.
+Tripwire: once v0.2 blockers shipped, the three
+``## v0.2 requirement (LOCKED) -- ...`` sections are archived to
+``CHANGELOG.md [0.2.0]`` and collapsed to a single ``## v0.2 release notes``
+pointer. These tests pin that transition and flag regressions that
+reintroduce a blocker heading under the archived label.
 """
 
 from __future__ import annotations
@@ -21,9 +20,9 @@ CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 
 
 def test_v02_locked_blocker_sections_stripped() -> None:
-    """After Task I4, CLAUDE.md must contain zero ``## v0.2 requirement
-    (LOCKED)`` headings -- the three shipped blockers live in
-    ``CHANGELOG.md [0.2.0]`` after archival.
+    """CLAUDE.md must contain zero ``## v0.2 requirement (LOCKED)`` headings
+    once v0.2 ships -- the shipped blockers live in ``CHANGELOG.md [0.2.0]``
+    after archival.
     """
     text = CLAUDE_MD.read_text(encoding="utf-8")
     matches = re.findall(
@@ -38,8 +37,8 @@ def test_v02_locked_blocker_sections_stripped() -> None:
 
 
 def test_v02_release_notes_section_points_to_changelog() -> None:
-    """After Task I4, CLAUDE.md must expose a ``## v0.2 release notes``
-    heading whose body references ``CHANGELOG.md`` (the archival target).
+    """CLAUDE.md must expose a ``## v0.2 release notes`` heading whose body
+    references ``CHANGELOG.md`` (the archival target for shipped v0.2 blockers).
     """
     text = CLAUDE_MD.read_text(encoding="utf-8")
     anchor = "## v0.2 release notes"
