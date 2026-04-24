@@ -51,3 +51,26 @@ def test_stub_magi_raises_on_exhausted_sequence():
     stub.invoke_magi(context_paths=[], cwd="/tmp")
     with pytest.raises(IndexError):
         stub.invoke_magi(context_paths=[], cwd="/tmp")
+
+
+def test_stub_spec_reviewer_sequence_consumed_fifo() -> None:
+    from tests.fixtures.skill_stubs import StubSpecReviewer
+
+    stub = StubSpecReviewer(sequence=[True, False, True])
+    r1 = stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None)
+    r2 = stub.dispatch_spec_reviewer(task_id="2", plan_path=None, repo_root=None)
+    r3 = stub.dispatch_spec_reviewer(task_id="3", plan_path=None, repo_root=None)
+    assert r1.approved is True
+    assert r1.issues == ()
+    assert r2.approved is False
+    assert len(r2.issues) == 1
+    assert r2.issues[0].severity == "MISSING"
+    assert r3.approved is True
+
+
+def test_stub_spec_reviewer_empty_raises() -> None:
+    from tests.fixtures.skill_stubs import StubSpecReviewer
+
+    stub = StubSpecReviewer(sequence=[])
+    with pytest.raises(IndexError):
+        stub.dispatch_spec_reviewer(task_id="1", plan_path=None, repo_root=None)
