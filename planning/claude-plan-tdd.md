@@ -1534,14 +1534,14 @@ def _collect_task_diff(repo_root: Path, task_id: str, n_commits: int = 4) -> str
 
 ### Task H3: `dispatch_spec_reviewer` core
 
-- [ ] **Step 1 (Red)**: tests using a stubbed `subprocess.run` that returns scripted reviewer outputs.
+- [x] **Step 1 (Red)**: tests using a stubbed `subprocess.run` that returns scripted reviewer outputs.
 
 ```python
 def test_dispatch_approved_path(tmp_path, monkeypatch) -> None:
     from spec_review_dispatch import dispatch_spec_reviewer
     # craft minimal plan + fake subprocess
     plan = tmp_path / "plan.md"
-    plan.write_text("### Task 1: foo\n- [ ] stuff\n", encoding="utf-8")
+    plan.write_text("### Task 1: foo\n- [x] stuff\n", encoding="utf-8")
     def fake_run(*a, **k):
         class R: returncode = 0; stdout = '{"approved": true, "issues": []}'; stderr = ""
         return R()
@@ -1554,7 +1554,7 @@ def test_dispatch_approved_path(tmp_path, monkeypatch) -> None:
 def test_dispatch_safety_valve_raises_spec_review_error(tmp_path, monkeypatch) -> None:
     from spec_review_dispatch import dispatch_spec_reviewer
     plan = tmp_path / "plan.md"
-    plan.write_text("### Task 1: foo\n- [ ] stuff\n", encoding="utf-8")
+    plan.write_text("### Task 1: foo\n- [x] stuff\n", encoding="utf-8")
     def fake_run(*a, **k):
         class R:
             returncode = 0
@@ -1567,9 +1567,9 @@ def test_dispatch_safety_valve_raises_spec_review_error(tmp_path, monkeypatch) -
                                max_iterations=3)
 ```
 
-- [ ] **Step 2-3**: commit `test:`.
+- [x] **Step 2-3**: commit `test:`.
 
-- [ ] **Step 4 (Green)**: append to `spec_review_dispatch.py`:
+- [x] **Step 4 (Green)**: append to `spec_review_dispatch.py`:
 
 ```python
 _REVIEWER_SKILL_REF = "/superpowers:subagent-driven-development/spec-reviewer-prompt.md"
@@ -1685,7 +1685,7 @@ def dispatch_spec_reviewer(
                           task_id=task_id, iteration=0)
 ```
 
-- [ ] **Step 5-8**: tests pass, commits.
+- [x] **Step 5-8**: tests pass, commits.
 
 ### Task H4: `StubSpecReviewer` fixture
 
