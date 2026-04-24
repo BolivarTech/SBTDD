@@ -124,15 +124,25 @@ def invoke_skill(
 
 
 # Per-skill default timeouts (seconds). The global default is 600s; skills
-# whose subprocess reliably needs more time override it below. ``/writing-plans``
-# is raised to 1800s because empirically (v0.2 Checkpoint 2 first run,
-# 2026-04-23) the subprocess exceeded 600s even when the plan file was already
-# written to disk -- the sub-session spends non-trivial post-write time on
-# closing actions, and killing it at 600s aborts the whole ``/sbtdd spec``
-# pipeline before MAGI Checkpoint 2 can run.
+# whose subprocess reliably needs more time override it below.
+#
+# - ``/writing-plans`` is raised to 1800s because empirically (v0.2
+#   Checkpoint 2 first run, 2026-04-23) the subprocess exceeded 600s even
+#   when the plan file was already written to disk -- the sub-session
+#   spends non-trivial post-write time on closing actions, and killing it
+#   at 600s aborts the whole ``/sbtdd spec`` pipeline before MAGI
+#   Checkpoint 2 can run.
+# - ``/test-driven-development`` is raised to 1800s because real
+#   implementer work on substantial tasks (observed G2 of Feature A:
+#   root-cause classifier + build_escalation_context on 2026-04-24)
+#   exceeds 600s when the sub-session reads the plan, writes tests,
+#   implements the production code, and runs ``make verify`` in one pass.
+#   The 600s default was tuned for the small Milestone A tasks where
+#   each phase is a few functions; v0.2's larger tasks need more budget.
 _DEFAULT_TIMEOUT = 600
 _SKILL_TIMEOUT_OVERRIDES: dict[str, int] = {
     "writing-plans": 1800,
+    "test-driven-development": 1800,
 }
 
 

@@ -184,6 +184,29 @@ def test_wrapper_monkeypatch_propagates_through_module_attr(monkeypatch):
     )
 
 
+def test_test_driven_development_default_timeout_is_1800s(monkeypatch):
+    """``/test-driven-development`` subprocess must default to 1800s.
+
+    Empirical v0.2 auto run G2 green phase (2026-04-24): the subagent's
+    combined read-plan + write-tests + implement + run-make-verify pass
+    exceeds the 600s default on substantial tasks. Raising the per-skill
+    default prevents the ``ValidationError: skill
+    '/test-driven-development' timed out after 600s`` that killed auto
+    mid-task. Same override mechanism as ``/writing-plans``.
+    """
+    from superpowers_dispatch import SkillResult, test_driven_development
+
+    captured: dict = {}
+
+    def fake_invoke(skill, args=None, timeout=600, cwd=None):
+        captured["timeout"] = timeout
+        return SkillResult(skill=skill, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("superpowers_dispatch.invoke_skill", fake_invoke)
+    test_driven_development(["--phase=green"])
+    assert captured["timeout"] == 1800
+
+
 def test_writing_plans_default_timeout_is_1800s(monkeypatch):
     """``/writing-plans`` subprocess must default to 1800s.
 
