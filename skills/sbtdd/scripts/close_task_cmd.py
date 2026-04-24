@@ -15,6 +15,11 @@ Enforces INV-3 (plan checkboxes monotonic: [x] never unset) and is
 subject to INV-12 (every subcomando validates preconditions before
 mutating state). The ``chore:`` commit honours INV-5..7 commit discipline
 via :mod:`commits`.
+
+v0.2 Feature B (INV-31): before advancing state, the subcommand dispatches
+the superpowers spec-reviewer for the closing task unless the
+``--skip-spec-review`` escape valve is set. A non-approved result surfaces
+as :class:`SpecReviewError` (exit 12) and leaves state untouched.
 """
 
 from __future__ import annotations
@@ -134,25 +139,36 @@ def mark_and_advance(state: SessionState, root: Path) -> SessionState:
     return new_state
 
 
+def _run_spec_review(task_id: str, state: SessionState, root: Path) -> None:
+    """Dispatch the spec-reviewer and raise on non-approval (INV-31).
+
+    Keeps :func:`main` flat: callers see a single pre-advance gate, not an
+    inline reviewer-plus-error-mapping block. Returns ``None`` on approval;
+    raises :class:`SpecReviewError` when the reviewer is unconvinced, which
+    aborts the subcommand before ``mark_and_advance`` mutates anything.
+    """
+    result = spec_review_dispatch.dispatch_spec_reviewer(
+        task_id=task_id,
+        plan_path=root / state.plan_path,
+        repo_root=root,
+    )
+    if not result.approved:
+        raise SpecReviewError(
+            f"spec-reviewer did not approve task {task_id}",
+            task_id=task_id,
+            iteration=result.reviewer_iter,
+            issues=tuple(i.text for i in result.issues),
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
     state = _preflight(root)
-    closed_task_id = state.current_task_id
+    closed_task_id = state.current_task_id or ""
     if not ns.skip_spec_review:
-        result = spec_review_dispatch.dispatch_spec_reviewer(
-            task_id=closed_task_id or "",
-            plan_path=root / state.plan_path,
-            repo_root=root,
-        )
-        if not result.approved:
-            raise SpecReviewError(
-                f"spec-reviewer did not approve task {closed_task_id}",
-                task_id=closed_task_id or "",
-                iteration=result.reviewer_iter,
-                issues=tuple(i.text for i in result.issues),
-            )
+        _run_spec_review(closed_task_id, state, root)
     new_state = mark_and_advance(state, root)
     next_msg = (
         f"Next: task {new_state.current_task_id}" if new_state.current_task_id else "Plan complete."
