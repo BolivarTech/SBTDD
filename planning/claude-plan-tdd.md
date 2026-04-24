@@ -598,14 +598,14 @@ def build_escalation_context(
 
 - [x] **Step 5: run tests, PASS**
 
-- [ ] **Step 6 (Green commit)**
+- [x] **Step 6 (Green commit)**
 
 ```bash
 git add skills/sbtdd/scripts/escalation_prompt.py tests/test_escalation_prompt.py
 git commit -m "feat: implement root-cause classifier + build_escalation_context"
 ```
 
-- [ ] **Step 7-8 (Refactor + verify + commit)**
+- [x] **Step 7-8 (Refactor + verify + commit)**
 
 ```bash
 make verify && git commit --allow-empty -m "refactor: classifier reviewed, clean"
