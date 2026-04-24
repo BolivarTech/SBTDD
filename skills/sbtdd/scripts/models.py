@@ -67,6 +67,7 @@ VALID_SUBCOMMANDS: tuple[str, ...] = (
     "finalize",
     "auto",
     "resume",
+    "review-spec-compliance",
 )
 
 #: Allowed values for the headless `on_exhausted` policy in

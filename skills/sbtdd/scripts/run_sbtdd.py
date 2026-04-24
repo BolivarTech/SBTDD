@@ -31,6 +31,7 @@ import finalize_cmd
 import init_cmd
 import pre_merge_cmd
 import resume_cmd
+import review_spec_compliance_cmd
 import spec_cmd
 import status_cmd
 from errors import EXIT_CODES, SBTDDError
@@ -39,8 +40,9 @@ from models import VALID_SUBCOMMANDS
 #: Handler signature: consumes the subcommand's argv tail and returns an exit code.
 SubcommandHandler = Callable[[list[str]], int]
 
-#: Subcommand name -> handler. All 9 entries point to the real
-#: ``{subcommand}_cmd.main`` functions as of Milestone C.
+#: Subcommand name -> handler. All 10 entries point to the real
+#: ``{subcommand}_cmd.main`` functions (v0.2 Feature B H7 adds
+#: ``review-spec-compliance`` to the nine Milestone-C subcommands).
 SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "init": init_cmd.main,
     "spec": spec_cmd.main,
@@ -51,6 +53,7 @@ SUBCOMMAND_DISPATCH: MutableMapping[str, SubcommandHandler] = {
     "finalize": finalize_cmd.main,
     "auto": auto_cmd.main,
     "resume": resume_cmd.main,
+    "review-spec-compliance": review_spec_compliance_cmd.main,
 }
 
 
