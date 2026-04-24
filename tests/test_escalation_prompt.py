@@ -41,3 +41,43 @@ def test_escalation_option_has_letter_action_rationale() -> None:
     opt = EscalationOption(letter="a", action="override", rationale="INV-0 user authority")
     assert opt.letter == "a"
     assert opt.action == "override"
+
+
+from escalation_prompt import (
+    build_escalation_context,
+    _classify_root_cause,
+)
+from magi_dispatch import MAGIVerdict
+
+
+def _mkv(verdict: str, degraded: bool = False, findings: tuple = (), conds: tuple = ()) -> MAGIVerdict:
+    return MAGIVerdict(verdict=verdict, degraded=degraded, conditions=conds, findings=findings, raw_output="")
+
+
+def test_classify_infra_transient_when_degraded_repeats() -> None:
+    iters = [
+        _mkv("HOLD", degraded=True),
+        _mkv("GO", degraded=False),
+        _mkv("HOLD", degraded=True),
+    ]
+    assert _classify_root_cause(iters) == _RootCause.INFRA_TRANSIENT
+
+
+def test_classify_structural_defect_when_strong_no_go_present() -> None:
+    iters = [_mkv("STRONG_NO_GO")]
+    assert _classify_root_cause(iters) == _RootCause.STRUCTURAL_DEFECT
+
+
+def test_classify_plan_vs_spec_when_critical_findings_persist() -> None:
+    critical = ({"severity": "CRITICAL", "text": "f"},)
+    iters = [_mkv("HOLD", findings=critical), _mkv("HOLD", findings=critical)]
+    assert _classify_root_cause(iters) == _RootCause.PLAN_VS_SPEC
+
+
+def test_build_escalation_context_checkpoint2_returns_frozen_struct() -> None:
+    iters = [_mkv("HOLD_TIE"), _mkv("HOLD"), _mkv("HOLD_TIE")]
+    ctx = build_escalation_context(iterations=iters, plan_id="A", context="checkpoint2")
+    assert ctx.plan_id == "A"
+    assert ctx.context == "checkpoint2"
+    assert len(ctx.iterations) == 3
+    assert ctx.root_cause in set(_RootCause)
