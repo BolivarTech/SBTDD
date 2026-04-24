@@ -8,6 +8,46 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## 0.1.2 - 2026-04-24
+
+### Fixed
+
+- `magi_dispatch.invoke_magi` now packs the `--output-dir <tmpdir>` flag
+  inside the single prompt string passed to `claude -p`, instead of
+  appending it as separate argv tokens. The v0.1.1 fix appended the flag
+  as bare argv entries after `-p /magi:magi`, which `claude` itself
+  parsed — rejecting with `error: unknown option '--output-dir'`. The
+  flag belongs to MAGI's `run_magi.py`, so it has to travel inside the
+  prompt for the sub-session to forward it. Observed live: v0.2
+  Checkpoint 2 converged in 2 iterations (HOLD_TIE → GO_WITH_CAVEATS
+  full non-degraded) against real `claude -p` traffic with this change.
+- `superpowers_dispatch` now defaults `/writing-plans` subprocess timeout
+  to 1800s (was 600s). Empirical observation during v0.2 Checkpoint 2
+  first run (2026-04-23): `/writing-plans` exceeded the 600s default
+  even when the plan document was already fully written to disk — the
+  sub-session spent non-trivial post-write time on closing actions, and
+  the 600s SIGTERM aborted `/sbtdd spec` before MAGI Checkpoint 2 could
+  run. Per-skill override table (`_SKILL_TIMEOUT_OVERRIDES`) lets other
+  skills keep the 600s baseline; caller-supplied `timeout=` kwargs still
+  win per-call.
+- `dependency_check.check_tdd_guard_binary` now resolves the binary path
+  via `shutil.which` and forwards the full path as `argv[0]` to the
+  subprocess. On Windows, `npm install -g @nizos/tdd-guard` installs
+  `tdd-guard.cmd` (a `.cmd` batch shim, not `.exe`); Python's
+  `subprocess.run([...], shell=False)` does NOT apply PATHEXT and
+  therefore raised `FileNotFoundError` (WinError 2) when argv[0] was the
+  bare name `"tdd-guard"`. Observed as a crash in `auto` Phase 1
+  preflight on 2026-04-24. Resolving the full path first makes the
+  invocation work cross-platform without `shell=True`.
+
+### Added
+
+- 12 new tests covering the three fixes: 8 in `test_magi_dispatch`
+  (prompt-string packing, disk-based report reading, split-suffix
+  stripping, degraded flag propagation, missing/malformed report paths),
+  3 in `test_superpowers_dispatch` (new default timeout pinning), 1 in
+  `test_dependency_check` (Windows `.cmd` resolution regression guard).
+
 ## 0.1.1 - 2026-04-23
 
 ### Fixed
