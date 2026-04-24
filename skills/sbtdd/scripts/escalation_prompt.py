@@ -23,6 +23,7 @@ import enum
 import json
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -283,3 +284,33 @@ def prompt_user(
             return _decision_for(options, "abandon", "override requested without reason")
         return UserDecision(chosen_option=choice, action="override", reason=reason)
     return UserDecision(chosen_option=choice, action=opt.action, reason=f"user chose {opt.action}")
+
+
+def apply_decision(decision: UserDecision, ctx: EscalationContext, project_root: Path) -> int:
+    """Write audit artifact + return process exit code.
+
+    Returns:
+        0 if decision is override/retry/alternative (caller continues);
+        8 if abandon (exit 8 matches v0.1 behavior so wrappers can propagate).
+    """
+    artifact_dir = project_root / ".claude" / "magi-escalations"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    safe_ts = ts.replace(":", "-")
+    artifact = artifact_dir / f"{safe_ts}-{ctx.plan_id}.json"
+    payload = {
+        "decision": decision.action,
+        "chosen_option": decision.chosen_option,
+        "reason": decision.reason,
+        "escalation_context": {
+            "iterations": list(ctx.iterations),
+            "plan_id": ctx.plan_id,
+            "root_cause": ctx.root_cause.value,
+            "n_findings": len(ctx.findings),
+        },
+        "timestamp": ts,
+        "plan_id": ctx.plan_id,
+        "magi_context": ctx.context,
+    }
+    artifact.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return 8 if decision.action == "abandon" else 0
