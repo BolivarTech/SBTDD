@@ -352,3 +352,105 @@ def test_auto_phase2_spec_review_error_mid_plan_records_completed_tasks(
     audit = json.loads((tmp_path / ".claude" / "auto-run.json").read_text(encoding="utf-8"))
     assert audit["error"] == "SpecReviewError"
     assert audit["tasks_completed"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Cost guardrail -- cumulative spec-review wall-time budget.
+# ---------------------------------------------------------------------------
+
+
+def test_auto_phase2_skips_reviewer_after_budget_exceeded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Once the cumulative reviewer wall-time exceeds the configured budget,
+    subsequent tasks must skip the dispatcher and continue normally.
+
+    Setup: 3-task plan, budget tightened to 1 second via the parsed config.
+    The first reviewer call sleeps long enough to exceed the budget; the
+    next two tasks must NOT call the dispatcher and the breadcrumb must
+    appear on stderr exactly once.
+    """
+    import time
+
+    import auto_cmd
+    import spec_review_dispatch
+    import superpowers_dispatch
+    from config import PluginConfig, load_plugin_local
+    from spec_review_dispatch import SpecReviewResult
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, task_count=3, task_id="1", current_phase="red")
+    base_cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")
+    cfg = PluginConfig(
+        **{**base_cfg.__dict__, "auto_max_spec_review_seconds": 1},
+    )
+
+    _install_auto_loop_patches(monkeypatch, auto_cmd, superpowers_dispatch)
+
+    call_count = {"n": 0}
+
+    def slow_then_fast(**kwargs: Any) -> SpecReviewResult:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First task spends > budget. Use a tiny sleep so the test
+            # stays fast but monotonic delta crosses the 1s budget.
+            time.sleep(1.05)
+        return SpecReviewResult(approved=True, issues=(), reviewer_iter=1, artifact_path=None)
+
+    monkeypatch.setattr(spec_review_dispatch, "dispatch_spec_reviewer", slow_then_fast)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    final = auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    assert final.current_phase == "done"
+    assert final.current_task_id is None
+    assert call_count["n"] == 1, (
+        f"reviewer must run only for task 1 (call_count={call_count['n']});"
+        " tasks 2 and 3 should skip after budget exhaustion"
+    )
+    err = capsys.readouterr().err
+    assert "spec-review budget" in err and "exceeded" in err and "--skip-spec-review" in err, (
+        f"expected breadcrumb on stderr, got: {err!r}"
+    )
+    # Breadcrumb emitted exactly once even though two tasks were skipped.
+    assert err.count("spec-review budget") == 1
+
+
+def test_auto_phase2_budget_not_exceeded_runs_reviewer_for_all(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When the cumulative reviewer time stays under budget, no skip path
+    triggers and no breadcrumb appears on stderr.
+    """
+    import auto_cmd
+    import spec_review_dispatch
+    import superpowers_dispatch
+    from config import load_plugin_local
+    from spec_review_dispatch import SpecReviewResult
+    from state_file import load as load_state
+
+    _seed_auto_env(tmp_path, task_count=2, task_id="1", current_phase="red")
+    cfg = load_plugin_local(tmp_path / ".claude" / "plugin.local.md")  # default 3600s budget
+
+    _install_auto_loop_patches(monkeypatch, auto_cmd, superpowers_dispatch)
+
+    calls = {"n": 0}
+
+    def fast_dispatch(**kwargs: Any) -> SpecReviewResult:
+        calls["n"] += 1
+        return SpecReviewResult(approved=True, issues=(), reviewer_iter=1, artifact_path=None)
+
+    monkeypatch.setattr(spec_review_dispatch, "dispatch_spec_reviewer", fast_dispatch)
+
+    ns = auto_cmd._build_parser().parse_args(["--project-root", str(tmp_path)])
+    state = load_state(tmp_path / ".claude" / "session-state.json")
+    auto_cmd._phase2_task_loop(ns, state, cfg)
+
+    assert calls["n"] == 2
+    err = capsys.readouterr().err
+    assert "spec-review budget" not in err
