@@ -152,6 +152,88 @@ def _stream_subprocess(
     return ("".join(stdout_buf), "".join(stderr_buf))
 
 
+#: Human-readable phase names for state-machine breadcrumbs (Feature D3).
+#: Index = phase number; phase 0 is the implicit pre-flight, 1-5 mirror
+#: the five auto phases (preflight, spec gate, task loop, pre-merge,
+#: checklist). Stored as a tuple so callers cannot mutate it accidentally.
+_PHASE_NAMES: tuple[str, ...] = (
+    "pre-flight",
+    "spec",
+    "task loop",
+    "pre-merge",
+    "checklist",
+)
+
+
+def _emit_phase_breadcrumb(
+    phase: int,
+    total_phases: int,
+    *,
+    task_index: int | None = None,
+    task_total: int | None = None,
+    sub_phase: str | None = None,
+) -> None:
+    """Emit a one-line state-machine breadcrumb to orchestrator stderr.
+
+    Format: ``[sbtdd] phase {p}/{t}: {phase_name} -- task {i}/{n} ({sub_phase})``.
+    Task-index and sub-phase are optional for non-task-loop phases (e.g.
+    pre-merge emits without ``-- task X/Y``).
+
+    Implements Feature D3 (spec-behavior sec.2 D3.1, D3.2). Always
+    flushes stderr so external observers see the line immediately even
+    if Python's default buffering is line-buffered to a pipe.
+
+    Args:
+        phase: 0-indexed phase number (0..len(_PHASE_NAMES)-1).
+        total_phases: Total number of phases (display denominator).
+        task_index: Optional task index for task-loop phase.
+        task_total: Optional task total for task-loop phase.
+        sub_phase: Optional TDD sub-phase label (``red``, ``green``,
+            ``refactor``, ``task-close``, ``magi-loop``, ``checklist``).
+    """
+    name = _PHASE_NAMES[phase] if 0 <= phase < len(_PHASE_NAMES) else f"phase-{phase}"
+    line = f"[sbtdd] phase {phase}/{total_phases}: {name}"
+    if task_index is not None and task_total is not None:
+        suffix = f" ({sub_phase})" if sub_phase else ""
+        line += f" -- task {task_index}/{task_total}{suffix}"
+    sys.stderr.write(line + "\n")
+    sys.stderr.flush()
+
+
+def _task_progress(plan_path: Path, current_task_id: str | None) -> tuple[int | None, int | None]:
+    """Return ``(task_index, task_total)`` for the active task, best-effort.
+
+    Reads ``plan_path`` once and counts ``### Task`` headers via the same
+    regex used by :mod:`_plan_ops`. ``task_index`` is 1-based: position of
+    ``current_task_id`` among the headers in source order. Returns
+    ``(None, None)`` on any failure (missing plan, unreadable, task id
+    not found) so breadcrumb / progress wiring degrades gracefully when
+    the plan layout is non-standard.
+
+    Args:
+        plan_path: Resolved path to ``planning/claude-plan-tdd.md``.
+        current_task_id: Active task id from the session state.
+
+    Returns:
+        Tuple ``(index, total)`` with 1-based index, or ``(None, None)``.
+    """
+    if current_task_id is None:
+        return (None, None)
+    try:
+        from _plan_ops import _TASK_HEADER_RE
+
+        text = plan_path.read_text(encoding="utf-8")
+        ids = [m.group(1) for m in _TASK_HEADER_RE.finditer(text)]
+        total = len(ids)
+        if total == 0:
+            return (None, None)
+        if current_task_id not in ids:
+            return (None, total)
+        return (ids.index(current_task_id) + 1, total)
+    except (OSError, ValueError):
+        return (None, None)
+
+
 def _build_run_sbtdd_argv(
     subcommand: str,
     extra_args: list[str] | None = None,
@@ -817,6 +899,18 @@ def _phase2_task_loop(
     spec_review_budget_seconds = cfg.auto_max_spec_review_seconds
     spec_review_elapsed = 0.0
     spec_review_breadcrumb_emitted = False
+    # Feature D3: emit one entry breadcrumb for phase 2 ("task loop") so
+    # operators see the run move past pre-flight before the first
+    # subagent dispatch. ``_task_progress`` is best-effort; on failure we
+    # still emit the phase line without the task counter.
+    _t_idx, _t_total = _task_progress(plan_path, current.current_task_id)
+    _emit_phase_breadcrumb(
+        phase=2,
+        total_phases=5,
+        task_index=_t_idx,
+        task_total=_t_total,
+        sub_phase=current.current_phase,
+    )
     try:
         while current.current_task_id is not None:
             phase_idx = (
@@ -898,6 +992,16 @@ def _phase2_task_loop(
                         plan_approved_at=current.plan_approved_at,
                     )
                     save_state(current, state_path)
+                    # Feature D3: breadcrumb AFTER state save, BEFORE the
+                    # next subagent dispatch (red->green or green->refactor).
+                    _t_idx, _t_total = _task_progress(plan_path, current.current_task_id)
+                    _emit_phase_breadcrumb(
+                        phase=2,
+                        total_phases=5,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        sub_phase=next_phase,
+                    )
                 else:
                     # H6 (INV-31): spec-reviewer gate BEFORE mark_and_advance.
                     assert current.current_task_id is not None
@@ -948,6 +1052,19 @@ def _phase2_task_loop(
                     # sequence.
                     current = close_task_cmd.mark_and_advance(current, root)
                     tasks_completed += 1
+                    # Feature D3: breadcrumb AFTER mark_and_advance,
+                    # BEFORE the first dispatch on the new task.
+                    # ``current.current_phase`` is "red" (or "done" when
+                    # the plan completes); both are valid sub_phase
+                    # labels for the breadcrumb.
+                    _t_idx, _t_total = _task_progress(plan_path, current.current_task_id)
+                    _emit_phase_breadcrumb(
+                        phase=2,
+                        total_phases=5,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        sub_phase=current.current_phase,
+                    )
                     # Plan D iter 2 Caspar: incremental audit write after
                     # each task close so a mid-loop raise preserves the
                     # partial tasks_completed count on disk.
