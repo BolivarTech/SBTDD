@@ -25,7 +25,7 @@ import subprocess
 import sys as _sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import quota_detector
 import subprocess_utils
@@ -140,6 +140,7 @@ def invoke_skill(
     *,
     model: str | None = None,
     skill_field_name: str = "implementer_model",
+    stream_prefix: str | None = None,
 ) -> SkillResult:
     """Invoke a superpowers skill via ``claude -p`` subprocess.
 
@@ -160,6 +161,13 @@ def invoke_skill(
             became ``model`` -- surfaces in the INV-0 breadcrumb. Defaults
             to ``"implementer_model"`` so callers that pass ``model=``
             without explicitly tagging it still get a sensible message.
+        stream_prefix: When set, forwards to
+            :func:`subprocess_utils.run_with_timeout` so the underlying
+            ``claude -p`` subprocess emits stdout/stderr line-by-line to
+            the orchestrator's stderr during execution (Feature D
+            streaming integration -- iter 2 finding #1 + #7 fix). When
+            ``None`` (default) the v0.2.x ``capture_output=True``
+            behavior is preserved.
 
     Returns:
         :class:`SkillResult` with returncode, stdout, stderr.
@@ -171,8 +179,14 @@ def invoke_skill(
     """
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     cmd = _build_skill_cmd(skill, args, model=effective_model)
+    # iter 2 finding #1 + #7: only pass stream_prefix when supplied so
+    # test fakes for run_with_timeout that don't accept the new kwarg
+    # keep working byte-identically (the v0.2 baseline behavior).
+    rwt_kwargs: dict[str, Any] = {"timeout": timeout, "capture": True, "cwd": cwd}
+    if stream_prefix is not None:
+        rwt_kwargs["stream_prefix"] = stream_prefix
     try:
-        result = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True, cwd=cwd)
+        result = subprocess_utils.run_with_timeout(cmd, **rwt_kwargs)
     except subprocess.TimeoutExpired as exc:
         raise ValidationError(f"skill '/{skill}' timed out after {exc.timeout}s") from exc
 
@@ -254,6 +268,7 @@ def _make_wrapper(
         *,
         model: str | None = None,
         skill_field_name: str = "implementer_model",
+        stream_prefix: str | None = None,
     ) -> SkillResult:
         module = _sys.modules[__name__]
         fn = module.invoke_skill  # late-bound: tests can replace via monkeypatch
@@ -262,17 +277,18 @@ def _make_wrapper(
         # downstream. With model=None the wrapper preserves the v0.2.x
         # call signature (no kwargs added) so monkeypatched stubs that
         # only accept (args, timeout, cwd) keep working in tests.
-        if model is None:
-            result: SkillResult = fn(skill_name, args=args, timeout=timeout, cwd=cwd)
-        else:
-            result = fn(
-                skill_name,
-                args=args,
-                timeout=timeout,
-                cwd=cwd,
-                model=model,
-                skill_field_name=skill_field_name,
-            )
+        #
+        # iter 2 finding #1 + #7: stream_prefix is opt-in; the wrapper
+        # forwards it only when the caller supplied a non-None value so
+        # pre-existing monkeypatched stubs continue to accept the call
+        # signature byte-identically.
+        kwargs: dict[str, Any] = {"args": args, "timeout": timeout, "cwd": cwd}
+        if model is not None:
+            kwargs["model"] = model
+            kwargs["skill_field_name"] = skill_field_name
+        if stream_prefix is not None:
+            kwargs["stream_prefix"] = stream_prefix
+        result: SkillResult = fn(skill_name, **kwargs)
         return result
 
     _wrapper.__name__ = skill_name.replace("-", "_")

@@ -164,8 +164,22 @@ class StubSpecReviewer:
         repo_root: Any,
         max_iterations: int = 3,
         timeout: int = 900,
+        model: str | None = None,
+        skill_field_name: str = "spec_reviewer_model",
+        stream_prefix: str | None = None,
     ) -> SpecReviewResult:
-        self.calls.append({"task_id": task_id, "max_iterations": max_iterations})
+        # v0.3.0 Feature D iter 2 (finding #1 + #7): accept stream_prefix
+        # so production wiring at auto_cmd._run_spec_review_gate threads
+        # the kwarg through. Stub ignores the value (test fixtures do not
+        # exercise real subprocess output).
+        self.calls.append(
+            {
+                "task_id": task_id,
+                "max_iterations": max_iterations,
+                "model": model,
+                "stream_prefix": stream_prefix,
+            }
+        )
         approved = self.sequence.pop(0)
         issues: tuple[SpecIssue, ...] = ()
         if not approved:

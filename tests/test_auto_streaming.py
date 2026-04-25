@@ -290,7 +290,10 @@ def test_invoke_magi_propagates_stream_prefix(monkeypatch: pytest.MonkeyPatch) -
     class _CompletedStub:
         returncode = 1  # short-circuit early so we don't need a real magi-report.json
         stdout = ""
-        stderr = "rate_limit_error: simulated for test"
+        # Match quota_detector.QUOTA_PATTERNS["rate_limit_429"] so the
+        # MAGIGateError is suppressed in favor of QuotaExhaustedError;
+        # we want to assert the kwarg propagated BEFORE the error fires.
+        stderr = "Request rejected (429)"
 
     def fake_run(cmd: list[str], **kwargs: Any) -> _CompletedStub:  # noqa: ARG001
         received["kwargs"] = kwargs

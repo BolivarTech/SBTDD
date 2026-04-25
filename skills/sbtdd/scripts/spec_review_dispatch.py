@@ -360,6 +360,7 @@ def dispatch_spec_reviewer(
     timeout: int = 900,
     model: str | None = None,
     skill_field_name: str = "spec_reviewer_model",
+    stream_prefix: str | None = None,
 ) -> SpecReviewResult:
     """Run the spec-reviewer for ONE task with a bounded retry budget.
 
@@ -425,14 +426,16 @@ def dispatch_spec_reviewer(
         cmd.extend(["--model", effective_model])
     cmd.extend(["-p", _REVIEWER_SKILL_REF, prompt])
     iter_history: list[dict[str, Any]] = []
+    # iter 2 finding #1 + #7: thread stream_prefix so the
+    # spec-reviewer subagent's per-iteration progress reaches
+    # the orchestrator's stderr line-by-line. Pass only when set
+    # so v0.2.x test fakes without the new kwarg keep working.
+    rwt_kwargs: dict[str, Any] = {"timeout": timeout, "capture": True, "cwd": str(repo_root)}
+    if stream_prefix is not None:
+        rwt_kwargs["stream_prefix"] = stream_prefix
     for iteration in range(1, max_iterations + 1):
         try:
-            result = subprocess_utils.run_with_timeout(
-                cmd,
-                timeout=timeout,
-                capture=True,
-                cwd=str(repo_root),
-            )
+            result = subprocess_utils.run_with_timeout(cmd, **rwt_kwargs)
         except subprocess.TimeoutExpired as exc:
             raise SpecReviewError(
                 f"spec-reviewer timed out at iter {iteration} for task {task_id}",

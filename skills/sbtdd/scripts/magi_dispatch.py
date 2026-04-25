@@ -330,6 +330,7 @@ def invoke_magi(
     *,
     model: str | None = None,
     skill_field_name: str = "magi_dispatch_model",
+    stream_prefix: str | None = None,
 ) -> MAGIVerdict:
     """Invoke /magi:magi and return a parsed MAGIVerdict.
 
@@ -367,8 +368,15 @@ def invoke_magi(
     effective_model = _apply_inv0_model_check(model, skill_field_name)
     with tempfile.TemporaryDirectory(prefix="sbtdd-magi-") as tmpdir:
         cmd = _build_magi_cmd(context_paths, output_dir=tmpdir, model=effective_model)
+        # iter 2 finding #1 + #7: thread stream_prefix so MAGI Loop 2
+        # output reaches the orchestrator's stderr line-by-line during
+        # the (often multi-minute) consensus run. Only pass when supplied
+        # so test fakes that pre-date v0.3.0 keep accepting the call.
+        rwt_kwargs: dict[str, Any] = {"timeout": timeout, "capture": True, "cwd": cwd}
+        if stream_prefix is not None:
+            rwt_kwargs["stream_prefix"] = stream_prefix
         try:
-            result = subprocess_utils.run_with_timeout(cmd, timeout=timeout, capture=True, cwd=cwd)
+            result = subprocess_utils.run_with_timeout(cmd, **rwt_kwargs)
         except subprocess.TimeoutExpired as exc:
             raise MAGIGateError(f"/magi:magi timed out after {exc.timeout}s") from exc
 

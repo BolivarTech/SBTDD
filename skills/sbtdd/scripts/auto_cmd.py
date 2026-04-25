@@ -51,7 +51,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 import close_task_cmd
 import commits
@@ -739,6 +739,7 @@ def _run_spec_review_gate(
     root: Path,
     *,
     model: str | None = None,
+    stream_prefix: str | None = None,
 ) -> None:
     """Dispatch the spec-reviewer before :func:`close_task_cmd.mark_and_advance` (INV-31).
 
@@ -769,19 +770,19 @@ def _run_spec_review_gate(
             the kwarg is omitted entirely so test stubs that pre-date
             v0.3.0 keep working.
     """
-    if model is None:
-        spec_review_dispatch.dispatch_spec_reviewer(
-            task_id=task_id,
-            plan_path=plan_path,
-            repo_root=root,
-        )
-    else:
-        spec_review_dispatch.dispatch_spec_reviewer(
-            task_id=task_id,
-            plan_path=plan_path,
-            repo_root=root,
-            model=model,
-        )
+    # iter 2 finding #1 + #7: forward stream_prefix only when supplied
+    # (None -> kwarg omitted) so v0.2.x stubs without the new kwarg keep
+    # accepting the call.
+    kwargs: dict[str, Any] = {
+        "task_id": task_id,
+        "plan_path": plan_path,
+        "repo_root": root,
+    }
+    if model is not None:
+        kwargs["model"] = model
+    if stream_prefix is not None:
+        kwargs["stream_prefix"] = stream_prefix
+    spec_review_dispatch.dispatch_spec_reviewer(**kwargs)
 
 
 #: Maximum outer iterations for the B6 feedback loop, mirroring INV-11
@@ -1219,13 +1220,25 @@ def _phase2_task_loop(
             )
             for phase in _PHASE_ORDER[phase_idx:]:
                 pre_phase_sha = _current_head_sha(root)
+                # v0.3.0 Feature D iter 2 (finding #1 + #7): build a
+                # task-and-phase tagged stream prefix so the operator
+                # sees per-task / per-phase identification on every
+                # streamed line. This is the production wiring the
+                # baseline v0.3.0 ship was missing.
+                _stream_pfx = (
+                    f"[sbtdd task-{current.current_task_id} {phase}]"
+                    if current.current_task_id is not None
+                    else None
+                )
                 # v0.3.0 Feature E: gate on ``implementer_model is None``
                 # so the kwargs are omitted entirely when the cascade
                 # resolved to None. Stubs that do NOT accept the new
                 # kwargs (test fixtures pre-dating v0.3.0) keep working.
                 if implementer_model is None:
                     superpowers_dispatch.test_driven_development(
-                        args=[f"--phase={phase}"], cwd=str(root)
+                        args=[f"--phase={phase}"],
+                        cwd=str(root),
+                        stream_prefix=_stream_pfx,
                     )
                 else:
                     superpowers_dispatch.test_driven_development(
@@ -1233,6 +1246,7 @@ def _phase2_task_loop(
                         cwd=str(root),
                         model=implementer_model,
                         skill_field_name="implementer_model",
+                        stream_prefix=_stream_pfx,
                     )
                 _run_verification_with_retries(root, retries)
                 prefix = _phase_prefix(phase)
@@ -1341,6 +1355,9 @@ def _phase2_task_loop(
                                 plan_path,
                                 root,
                                 model=spec_reviewer_model,
+                                stream_prefix=(
+                                    f"[sbtdd task-{current.current_task_id} spec-review]"
+                                ),
                             )
                             spec_review_elapsed += time.monotonic() - review_started
                         except SpecReviewError as exc:

@@ -197,10 +197,16 @@ def test_auto_phase2_reviewer_receives_plan_and_repo_paths(
         repo_root: Path,
         max_iterations: int = 3,
         timeout: int = 900,
+        model: str | None = None,
+        skill_field_name: str = "spec_reviewer_model",
+        stream_prefix: str | None = None,
     ) -> SpecReviewResult:
+        # iter 2 finding #1 + #7: accept stream_prefix kwarg threaded by
+        # _run_spec_review_gate (production wiring of streaming).
         observed["task_id"] = task_id
         observed["plan_path"] = plan_path
         observed["repo_root"] = repo_root
+        observed["stream_prefix"] = stream_prefix
         return SpecReviewResult(approved=True, issues=(), reviewer_iter=1, artifact_path=None)
 
     monkeypatch.setattr(spec_review_dispatch, "dispatch_spec_reviewer", fake_dispatch)

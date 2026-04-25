@@ -96,7 +96,10 @@ def bootstrapped_project(tmp_path, monkeypatch):
         sp.calls.append(("writing_plans", list(args or []), cwd or ""))
         return None
 
-    def fake_noop(args=None, timeout=600, cwd=None):
+    def fake_noop(args=None, timeout=600, cwd=None, **kwargs):
+        # Accept arbitrary v0.3.0+ kwargs (model, skill_field_name,
+        # stream_prefix) so the integration stub stays compatible with
+        # production wiring additions without per-revision churn.
         return None
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", fake_brainstorming)
