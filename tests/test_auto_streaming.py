@@ -90,7 +90,26 @@ def test_breadcrumb_on_task_close_advance(capfd):
 
 
 def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
-    """D1.3: streaming flushes pending buffers on subprocess termination."""
+    """D1.3: streaming flushes pending buffers on subprocess termination.
+
+    MAGI iter 1 finding #9 (WARNING) flagged the v0.3.0 baseline as
+    not load-bearing: it called ``proc.terminate()`` BEFORE invoking
+    ``_stream_subprocess``, so by the time the helper ran the OS
+    pipes were already closed and the threads merely drained whatever
+    the OS had buffered. That tests "drain closed pipes after
+    subprocess exit", a much weaker property than the spec scenario
+    D1.3 ("streaming flushes pending buffers a stderr orquestador
+    antes de exit 130", i.e. while orchestrator is catching SIGINT
+    and subprocess is mid-flight).
+
+    Iter 2 redesign: run ``_stream_subprocess`` on a daemon thread
+    BEFORE terminating; assert the pre-terminate output ("first")
+    reaches stderr. The streamer is concurrent with the SIGTERM,
+    matching the production scenario where the orchestrator catches
+    SIGINT mid-stream.
+    """
+    import threading as _thr
+
     script = tmp_path / "emit_then_hang.py"
     script.write_text("import sys, time\nprint('first', flush=True)\ntime.sleep(60)\n")
     proc = subprocess.Popen(
@@ -100,9 +119,20 @@ def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
         bufsize=1,
         text=True,
     )
+    streamer = _thr.Thread(
+        target=auto_cmd._stream_subprocess,
+        args=(proc, "[sbtdd]"),
+        daemon=True,
+    )
+    streamer.start()
+    # Give the streamer time to read and emit "first" while the
+    # subprocess is still alive (it then sleeps 60s).
     time.sleep(0.5)
     proc.terminate()
     proc.wait(timeout=5)
-    auto_cmd._stream_subprocess(proc, prefix="[sbtdd]")
+    # SIGTERM closes the pipes; iter(stream.readline, "") returns "",
+    # the pump exits, and the streamer thread completes.
+    streamer.join(timeout=5)
+    assert not streamer.is_alive(), "streamer thread did not unwind after terminate"
     captured = capfd.readouterr()
     assert "first" in captured.err
