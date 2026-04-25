@@ -44,11 +44,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import IO
 
 import close_task_cmd
 import commits
@@ -97,6 +100,56 @@ _ALLOWED_AUTO_RUN_STATUSES: tuple[str, ...] = (
 #: status value removed). Additive changes (new status, new optional
 #: field) keep the version.
 _AUTO_RUN_SCHEMA_VERSION: int = 1
+
+
+def _stream_subprocess(
+    proc: subprocess.Popen[str],
+    prefix: str,
+) -> tuple[str, str]:
+    """Read subprocess stdout/stderr line-by-line, rewrite to orchestrator stderr.
+
+    Reads pipes via a thread-pair pump so neither stream starves and the
+    helper works identically on POSIX and Windows (``select.select`` does
+    not work on pipes on Windows -- PEP 446). Each line is prefixed with
+    ``prefix`` and emitted to ``sys.stderr`` of the orchestrator with an
+    explicit ``flush`` so external observers see progress in real time.
+
+    Returns the accumulated ``(stdout, stderr)`` strings for the caller's
+    diagnostic / commit-error recovery paths (``CommitError`` v0.1.6
+    expects captured strings).
+
+    Implements Feature D scenarios D1.1 (line-buffered flush), D1.2
+    (prefix-aware rewrite), and D1.3 (final flush on subprocess exit).
+
+    Args:
+        proc: A ``subprocess.Popen`` opened with ``stdout=PIPE`` and
+            ``stderr=PIPE`` in text mode (``text=True``).
+        prefix: Tag prepended to every emitted line, e.g.
+            ``"[sbtdd task-7 green]"``.
+
+    Returns:
+        Tuple ``(stdout_text, stderr_text)`` containing the verbatim
+        subprocess output (without the orchestrator prefix).
+    """
+    stdout_buf: list[str] = []
+    stderr_buf: list[str] = []
+
+    def _pump(stream: IO[str] | None, sink: list[str]) -> None:
+        if stream is None:
+            return
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            sys.stderr.write(f"{prefix} {line}")
+            sys.stderr.flush()
+        stream.close()
+
+    t_out = threading.Thread(target=_pump, args=(proc.stdout, stdout_buf), daemon=True)
+    t_err = threading.Thread(target=_pump, args=(proc.stderr, stderr_buf), daemon=True)
+    t_out.start()
+    t_err.start()
+    t_out.join()
+    t_err.join()
+    return ("".join(stdout_buf), "".join(stderr_buf))
 
 
 @dataclass(frozen=True)

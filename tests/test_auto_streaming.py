@@ -40,3 +40,41 @@ def test_stream_subprocess_flushes_lines_individually(tmp_path, capfd):
     assert "line0" in captured.err
     assert "line4" in captured.err
     assert elapsed < 1.0  # 5 lines * 50ms + slack, not blocking till end
+
+
+def test_stream_subprocess_applies_prefix(tmp_path, capfd):
+    """D1.2: stderr lines carry the supplied prefix."""
+    script = tmp_path / "emit_to_stderr.py"
+    script.write_text(
+        "import sys\nsys.stderr.write('[skill] starting red phase\\n')\nsys.stderr.flush()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        text=True,
+    )
+    auto_cmd._stream_subprocess(proc, prefix="[sbtdd task-7 green]")
+    proc.wait(timeout=2)
+    captured = capfd.readouterr()
+    assert "[sbtdd task-7 green] [skill] starting red phase" in captured.err
+
+
+def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
+    """D1.3: streaming flushes pending buffers on subprocess termination."""
+    script = tmp_path / "emit_then_hang.py"
+    script.write_text("import sys, time\nprint('first', flush=True)\ntime.sleep(60)\n")
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        text=True,
+    )
+    time.sleep(0.5)
+    proc.terminate()
+    proc.wait(timeout=5)
+    auto_cmd._stream_subprocess(proc, prefix="[sbtdd]")
+    captured = capfd.readouterr()
+    assert "first" in captured.err
