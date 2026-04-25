@@ -64,7 +64,19 @@ subcommand routes through `run_sbtdd.py` (see `## Execution pipeline` below).
 - `--non-interactive` (on `spec`, `pre-merge`) -- force headless policy even on a TTY; applies `.claude/magi-auto-policy.json` (default `abort`).
 - `--skip-spec-review` (on `close-task`) -- bypass the Feature B spec-reviewer dispatch for manual flows where compliance has already been verified by hand.
 
-> **BREAKING -- INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts. Operators must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The reviewer-feedback mini-cycle (`/receiving-code-review` + mini-cycle TDD fix + re-dispatch up to 3 iter) promised in spec-base §2.2 is deferred to v0.2.1; until then, INV-31 is enforced as a fail-fast gate. Quota-constrained or non-superpowers-enabled environments should set `--skip-spec-review` explicitly until v0.2.1 lands.
+> **BREAKING -- INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts. Operators must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The reviewer-feedback mini-cycle (`/receiving-code-review` + mini-cycle TDD fix + re-dispatch up to 3 iter) promised in spec-base §2.2 shipped in v0.2.1 (B6 auto-feedback loop), so a single reviewer issue mid-`auto` no longer aborts the whole run -- but the per-task cost overhead remains.
+
+## Operational impact (INV-31 default-on)
+
+Because INV-31 is enforced by default, every `close-task` and every `auto` run dispatches the Superpowers spec-reviewer at least once per task. This adds 1-3 `claude -p` subprocess calls per task close (one nominal dispatch, plus up to two B6 feedback re-dispatches when issues are accepted). Three environments need explicit operator action before the first run:
+
+| Your environment | Symptom if untreated | Action |
+|------------------|----------------------|--------|
+| Anthropic quota constrained | First task close hits `QuotaExhaustedError` (exit 11) | Pass `--skip-spec-review` on `close-task`; or run with `--non-interactive` and a permissive `magi-auto-policy.json`. |
+| `superpowers` plugin missing | First task close hits `PreconditionError` (exit 2) | Either install superpowers (`/plugin install superpowers@claude-plugins-official`) or set `--skip-spec-review`. |
+| Long-running `auto` (>20 tasks) | Cumulative reviewer wall-time can dominate the run | `auto_max_spec_review_seconds` (default 3600s) caps total reviewer budget; once exceeded, the run continues without further reviewer dispatch and emits a once-per-run stderr breadcrumb. |
+
+Standard environments (paid plan + superpowers enabled) need no flags -- the default catches missing-requirement / over-engineering / misunderstanding defects per task. v1.0.0 will re-evaluate whether the default flips to opt-in based on field data.
 
 ## Complexity gate
 

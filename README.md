@@ -98,6 +98,17 @@ claude
 
 The `.claude/` directory is gitignored; each developer creates their own symlink locally. Changes are picked up with `/reload-plugins` without restarting.
 
+> **WARNING -- read before your first `/sbtdd auto` or `/sbtdd close-task`.** Since v0.2.0, the plugin invokes a Superpowers spec-reviewer subagent on every task close (INV-31 hard block). If you do not flip `--skip-spec-review` and your environment is below, your first task close will fail unexpectedly:
+>
+> | Your environment | What to do |
+> |------------------|-----------|
+> | Anthropic API quota constrained (low-tier plan, near monthly cap, no-credit) | Pass `--skip-spec-review` on `close-task`; the reviewer adds 1-3 `claude -p` calls per task. |
+> | `superpowers` plugin not installed or not enabled | Pass `--skip-spec-review`; reviewer dispatch needs `superpowers:subagent-driven-development`. |
+> | Running `auto` on >20-task plan with feedback loop disabled | Audit per-run cost via `.claude/spec-reviews/<task-id>-*.json` artifacts; budget `auto_max_spec_review_seconds` (default 3600s) caps cumulative wall-time. |
+> | Standard environment (paid plan + superpowers enabled) | Default behavior is correct -- reviewer catches missing-requirement / over-engineering / misunderstanding defects per task. |
+>
+> v0.2.1 ships the auto-feedback loop (`/receiving-code-review` + mini-cycle TDD fix per accepted finding, safety valve 3 iter), so a single reviewer issue mid-`auto` no longer kills the run -- but the per-task cost overhead remains. v1.0.0 will re-evaluate whether the default flips to opt-in based on field data.
+
 ---
 
 ## Usage

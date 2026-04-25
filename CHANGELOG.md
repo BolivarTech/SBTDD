@@ -8,13 +8,30 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
-## Unreleased (Deferred — tracked for v0.2.2 / v1.0.0)
+## Unreleased (Deferred — tracked for v1.0.0)
 
-WARNING #12 (INV-31 default-on surprise risk): v0.2 ships with
-spec-review default-on per the original INV-31 wording; field data
-from v0.2/v0.2.1 will drive whether v1.0.0 flips to opt-in or keeps
-the default. Operational impact documented in `## [0.2.0] BREAKING`
-(INV-31 hard-block entry).
+All v0.2 cycle deferred items closed. Open backlog tracked under
+v1.0.0 LOCKED (auto progress streaming, MAGI dispatch hardening +
+retried_agents telemetry, MAGI → /requesting-code-review cross-check,
+Group B spec-drift detection options re-evaluation, INV-31
+default-on opt-in re-evaluation based on v0.2/v0.2.1 field data).
+
+## [0.2.2] - 2026-04-25
+
+### Documentation
+
+- WARNING #12 (INV-31 default-on surprise risk) closed via prominent
+  operational callout. README.md gains a per-environment matrix
+  immediately after the install commands (quota-constrained /
+  superpowers-missing / long-auto-run / standard) so users see the
+  flip-`--skip-spec-review` decision before their first
+  `/sbtdd close-task` or `/sbtdd auto`. SKILL.md gains a parallel
+  `## Operational impact (INV-31 default-on)` section describing the
+  symptom-action mapping and the 1-3 `claude -p` per-task cost. The
+  prior callout (v0.2.1 commit `d6f1128`) remained accurate but was
+  buried inside `### v0.2 flags`; v0.2.2 surfaces it as the first
+  operational note new users encounter. Pure docs hotfix -- no code,
+  no test changes, no behavior change.
 
 ## [0.2.1] - 2026-04-25
 
