@@ -888,6 +888,136 @@ def test_loop2_does_not_write_feedback_file_when_no_rejections(
     assert not (tmp_path / ".claude" / "magi-feedback.md").exists()
 
 
+def test_loop2_seeds_pre_existing_magi_feedback_md_in_iter_1_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operator-curated seed feeds iter 1 context (commit 03fe687).
+
+    Pre-merge Loop 2 must include ``.claude/magi-feedback.md`` in the
+    iter-1 ``context_paths`` when the file pre-exists on disk, so MAGI
+    sees the operator's framing before building its own rejection list.
+    Absent this seed, iter 1 only sees the plan markdown -- the regression
+    that motivated the fix (CRITICAL findings re-flagged in iter 1 even
+    after code-side fixes had landed because MAGI only saw the plan,
+    not the new HEAD).
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
+
+    seed = tmp_path / ".claude" / "magi-feedback.md"
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_text("# MAGI iteration feedback\n\noperator framing\n", encoding="utf-8")
+
+    iter_paths_seen: list[list[str]] = []
+
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        iter_paths_seen.append(list(context_paths))
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
+
+    pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    assert len(iter_paths_seen) == 1
+    assert str(seed) in iter_paths_seen[0]
+
+
+def test_loop2_iter_1_does_not_include_feedback_path_when_file_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative: no pre-existing feedback file -> iter 1 paths exclude it.
+
+    Companion to the seed-present case. Confirms the seed-feedback branch
+    is gated by ``Path.exists()`` and never injects a phantom path.
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
+
+    iter_paths_seen: list[list[str]] = []
+
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        iter_paths_seen.append(list(context_paths))
+        return _make_verdict("GO", degraded=False)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
+
+    pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    feedback_path = str(tmp_path / ".claude" / "magi-feedback.md")
+    assert len(iter_paths_seen) == 1
+    assert feedback_path not in iter_paths_seen[0]
+
+
+def test_loop2_iter_2_rejections_overwrite_pre_existing_seed_feedback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """iter-2 rejections take over the feedback file even if a seed pre-existed.
+
+    The operator's seed only governs iter 1. Once rejections accumulate,
+    ``_write_magi_feedback_file`` overwrites the on-disk file with the
+    in-memory rejection list so iter 2+ sees the accumulated picture.
+    Verifies the seed is not pinned across iterations.
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+    import superpowers_dispatch
+
+    _seed_loop2_env(tmp_path)
+    _patch_no_drift(monkeypatch)
+    _patch_loop1_clean(monkeypatch)
+
+    seed = tmp_path / ".claude" / "magi-feedback.md"
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_text("# MAGI iteration feedback\n\noperator framing\n", encoding="utf-8")
+
+    sequence = iter(
+        [
+            _make_verdict(
+                "GO_WITH_CAVEATS",
+                degraded=False,
+                conditions=("redo all tests",),
+            ),
+            _make_verdict("GO", degraded=False),
+        ]
+    )
+
+    iter_paths_seen: list[list[str]] = []
+
+    def fake_invoke(
+        context_paths: list[str], timeout: int = 1800, cwd: str | None = None
+    ) -> object:
+        iter_paths_seen.append(list(context_paths))
+        return next(sequence)
+
+    def fake_receiving(
+        args: list[str] | None = None, timeout: int = 600, cwd: str | None = None
+    ) -> object:
+        return _make_skill_result(
+            stdout="## Rejected\n- redo all tests (rationale: out of scope)\n"
+        )
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", fake_invoke)
+    monkeypatch.setattr(superpowers_dispatch, "receiving_code_review", fake_receiving)
+
+    pre_merge_cmd.main(["--project-root", str(tmp_path)])
+    feedback_text = seed.read_text(encoding="utf-8")
+    assert "operator framing" not in feedback_text
+    assert "redo all tests" in feedback_text
+    assert len(iter_paths_seen) == 2
+    assert str(seed) in iter_paths_seen[0]
+    assert str(seed) in iter_paths_seen[1]
+
+
 # ---------------------------------------------------------------------------
 # MAGI Loop 2 iter 3 redesign: ``_loop2`` writes accepted conditions to
 # ``.claude/magi-conditions.md`` and raises :class:`MAGIGateError` instead
