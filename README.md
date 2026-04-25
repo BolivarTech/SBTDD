@@ -138,6 +138,48 @@ Invoke with `/sbtdd <subcommand>` or natural trigger phrases ("advance TDD phase
 
 > **BREAKING — INV-31 hard block (v0.2.0).** `close-task` and `auto` now invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts and the operator must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The v0.2 promise of routing reviewer issues through a `/receiving-code-review` + mini-cycle TDD feedback loop with up to 3 retry iterations is **deferred to v0.2.1** -- in v0.2.0 a single reviewer issue mid-`/sbtdd auto` aborts the whole run. Operators running quota-constrained or non-superpowers-enabled environments should set `--skip-spec-review` explicitly until v0.2.1 ships.
 
+### Cost optimization (v0.3.0+)
+
+v0.3.0 ships per-skill model selection so long `/sbtdd auto` runs no
+longer inherit the user's session model (typically Opus) for every
+implementer + spec-reviewer + MAGI-dispatch subprocess. Configure four
+optional fields in `.claude/plugin.local.md` (default `null` = inherit
+session, preserves v0.2.x behavior exactly):
+
+| Skill field | Recommended baseline | Rationale |
+|-------------|----------------------|-----------|
+| `implementer_model` | `claude-sonnet-4-6` | Depth needed for refactors and bug detection. |
+| `code_review_model` | `claude-sonnet-4-6` | `/requesting-code-review` benefits from the same depth. |
+| `spec_reviewer_model` | `claude-haiku-4-5` | Spec-reviewer is a pattern-match task; Haiku is sufficient and ~10x cheaper than Opus. |
+| `magi_dispatch_model` | `null` (inherit) | MAGI's 3 sub-agents pick their own model per the MAGI plugin contract; this flag controls only the outer dispatcher process. |
+
+Projected reduction on a 36-task `/sbtdd auto` run: **~70-80% vs
+default-Opus session**, preserving Opus only in the 3-5 MAGI Loop 2
+iterations where multi-perspective consensus value is highest.
+
+The recommended baseline ships commented in
+`templates/plugin.local.md.template`; uncomment and re-run
+`/sbtdd init --force` (or hand-edit `.claude/plugin.local.md`) to
+adopt it.
+
+For one-off bumps without editing the plugin config, pass
+`--model-override <skill>:<model>` to `/sbtdd auto` (repeatable):
+
+```bash
+/sbtdd auto --model-override implementer:claude-opus-4-7
+```
+
+> **INV-0 cascade.** If your global `~/.claude/CLAUDE.md` pins a
+> Claude model with phrasing like `Use claude-opus-4-7 for all sessions`
+> or `Pin claude-sonnet-4-6 globally`, that pin wins over both
+> `plugin.local.md` and `--model-override`; the dispatcher emits a
+> stderr breadcrumb explaining the cost implication. The pinning
+> regex requires a directive suffix (`globally`, `for all sessions`,
+> `as default`) — narrative prose like "do not use claude-opus-4-7"
+> or "for example, use claude-haiku-4-5" does NOT trigger the cascade.
+> See `~/.claude/CLAUDE.md` rules section if you want to opt out
+> entirely (remove the pin phrase) or in (add the pin phrase).
+
 ### Typical end-to-end flow
 
 ```bash

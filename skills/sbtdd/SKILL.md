@@ -66,6 +66,49 @@ subcommand routes through `run_sbtdd.py` (see `## Execution pipeline` below).
 
 > **BREAKING -- INV-31 hard block (v0.2.0).** `close-task` and `auto` invoke the Feature B spec-reviewer by default. When the reviewer flags any issue (`SpecReviewError`, exit code **12**), the failing subcommand aborts. Operators must either fix the diff and re-run, or pass `--skip-spec-review` after manually verifying compliance. The reviewer-feedback mini-cycle (`/receiving-code-review` + mini-cycle TDD fix + re-dispatch up to 3 iter) promised in spec-base §2.2 shipped in v0.2.1 (B6 auto-feedback loop), so a single reviewer issue mid-`auto` no longer aborts the whole run -- but the per-task cost overhead remains.
 
+### v0.3 flags
+
+- `--model-override <skill>:<model>` (on `auto`, repeatable) -- one-off
+  per-skill model selection without editing `plugin.local.md`. Valid
+  skill names: `implementer`, `code_review`, `spec_reviewer`,
+  `magi_dispatch`. Valid model IDs come from
+  `models.ALLOWED_CLAUDE_MODEL_IDS` (the 4.x family snapshot:
+  `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`,
+  `claude-haiku-4-5-20251001`). Unknown skill names or model IDs
+  exit `2` (PRECONDITION_FAILED) before any subprocess work.
+
+Four optional fields land in `.claude/plugin.local.md` to set
+per-skill models persistently (default `null` = inherit session,
+preserves v0.2.x behavior):
+
+| Field | Recommended baseline | Purpose |
+|-------|----------------------|---------|
+| `implementer_model` | `claude-sonnet-4-6` | Implementer subagent (`subagent-driven-development`, `executing-plans`). |
+| `code_review_model` | `claude-sonnet-4-6` | `/requesting-code-review` Loop 1 dispatcher. |
+| `spec_reviewer_model` | `claude-haiku-4-5` | Feature B spec-reviewer subagent. |
+| `magi_dispatch_model` | `null` (inherit) | `/magi:magi` outer dispatcher only. |
+
+> **MAGI sub-agent caveat.** `magi_dispatch_model` controls only the
+> MAGI plugin's outer dispatcher process. The 3 sub-agents
+> (Melchior, Balthasar, Caspar) pick their own model internally per
+> the MAGI plugin contract; this flag does not control them.
+
+> **INV-0 cascade.** Resolution order is CLI override > plugin.local.md
+> > None. If `~/.claude/CLAUDE.md` pins a model with phrasing like
+> `Use claude-opus-4-7 for all sessions`, `Pin claude-sonnet-4-6
+> globally`, or `Always claude-haiku-4-5 as default`, the global pin
+> wins over both lower layers and the dispatcher emits a stderr
+> breadcrumb starting `[sbtdd inv-0]` explaining the cost
+> implication. The pinning regex requires a directive suffix
+> (`globally`, `for all sessions`, `as default`, etc.); narrative
+> prose like "do not use claude-opus-4-7" or "for example, use
+> claude-haiku-4-5" does NOT trigger the cascade.
+
+Recommended baseline (Sonnet implementer + code-review, Haiku
+spec-reviewer, null magi_dispatch) is shipped commented in
+`templates/plugin.local.md.template`. Projected reduction on a
+36-task `/sbtdd auto` run vs default-Opus session: **~70-80%**.
+
 ## Operational impact (INV-31 default-on)
 
 Because INV-31 is enforced by default, every `close-task` and every `auto` run dispatches the Superpowers spec-reviewer at least once per task. This adds 1-3 `claude -p` subprocess calls per task close (one nominal dispatch, plus up to two B6 feedback re-dispatches when issues are accepted). Three environments need explicit operator action before the first run:
