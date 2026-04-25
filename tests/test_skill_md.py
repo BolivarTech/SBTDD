@@ -206,8 +206,11 @@ def test_skill_subcommand_dispatch_table_has_ten_rows() -> None:
 
     v0.1 shipped nine subcommands (init, spec, close-phase, close-task, status,
     pre-merge, finalize, auto, resume). v0.2 Feature B adds a tenth
-    (review-spec-compliance) for manual/executing-plans flows. The table in
-    the ``## Subcommand dispatch`` section must grow to ten data rows.
+    (review-spec-compliance) for manual/executing-plans flows. The dispatch
+    table at the top of the ``## Subcommand dispatch`` section must contain
+    exactly ten data rows (v0.3+ subsections like ``### v0.3 flags`` may
+    introduce additional tables further down the section -- skip past them
+    by stopping at the first blank line after the dispatch table closes).
     """
     text = _read_skill()
     section = re.search(
@@ -217,7 +220,18 @@ def test_skill_subcommand_dispatch_table_has_ten_rows() -> None:
     )
     assert section, "Subcommand dispatch section missing"
     body = section.group(1)
-    data_rows = [ln for ln in body.splitlines() if re.match(r"^\|\s*`[^`]+`", ln)]
+    # Collect only the FIRST contiguous run of data rows -- the dispatch
+    # table proper. Subsequent tables (v0.3 flags model fields, etc.)
+    # appear after a blank line and any narrative paragraphs in between.
+    data_rows: list[str] = []
+    in_table = False
+    for line in body.splitlines():
+        if re.match(r"^\|\s*`[^`]+`", line):
+            data_rows.append(line)
+            in_table = True
+        elif in_table:
+            # First non-data-row after the table closes the run.
+            break
     assert len(data_rows) == 10, f"expected 10 dispatch rows (v0.2), found {len(data_rows)}"
 
 

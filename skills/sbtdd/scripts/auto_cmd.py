@@ -275,13 +275,18 @@ def _update_progress(
     else:
         existing = {}
         auto_run_path.parent.mkdir(parents=True, exist_ok=True)
-    progress: dict[str, object] = {"phase": phase}
-    if task_index is not None:
-        progress["task_index"] = task_index
-    if task_total is not None:
-        progress["task_total"] = task_total
-    if sub_phase is not None:
-        progress["sub_phase"] = sub_phase
+    # MAGI iter 1 finding #4 fix: always emit the four keys
+    # ``{phase, task_index, task_total, sub_phase}`` to satisfy
+    # spec sec.2 D4.2 "shape exacto" literally. ``None`` values become
+    # JSON ``null`` rather than absent keys so future
+    # ``/sbtdd status --watch`` consumers can rely on the shape and
+    # treat ``null`` as the explicit "unknown" sentinel.
+    progress: dict[str, object | None] = {
+        "phase": phase,
+        "task_index": task_index,
+        "task_total": task_total,
+        "sub_phase": sub_phase,
+    }
     existing["progress"] = progress
     tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
     tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
