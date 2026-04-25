@@ -234,6 +234,84 @@ def _task_progress(plan_path: Path, current_task_id: str | None) -> tuple[int | 
         return (None, None)
 
 
+def _update_progress(
+    auto_run_path: Path,
+    *,
+    phase: int,
+    task_index: int | None,
+    task_total: int | None,
+    sub_phase: str | None,
+) -> None:
+    """Write the ``progress`` field of ``auto-run.json`` atomically.
+
+    Mirrors the atomic-write pattern of :func:`state_file.save` and
+    :func:`_write_auto_run_audit` (tmp file + ``os.replace``). A
+    concurrent reader sees either the prior payload or the new one,
+    never a torn JSON document (Feature D4 / spec-behavior sec.2 D4.1).
+
+    The file may already contain other top-level keys (``schema_version``,
+    ``auto_started_at``, etc.); they are preserved unchanged. When the
+    file does not exist, an empty dict is the starting point so the
+    helper is safe to call even before :func:`_write_auto_run_audit`.
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        phase: 0-indexed phase number.
+        task_index: Optional 1-based task index (omitted when ``None``).
+        task_total: Optional total task count (omitted when ``None``).
+        sub_phase: Optional sub-phase label (``red``, ``green``,
+            ``refactor``, ``task-close``, ``magi-loop``, ``checklist``);
+            omitted when ``None``.
+
+    Raises:
+        OSError: ``os.replace`` failed; tmp file is cleaned up before
+            re-raising so nothing leaks.
+    """
+    if auto_run_path.exists():
+        try:
+            existing: dict[str, object] = json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing = {}
+    else:
+        existing = {}
+        auto_run_path.parent.mkdir(parents=True, exist_ok=True)
+    progress: dict[str, object] = {"phase": phase}
+    if task_index is not None:
+        progress["task_index"] = task_index
+    if task_total is not None:
+        progress["task_total"] = task_total
+    if sub_phase is not None:
+        progress["sub_phase"] = sub_phase
+    existing["progress"] = progress
+    tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
+    # can transiently fail with PermissionError when another process /
+    # thread has the destination file open without FILE_SHARE_DELETE
+    # (concurrent reader pattern from D4.1). Retry a small number of
+    # times with a short sleep so the writer recovers from the race
+    # window without breaking the atomicity contract; the reader still
+    # never observes torn JSON because we never write into the target
+    # path directly.
+    last_err: OSError | None = None
+    for _ in range(20):
+        try:
+            os.replace(tmp, auto_run_path)
+            return
+        except PermissionError as exc:
+            last_err = exc
+            time.sleep(0.005)
+        except OSError as exc:
+            last_err = exc
+            break
+    try:
+        tmp.unlink()
+    except FileNotFoundError:
+        pass
+    assert last_err is not None
+    raise last_err
+
+
 def _build_run_sbtdd_argv(
     subcommand: str,
     extra_args: list[str] | None = None,
@@ -899,14 +977,23 @@ def _phase2_task_loop(
     spec_review_budget_seconds = cfg.auto_max_spec_review_seconds
     spec_review_elapsed = 0.0
     spec_review_breadcrumb_emitted = False
-    # Feature D3: emit one entry breadcrumb for phase 2 ("task loop") so
-    # operators see the run move past pre-flight before the first
-    # subagent dispatch. ``_task_progress`` is best-effort; on failure we
-    # still emit the phase line without the task counter.
+    # Feature D3 + D4: emit one entry breadcrumb for phase 2 ("task
+    # loop") so operators see the run move past pre-flight before the
+    # first subagent dispatch, and persist progress atomically into
+    # ``auto-run.json`` so a concurrent reader can poll the run state
+    # without racing the writer. ``_task_progress`` is best-effort; on
+    # failure we still emit the phase line without the task counter.
     _t_idx, _t_total = _task_progress(plan_path, current.current_task_id)
     _emit_phase_breadcrumb(
         phase=2,
         total_phases=5,
+        task_index=_t_idx,
+        task_total=_t_total,
+        sub_phase=current.current_phase,
+    )
+    _update_progress(
+        auto_run,
+        phase=2,
         task_index=_t_idx,
         task_total=_t_total,
         sub_phase=current.current_phase,
@@ -992,12 +1079,20 @@ def _phase2_task_loop(
                         plan_approved_at=current.plan_approved_at,
                     )
                     save_state(current, state_path)
-                    # Feature D3: breadcrumb AFTER state save, BEFORE the
-                    # next subagent dispatch (red->green or green->refactor).
+                    # Feature D3 + D4: breadcrumb + progress AFTER state
+                    # save, BEFORE the next subagent dispatch (red->green
+                    # or green->refactor).
                     _t_idx, _t_total = _task_progress(plan_path, current.current_task_id)
                     _emit_phase_breadcrumb(
                         phase=2,
                         total_phases=5,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        sub_phase=next_phase,
+                    )
+                    _update_progress(
+                        auto_run,
+                        phase=2,
                         task_index=_t_idx,
                         task_total=_t_total,
                         sub_phase=next_phase,
@@ -1052,15 +1147,22 @@ def _phase2_task_loop(
                     # sequence.
                     current = close_task_cmd.mark_and_advance(current, root)
                     tasks_completed += 1
-                    # Feature D3: breadcrumb AFTER mark_and_advance,
-                    # BEFORE the first dispatch on the new task.
-                    # ``current.current_phase`` is "red" (or "done" when
-                    # the plan completes); both are valid sub_phase
-                    # labels for the breadcrumb.
+                    # Feature D3 + D4: breadcrumb + progress AFTER
+                    # mark_and_advance, BEFORE the first dispatch on the
+                    # new task. ``current.current_phase`` is "red" (or
+                    # "done" when the plan completes); both are valid
+                    # sub_phase labels for the breadcrumb.
                     _t_idx, _t_total = _task_progress(plan_path, current.current_task_id)
                     _emit_phase_breadcrumb(
                         phase=2,
                         total_phases=5,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        sub_phase=current.current_phase,
+                    )
+                    _update_progress(
+                        auto_run,
+                        phase=2,
                         task_index=_t_idx,
                         task_total=_t_total,
                         sub_phase=current.current_phase,
