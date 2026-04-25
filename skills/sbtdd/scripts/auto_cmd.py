@@ -507,9 +507,7 @@ def _parse_model_overrides(raw_values: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for raw in raw_values:
         if ":" not in raw:
-            raise ValidationError(
-                f"--model-override expects '<skill>:<model>'; got {raw!r}"
-            )
+            raise ValidationError(f"--model-override expects '<skill>:<model>'; got {raw!r}")
         skill, _, model = raw.partition(":")
         if skill not in _VALID_MODEL_OVERRIDE_SKILLS:
             raise ValidationError(

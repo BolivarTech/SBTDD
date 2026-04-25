@@ -45,9 +45,7 @@ def test_inv0_precedence_pinned_model_wins(
     """E3.3: CLAUDE.md pinned model wins, breadcrumb emitted."""
     fake_home = tmp_path
     (fake_home / ".claude").mkdir()
-    (fake_home / ".claude" / "CLAUDE.md").write_text(
-        "Use claude-opus-4-7 for all sessions.\n"
-    )
+    (fake_home / ".claude" / "CLAUDE.md").write_text("Use claude-opus-4-7 for all sessions.\n")
     monkeypatch.setattr(Path, "home", lambda: fake_home)
     effective = superpowers_dispatch._apply_inv0_model_check(
         configured_model="claude-sonnet-4-6", skill_field_name="implementer_model"
@@ -83,9 +81,7 @@ def test_inv0_with_none_configured_returns_none(
     """When configured_model is None (default), return None without scanning."""
     fake_home = tmp_path
     (fake_home / ".claude").mkdir()
-    (fake_home / ".claude" / "CLAUDE.md").write_text(
-        "Use claude-opus-4-7 for all sessions.\n"
-    )
+    (fake_home / ".claude" / "CLAUDE.md").write_text("Use claude-opus-4-7 for all sessions.\n")
     monkeypatch.setattr(Path, "home", lambda: fake_home)
     effective = superpowers_dispatch._apply_inv0_model_check(
         configured_model=None, skill_field_name="implementer_model"
@@ -124,7 +120,5 @@ def test_magi_dispatch_build_with_model_none_byte_identical_to_v02() -> None:
     """E3 mirror: magi_dispatch._build_magi_cmd with model=None preserves v0.2 shape."""
     import magi_dispatch
 
-    argv = magi_dispatch._build_magi_cmd(
-        ["spec-behavior.md"], output_dir="/tmp/x", model=None
-    )
+    argv = magi_dispatch._build_magi_cmd(["spec-behavior.md"], output_dir="/tmp/x", model=None)
     assert "--model" not in argv

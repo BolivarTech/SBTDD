@@ -76,9 +76,7 @@ def test_resolve_model_cli_override_wins() -> None:
         worktree_policy="optional",
         implementer_model="claude-sonnet-4-6",
     )
-    result = auto_cmd._resolve_model(
-        "implementer", cfg, {"implementer": "claude-haiku-4-5"}
-    )
+    result = auto_cmd._resolve_model("implementer", cfg, {"implementer": "claude-haiku-4-5"})
     assert result == "claude-haiku-4-5"
 
 

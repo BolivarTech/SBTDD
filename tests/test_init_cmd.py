@@ -627,9 +627,9 @@ def test_rollback_leaves_no_empty_subdirectories(
 
 def test_template_ships_sonnet_haiku_baseline_commented() -> None:
     """E7.1: template contains commented Sonnet+Haiku baseline block."""
-    template = (
-        Path(__file__).parent.parent / "templates" / "plugin.local.md.template"
-    ).read_text(encoding="utf-8")
+    template = (Path(__file__).parent.parent / "templates" / "plugin.local.md.template").read_text(
+        encoding="utf-8"
+    )
     assert "# Recommended cost-optimized baseline" in template
     assert "# implementer_model: claude-sonnet-4-6" in template
     assert "# spec_reviewer_model: claude-haiku-4-5" in template

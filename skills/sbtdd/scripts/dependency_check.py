@@ -633,6 +633,7 @@ def check_environment(
 # v0.3.0 Feature E -- per-skill model selection (sec.S.12.5).
 # ---------------------------------------------------------------------------
 
+
 def check_model_ids(config: object) -> DependencyCheck:
     """Validate non-null model fields against ALLOWED_CLAUDE_MODEL_IDS.
 
