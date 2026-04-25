@@ -91,12 +91,38 @@ ALLOWED_CLAUDE_MODEL_IDS: tuple[str, ...] = (
 #: Regex used by superpowers_dispatch / magi_dispatch to detect when the
 #: developer's global ``~/.claude/CLAUDE.md`` pins a Claude model
 #: explicitly. INV-0 cascade: if the global file pins, plugin.local.md
-#: model fields are ignored and a stderr breadcrumb is emitted. The
-#: regex matches phrases like ``use claude-X-Y for``, ``pin claude-X-Y``,
-#: or ``always claude-X-Y``. Word-boundary anchored to avoid false
-#: positives in narrative prose.
+#: model fields are ignored and a stderr breadcrumb is emitted.
+#:
+#: v0.3.0 hotfix (MAGI iter 1 findings #3 + #8): the original
+#: verb-only form ``\b(?:use|pin|...)\s+claude-...\b`` had a real
+#: false-positive surface in narrative prose -- "don't use
+#: claude-opus-4-7", "we always use claude-sonnet-4-6 in this codebase
+#: notes", "for example, use claude-haiku-4-5 to optimize cost" all
+#: matched and silently downgraded plugin.local.md to session default.
+#:
+#: The fix requires a pinning suffix immediately after the model id:
+#: one of ``globally``, ``for all sessions``, ``as default``,
+#: ``as the (default|fixed|pinned) model``, ``across all sessions``,
+#: ``in every session``, ``for every session``. This keeps the regex
+#: cheap (single-pass on CLAUDE.md text), case-insensitive, and word-
+#: boundary anchored, while eliminating the narrative-prose surface.
+#:
+#: Operators who want to pin a model must use one of those imperatives
+#: (e.g. ``Use claude-opus-4-7 for all sessions``). The README and
+#: SKILL.md cost-optimization sections document the canonical phrases.
 INV_0_PINNED_MODEL_RE: "re.Pattern[str]" = re.compile(
     r"\b(?:use|pin|pinned|always|stick to|enforce)\s+"
-    r"(claude-(?:opus|sonnet|haiku)-\d+(?:-\d+)?(?:-\d{8})?)\b",
+    r"(claude-(?:opus|sonnet|haiku)-\d+(?:-\d+)?(?:-\d{8})?)"
+    # Required pinning suffix follows immediately (allowing the optional
+    # verb ``as`` between the model id and the suffix nominal).
+    r"(?:\s+(?:"
+    r"globally"
+    r"|for\s+all\s+sessions"
+    r"|across\s+all\s+sessions"
+    r"|in\s+every\s+session"
+    r"|for\s+every\s+session"
+    r"|as\s+default"
+    r"|as\s+the\s+(?:default|fixed|pinned)\s+model"
+    r"))\b",
     re.IGNORECASE,
 )
