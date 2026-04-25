@@ -243,7 +243,19 @@ def _phase4_smoke_test(staging: Path) -> None:
         if event not in data.get("hooks", {}):
             raise PreconditionError(f"smoke test: hook '{event}' missing")
     plugin_local = staging / ".claude" / "plugin.local.md"
-    load_plugin_local(plugin_local)
+    cfg = load_plugin_local(plugin_local)
+    # v0.3.0 Feature E -- emit a stderr warning when the freshly-written
+    # plugin.local.md carries model IDs not in ALLOWED_CLAUDE_MODEL_IDS.
+    # The check returns OK (not BROKEN) so init does not abort -- a field
+    # may legitimately be a freshly-released model. The runtime dispatch
+    # path hard-fails when claude rejects the --model arg.
+    from dependency_check import check_model_ids as _check_model_ids
+
+    model_check = _check_model_ids(cfg)
+    if "unknown model IDs" in model_check.detail:
+        import sys as _sys
+
+        _sys.stderr.write(f"[sbtdd init] {model_check.detail}\n")
 
 
 def _phase5_relocate(staging: Path, dest_root: Path) -> list[Path]:

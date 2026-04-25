@@ -23,6 +23,7 @@ from typing import Mapping
 
 import subprocess_utils
 from errors import ValidationError
+from models import ALLOWED_CLAUDE_MODEL_IDS
 
 #: Regex extracting ``major.minor[.patch]`` from ``python --version`` output.
 _PYTHON_VERSION_RE: _re.Pattern[str] = _re.compile(r"^Python\s+(\d+)\.(\d+)(?:\.(\d+))?")
@@ -626,3 +627,58 @@ def check_environment(
     checks.extend(check_stack_toolchain(stack))
     checks.append(check_working_tree(project_root))
     return DependencyReport(checks=tuple(checks))
+
+
+# ---------------------------------------------------------------------------
+# v0.3.0 Feature E -- per-skill model selection (sec.S.12.5).
+# ---------------------------------------------------------------------------
+
+def check_model_ids(config: object) -> DependencyCheck:
+    """Validate non-null model fields against ALLOWED_CLAUDE_MODEL_IDS.
+
+    v0.3.0 returns a non-fatal :class:`DependencyCheck` with
+    ``status='OK'`` plus a warning detail when fields contain unknown
+    IDs (so init does not abort -- a field may legitimately be a freshly-
+    released model the plugin's tuple does not yet recognize). Runtime
+    dispatch is the hard-fail path: ``claude --model <unknown>`` errors
+    and the surrounding subprocess wrapper raises ValidationError.
+
+    Args:
+        config: A :class:`config.PluginConfig`-shaped object with the
+            four ``*_model`` fields. Typed loosely as ``object`` to keep
+            the import surface flat (callers pass a real PluginConfig).
+
+    Returns:
+        :class:`DependencyCheck` with ``name="model_ids"``, ``status="OK"``
+        in all cases, and a ``detail`` string that surfaces unknown IDs
+        (or ``"all model IDs recognized"`` when none are flagged).
+    """
+    field_pairs: list[tuple[str, str | None]] = [
+        ("implementer_model", getattr(config, "implementer_model", None)),
+        ("spec_reviewer_model", getattr(config, "spec_reviewer_model", None)),
+        ("code_review_model", getattr(config, "code_review_model", None)),
+        ("magi_dispatch_model", getattr(config, "magi_dispatch_model", None)),
+    ]
+    unknown: list[str] = []
+    for field, value in field_pairs:
+        if value is not None and value not in ALLOWED_CLAUDE_MODEL_IDS:
+            unknown.append(f"{field}={value}")
+    if not unknown:
+        return DependencyCheck(
+            name="model_ids",
+            status="OK",
+            detail="all model IDs recognized",
+            remediation=None,
+        )
+    detail = (
+        f"unknown model IDs in plugin.local.md: {'; '.join(unknown)}. "
+        f"Will hard-fail at runtime if Anthropic does not recognize this "
+        f"ID. Verify spelling against the family snapshot in "
+        f"models.ALLOWED_CLAUDE_MODEL_IDS."
+    )
+    return DependencyCheck(
+        name="model_ids",
+        status="OK",  # warning, not failure -- init must not abort here.
+        detail=detail,
+        remediation="Update the field or remove it from plugin.local.md",
+    )
