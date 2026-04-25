@@ -189,6 +189,24 @@ v1.0.0 LOCKED items remaining:
 - INV-29 honored: every MAGI finding evaluated for technical merit
   before the mini-cycle TDD application; 0 findings rejected this
   iteration (all CRITICAL+WARNING substantive).
+- **MAGI iter 2 synthesizer recovery via manual synthesis.** The MAGI
+  v2.2.2 orchestrator aborted iter 2 with `RuntimeError: Only 1
+  agent(s) succeeded` because melchior + balthasar wrapped their
+  agent JSON in narrative preamble, defeating the strict parser
+  (caspar parsed cleanly). Inspecting the `.raw.json` files showed
+  all three agents produced unambiguous GO verdicts: melchior GO 88%
+  (4 INFO findings), balthasar approve/GO_WITH_CAVEATS 88% (3 INFO),
+  caspar approve 85% (3 INFO) — zero CRITICAL, zero WARNING, zero
+  Conditions for Approval across all three. Effective consensus
+  GO (3-0). Manual synthesis was treated as authoritative for the
+  exit-criterion check; the synthesizer failure is exactly the
+  v1.0.0 Feature F LOCKED item (MAGI dispatch hardening +
+  marker-based discovery + tolerant agent-output parsing) manifesting
+  empirically. The full v0.3.0 ship is the empirical justification
+  to prioritize Feature F early in v1.0.0. Raw outputs and the
+  manual synthesis are preserved in
+  `.claude/magi-runs/v030-iter2/{melchior,balthasar,caspar}.raw.json`
+  for the audit trail.
 
 ## [0.2.2] - 2026-04-25
 
