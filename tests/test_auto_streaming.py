@@ -10,10 +10,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
 
 import auto_cmd
+import subprocess_utils
 
 
 def test_stream_subprocess_flushes_lines_individually(tmp_path, capfd):
@@ -136,3 +140,173 @@ def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
     assert not streamer.is_alive(), "streamer thread did not unwind after terminate"
     captured = capfd.readouterr()
     assert "first" in captured.err
+
+
+# ----- iter 2 finding #1 + #7: production wiring of streaming -----
+#
+# The v0.3.0 baseline shipped _stream_subprocess + _build_run_sbtdd_argv
+# as helpers BUT no production caller used them. Every dispatch
+# subprocess invocation flowed through subprocess_utils.run_with_timeout
+# which used subprocess.run(..., capture_output=True) -- a blocking call
+# that returned one CompletedProcess after EOF.
+#
+# Iter 2 fix: subprocess_utils.run_with_timeout gains an optional
+# stream_prefix kwarg. With stream_prefix=None (default) behavior is
+# byte-identical to v0.2.x. With stream_prefix set, the helper switches
+# to subprocess.Popen + auto_cmd._stream_subprocess(proc, prefix). The
+# returned object is still CompletedProcess for compat with all 30+
+# existing callers.
+
+
+def test_run_with_timeout_no_stream_prefix_uses_subprocess_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Iter 2 finding #1: stream_prefix=None preserves v0.2.x subprocess.run path.
+
+    The helper must call subprocess.run -- NOT subprocess.Popen -- when
+    no stream_prefix is supplied. This guarantees byte-identical
+    behavior for the 30+ callers that did not opt into streaming
+    (commits, dependency_check, drift, finalize, resume, etc.).
+    """
+    captured: dict[str, Any] = {}
+
+    class _CompletedStub:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = "ok"
+            self.stderr = ""
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> _CompletedStub:
+        captured["called_run"] = True
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return _CompletedStub()
+
+    def fake_popen(*args: Any, **kwargs: Any) -> Any:
+        captured["called_popen"] = True
+        raise AssertionError("Popen must not be called when stream_prefix is None")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    result = subprocess_utils.run_with_timeout(["echo", "hi"], timeout=5)
+    assert captured.get("called_run") is True
+    assert captured.get("called_popen") is None
+    assert result.returncode == 0
+
+
+def test_run_with_timeout_with_stream_prefix_uses_popen_and_stream(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Iter 2 finding #1 + #7: stream_prefix triggers Popen + _stream_subprocess.
+
+    This is the END-TO-END regression: when a caller opts into
+    streaming via the new stream_prefix kwarg, the helper MUST switch
+    to Popen + the existing auto_cmd._stream_subprocess pump. This is
+    what wires the line-buffered output guarantee from D1.x scenarios
+    into the production auto path.
+    """
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-u",
+            "-c",
+            "import sys; sys.stdout.write('hello\\n'); sys.stdout.flush(); "
+            "sys.stderr.write('err1\\n'); sys.stderr.flush()",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+        text=True,
+    )
+
+    invoked: dict[str, Any] = {}
+
+    class _RecordingPopen:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            invoked["popen_args"] = args
+            invoked["popen_kwargs"] = kwargs
+            # Hand off to the real pre-spawned process so the streamer
+            # has actual data to consume.
+            self._inner = proc
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(subprocess, "Popen", _RecordingPopen)
+
+    result = subprocess_utils.run_with_timeout(
+        [sys.executable, "-u", "-c", "print('inert')"],
+        timeout=5,
+        stream_prefix="[sbtdd test wiring]",
+    )
+    proc.wait(timeout=5)
+
+    captured = capfd.readouterr()
+    assert "popen_args" in invoked, "Popen was not used when stream_prefix supplied"
+    assert "[sbtdd test wiring] hello" in captured.err
+    assert "[sbtdd test wiring] err1" in captured.err
+    assert result.returncode == 0
+
+
+def test_invoke_skill_propagates_stream_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Iter 2 finding #1 + #7: superpowers_dispatch.invoke_skill threads stream_prefix.
+
+    Verifies the kwarg is forwarded from the dispatch wrapper into
+    subprocess_utils.run_with_timeout so the auto path's
+    'invoke skill with prefix' contract reaches the underlying
+    subprocess machinery without being silently dropped.
+    """
+    import superpowers_dispatch
+
+    received: dict[str, Any] = {}
+
+    class _CompletedStub:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> _CompletedStub:  # noqa: ARG001
+        received["kwargs"] = kwargs
+        return _CompletedStub()
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+
+    superpowers_dispatch.invoke_skill(
+        "test-driven-development",
+        args=["--phase=red"],
+        timeout=10,
+        stream_prefix="[sbtdd task-7 red]",
+    )
+    assert received.get("kwargs", {}).get("stream_prefix") == "[sbtdd task-7 red]"
+
+
+def test_invoke_magi_propagates_stream_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Iter 2 finding #1 + #7: magi_dispatch.invoke_magi threads stream_prefix."""
+    import magi_dispatch
+
+    received: dict[str, Any] = {}
+
+    class _CompletedStub:
+        returncode = 1  # short-circuit early so we don't need a real magi-report.json
+        stdout = ""
+        stderr = "rate_limit_error: simulated for test"
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> _CompletedStub:  # noqa: ARG001
+        received["kwargs"] = kwargs
+        return _CompletedStub()
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+
+    # We expect QuotaExhaustedError because we faked a quota match in stderr;
+    # the streamer kwarg propagation is what we are asserting (it must reach
+    # run_with_timeout BEFORE the error is raised).
+    from errors import QuotaExhaustedError
+
+    with pytest.raises(QuotaExhaustedError):
+        magi_dispatch.invoke_magi(
+            ["spec-behavior.md"],
+            timeout=10,
+            stream_prefix="[sbtdd magi loop2]",
+        )
+    assert received.get("kwargs", {}).get("stream_prefix") == "[sbtdd magi loop2]"
