@@ -71,6 +71,24 @@ def test_subprocess_argv_includes_dash_u():
     assert "fix" in argv
 
 
+def test_breadcrumb_on_red_to_green_transition(capfd):
+    """D3.1: state-machine emits breadcrumb before phase advance dispatch."""
+    auto_cmd._emit_phase_breadcrumb(
+        phase=2, total_phases=5, task_index=14, task_total=36, sub_phase="green"
+    )
+    captured = capfd.readouterr()
+    assert "[sbtdd] phase 2/5: task loop -- task 14/36 (green)" in captured.err
+
+
+def test_breadcrumb_on_task_close_advance(capfd):
+    """D3.2: state machine emits breadcrumb when advancing task index."""
+    auto_cmd._emit_phase_breadcrumb(
+        phase=2, total_phases=5, task_index=15, task_total=36, sub_phase="red"
+    )
+    captured = capfd.readouterr()
+    assert "[sbtdd] phase 2/5: task loop -- task 15/36 (red)" in captured.err
+
+
 def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
     """D1.3: streaming flushes pending buffers on subprocess termination."""
     script = tmp_path / "emit_then_hang.py"
