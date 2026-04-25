@@ -86,3 +86,52 @@ def test_progress_field_absent_is_tolerated(tmp_path):
     auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
     data = json.loads(auto_run.read_text())
     assert data.get("progress") is None  # absent is fine
+
+
+def test_update_progress_always_emits_four_keys_with_null_sentinels(tmp_path):
+    """D4.2 (iter 2 finding #4): all four keys ALWAYS present.
+
+    Spec sec.2 D4.2 states 'shape exacto {phase, task_index, task_total,
+    sub_phase}'. v0.3.0 baseline omitted keys whose value was None
+    (degraded ``_task_progress`` returning ``(None, None)``). MAGI iter
+    1 WARNING required satisfying the literal shape contract: emit JSON
+    null for unknowns rather than omit the key. This protects future
+    ``/sbtdd status --watch`` consumers from KeyError on degraded
+    payloads.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
+    auto_cmd._update_progress(
+        auto_run,
+        phase=2,
+        task_index=None,
+        task_total=None,
+        sub_phase=None,
+    )
+    data = json.loads(auto_run.read_text())
+    progress = data["progress"]
+    assert set(progress.keys()) == {"phase", "task_index", "task_total", "sub_phase"}
+    assert progress["phase"] == 2
+    assert progress["task_index"] is None
+    assert progress["task_total"] is None
+    assert progress["sub_phase"] is None
+
+
+def test_update_progress_emits_four_keys_with_partial_unknowns(tmp_path):
+    """D4.2 (iter 2 finding #4): partial-None payload still has all four keys."""
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}")
+    auto_cmd._update_progress(
+        auto_run,
+        phase=3,
+        task_index=14,
+        task_total=None,  # unknown total -- still emit as null
+        sub_phase="green",
+    )
+    data = json.loads(auto_run.read_text())
+    assert data["progress"] == {
+        "phase": 3,
+        "task_index": 14,
+        "task_total": None,
+        "sub_phase": "green",
+    }
