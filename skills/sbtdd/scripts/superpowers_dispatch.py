@@ -251,10 +251,28 @@ def _make_wrapper(
         args: list[str] | None = None,
         timeout: int = default_timeout,
         cwd: str | None = None,
+        *,
+        model: str | None = None,
+        skill_field_name: str = "implementer_model",
     ) -> SkillResult:
         module = _sys.modules[__name__]
         fn = module.invoke_skill  # late-bound: tests can replace via monkeypatch
-        result: SkillResult = fn(skill_name, args=args, timeout=timeout, cwd=cwd)
+        # v0.3.0 Feature E: pass model + skill_field_name when the caller
+        # supplied a non-None model so INV-0 + --model arg injection fires
+        # downstream. With model=None the wrapper preserves the v0.2.x
+        # call signature (no kwargs added) so monkeypatched stubs that
+        # only accept (args, timeout, cwd) keep working in tests.
+        if model is None:
+            result: SkillResult = fn(skill_name, args=args, timeout=timeout, cwd=cwd)
+        else:
+            result = fn(
+                skill_name,
+                args=args,
+                timeout=timeout,
+                cwd=cwd,
+                model=model,
+                skill_field_name=skill_field_name,
+            )
         return result
 
     _wrapper.__name__ = skill_name.replace("-", "_")

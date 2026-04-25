@@ -450,7 +450,112 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--magi-threshold", type=str, default=None)
     p.add_argument("--verification-retries", type=int, default=None)
     p.add_argument("--dry-run", action="store_true")
+    # v0.3.0 Feature E -- per-skill model selection. Repeatable;
+    # accumulates into ``ns.model_override`` as a ``list[str]`` of
+    # ``<skill>:<model>`` tokens that ``_parse_model_overrides`` decodes
+    # downstream. Cascade: CLAUDE.md > CLI override > plugin.local.md
+    # > None (inherit session).
+    p.add_argument(
+        "--model-override",
+        action="append",
+        default=[],
+        metavar="<skill>:<model>",
+        help=(
+            "Override the per-skill model for this run only. Repeatable. "
+            "Valid skill names: implementer, spec_reviewer, code_review, "
+            "magi_dispatch. Cascade: CLAUDE.md > CLI override > "
+            "plugin.local.md > None (inherit session)."
+        ),
+    )
     return p
+
+
+# ---------------------------------------------------------------------------
+# v0.3.0 Feature E -- per-skill model selection (Track E, disjoint from D).
+# ---------------------------------------------------------------------------
+
+#: Canonical skill names accepted by ``--model-override <skill>:<model>``.
+#: Frozen at module load: ``frozenset`` so callers cannot mutate the
+#: validation set at runtime. Mirrors :data:`config._MODEL_FIELDS` (with
+#: the ``_model`` suffix stripped) -- the field map in ``_resolve_model``
+#: stays the source of truth for the suffix translation.
+_VALID_MODEL_OVERRIDE_SKILLS: frozenset[str] = frozenset(
+    {"implementer", "spec_reviewer", "code_review", "magi_dispatch"}
+)
+
+
+def _parse_model_overrides(raw_values: list[str]) -> dict[str, str]:
+    """Parse repeated ``--model-override <skill>:<model>`` CLI tokens.
+
+    Returns a dict mapping skill name (one of the four canonical names in
+    :data:`_VALID_MODEL_OVERRIDE_SKILLS`) to model ID. Raises
+    :class:`ValidationError` on missing separator or unknown skill name;
+    the dispatcher in :mod:`run_sbtdd` converts ValidationError to exit
+    code 1 (USER_ERROR) per sec.S.11.1.
+
+    Args:
+        raw_values: List of ``<skill>:<model>`` tokens collected from
+            ``argparse.action='append'``. May be empty.
+
+    Returns:
+        Dict ``{skill_name: model_id}``; empty when ``raw_values`` is empty.
+
+    Raises:
+        ValidationError: A token has no ``:`` separator OR the skill name
+            is not in :data:`_VALID_MODEL_OVERRIDE_SKILLS`.
+    """
+    out: dict[str, str] = {}
+    for raw in raw_values:
+        if ":" not in raw:
+            raise ValidationError(
+                f"--model-override expects '<skill>:<model>'; got {raw!r}"
+            )
+        skill, _, model = raw.partition(":")
+        if skill not in _VALID_MODEL_OVERRIDE_SKILLS:
+            raise ValidationError(
+                f"invalid --model-override skill name {skill!r}. Valid: "
+                f"{', '.join(sorted(_VALID_MODEL_OVERRIDE_SKILLS))}"
+            )
+        out[skill] = model
+    return out
+
+
+def _resolve_model(
+    skill: str,
+    config: PluginConfig,
+    cli_overrides: dict[str, str],
+) -> str | None:
+    """Resolve the effective configured model for a skill at dispatch time.
+
+    Cascade: CLI override > plugin.local.md field > None. INV-0
+    (``~/.claude/CLAUDE.md`` global pin) is enforced downstream by each
+    dispatch module's ``_apply_inv0_model_check`` -- this helper does NOT
+    re-implement INV-0 because that gate must run on every invocation
+    regardless of whether the cascade landed on CLI or config.
+
+    Args:
+        skill: Canonical skill name (one of
+            :data:`_VALID_MODEL_OVERRIDE_SKILLS`).
+        config: Loaded :class:`PluginConfig`; carries the four
+            ``*_model`` fields from ``plugin.local.md``.
+        cli_overrides: Pre-parsed ``--model-override`` map (output of
+            :func:`_parse_model_overrides`).
+
+    Returns:
+        The model ID to pass to the dispatch module's ``model=`` kwarg,
+        or ``None`` when neither layer of the cascade set a value (the
+        plugin then inherits the session's default model — byte-identical
+        to v0.2.x behaviour).
+    """
+    if skill in cli_overrides:
+        return cli_overrides[skill]
+    field_map: dict[str, str | None] = {
+        "implementer": config.implementer_model,
+        "spec_reviewer": config.spec_reviewer_model,
+        "code_review": config.code_review_model,
+        "magi_dispatch": config.magi_dispatch_model,
+    }
+    return field_map.get(skill)
 
 
 def _print_dry_run_preview(ns: argparse.Namespace) -> None:
@@ -597,7 +702,13 @@ def _phase_prefix(phase: str) -> str:
     raise ValueError(f"unknown phase '{phase}'")
 
 
-def _run_spec_review_gate(task_id: str, plan_path: Path, root: Path) -> None:
+def _run_spec_review_gate(
+    task_id: str,
+    plan_path: Path,
+    root: Path,
+    *,
+    model: str | None = None,
+) -> None:
     """Dispatch the spec-reviewer before :func:`close_task_cmd.mark_and_advance` (INV-31).
 
     Thin wrapper around :func:`spec_review_dispatch.dispatch_spec_reviewer`
@@ -616,12 +727,30 @@ def _run_spec_review_gate(task_id: str, plan_path: Path, root: Path) -> None:
     exercising auto drive :class:`SpecReviewError` directly to cover the
     blocked-advance test path (see
     ``tests/test_auto_cmd_spec_review.py``).
+
+    Args:
+        task_id: Plan task id whose diff is being reviewed.
+        plan_path: Path to the approved plan.
+        root: Project root directory.
+        model: Optional Claude model ID (v0.3.0 Feature E). When set,
+            forwarded to the dispatcher's ``model=`` kwarg for the
+            INV-0 + ``--model`` injection cascade. When ``None`` (default)
+            the kwarg is omitted entirely so test stubs that pre-date
+            v0.3.0 keep working.
     """
-    spec_review_dispatch.dispatch_spec_reviewer(
-        task_id=task_id,
-        plan_path=plan_path,
-        repo_root=root,
-    )
+    if model is None:
+        spec_review_dispatch.dispatch_spec_reviewer(
+            task_id=task_id,
+            plan_path=plan_path,
+            repo_root=root,
+        )
+    else:
+        spec_review_dispatch.dispatch_spec_reviewer(
+            task_id=task_id,
+            plan_path=plan_path,
+            repo_root=root,
+            model=model,
+        )
 
 
 #: Maximum outer iterations for the B6 feedback loop, mirroring INV-11
@@ -725,6 +854,8 @@ def _run_mini_cycle_for_finding(
     task_id: str,
     finding: str,
     retries: int,
+    *,
+    implementer_model: str | None = None,
 ) -> None:
     """Run one ``test:`` -> ``fix:`` -> ``refactor:`` mini-cycle per finding.
 
@@ -747,6 +878,9 @@ def _run_mini_cycle_for_finding(
         finding: Verbatim accepted finding from ``/receiving-code-review``.
         retries: Verification retry budget per phase, matching the
             surrounding ``_phase2_task_loop`` value.
+        implementer_model: Optional v0.3.0 Feature E per-skill model
+            ID forwarded to the ``test_driven_development`` dispatcher.
+            ``None`` (default) preserves the v0.2.x argv shape.
     """
     phase_prefix_pairs: tuple[tuple[str, str], ...] = (
         ("red", COMMIT_PREFIX_MAP["red"]),
@@ -754,10 +888,20 @@ def _run_mini_cycle_for_finding(
         ("refactor", COMMIT_PREFIX_MAP["refactor"]),
     )
     for phase_label, prefix in phase_prefix_pairs:
-        superpowers_dispatch.test_driven_development(
-            args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
-            cwd=str(root),
-        )
+        # v0.3.0 Feature E: omit model kwargs entirely when None so test
+        # stubs pre-dating v0.3.0 keep accepting the call signature.
+        if implementer_model is None:
+            superpowers_dispatch.test_driven_development(
+                args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
+                cwd=str(root),
+            )
+        else:
+            superpowers_dispatch.test_driven_development(
+                args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
+                cwd=str(root),
+                model=implementer_model,
+                skill_field_name="implementer_model",
+            )
         _run_verification_with_retries(root, retries)
         _commit_mini_cycle_phase(root, task_id, finding, prefix, phase_label)
 
@@ -836,16 +980,35 @@ def _apply_spec_review_findings_via_mini_cycle(
         if ns.verification_retries is not None
         else cfg.auto_verification_retries
     )
+    # v0.3.0 Feature E -- resolve per-skill models once for the helper's
+    # lifetime so the same cascade decision applies to every dispatch in
+    # the outer feedback loop. ``ns.model_override_map`` is populated by
+    # ``main`` from ``--model-override`` flags; absent in test fixtures
+    # that build a bare Namespace, so default to {}.
+    cli_overrides = getattr(ns, "model_override_map", {}) or {}
+    implementer_model = _resolve_model("implementer", cfg, cli_overrides)
+    spec_reviewer_model = _resolve_model("spec_reviewer", cfg, cli_overrides)
+    code_review_model = _resolve_model("code_review", cfg, cli_overrides)
     last_error: "SpecReviewError" = initial_error
     cumulative_rejections: list[str] = []
     elapsed = spec_review_elapsed
     for outer_iter in range(1, _B6_MAX_FEEDBACK_ITERATIONS):
         # Route the current iteration's issues through /receiving-code-review.
         review_args = receiving_review_dispatch.conditions_to_skill_args(last_error.issues)
-        review_result = superpowers_dispatch.receiving_code_review(
-            args=review_args,
-            cwd=str(root),
-        )
+        # v0.3.0 Feature E: omit model kwargs when None so stubs pre-dating
+        # v0.3.0 keep accepting the call signature.
+        if code_review_model is None:
+            review_result = superpowers_dispatch.receiving_code_review(
+                args=review_args,
+                cwd=str(root),
+            )
+        else:
+            review_result = superpowers_dispatch.receiving_code_review(
+                args=review_args,
+                cwd=str(root),
+                model=code_review_model,
+                skill_field_name="code_review_model",
+            )
         accepted, rejected = receiving_review_dispatch.parse_receiving_review(review_result)
         if not accepted and not rejected:
             # The skill produced no decisions -- treat as a hard stop. This
@@ -858,7 +1021,9 @@ def _apply_spec_review_findings_via_mini_cycle(
         # dispatch sees a mutated diff (the input change that the v0.2
         # baseline was missing).
         for finding in accepted:
-            _run_mini_cycle_for_finding(root, task_id, finding, retries)
+            _run_mini_cycle_for_finding(
+                root, task_id, finding, retries, implementer_model=implementer_model
+            )
         # Re-dispatch reviewer; budget-track the call.
         if elapsed >= spec_review_budget_seconds:
             # Budget exhausted mid-loop: stop here and signal the caller
@@ -869,11 +1034,19 @@ def _apply_spec_review_findings_via_mini_cycle(
             return elapsed, True
         review_started = time.monotonic()
         try:
-            spec_review_dispatch.dispatch_spec_reviewer(
-                task_id=task_id,
-                plan_path=plan_path,
-                repo_root=root,
-            )
+            if spec_reviewer_model is None:
+                spec_review_dispatch.dispatch_spec_reviewer(
+                    task_id=task_id,
+                    plan_path=plan_path,
+                    repo_root=root,
+                )
+            else:
+                spec_review_dispatch.dispatch_spec_reviewer(
+                    task_id=task_id,
+                    plan_path=plan_path,
+                    repo_root=root,
+                    model=spec_reviewer_model,
+                )
         except SpecReviewError as exc:
             last_error = exc
             elapsed += time.monotonic() - review_started
@@ -977,6 +1150,14 @@ def _phase2_task_loop(
     spec_review_budget_seconds = cfg.auto_max_spec_review_seconds
     spec_review_elapsed = 0.0
     spec_review_breadcrumb_emitted = False
+    # v0.3.0 Feature E -- resolve per-skill model IDs once per task-loop
+    # entry; the cascade (CLI override > plugin.local.md > None) is the
+    # same for every dispatch in the loop. INV-0 fires inside each
+    # dispatch module so the cascade output here is the *configured*
+    # model, not necessarily the one ultimately used.
+    cli_overrides = getattr(ns, "model_override_map", {}) or {}
+    implementer_model = _resolve_model("implementer", cfg, cli_overrides)
+    spec_reviewer_model = _resolve_model("spec_reviewer", cfg, cli_overrides)
     # Feature D3 + D4: emit one entry breadcrumb for phase 2 ("task
     # loop") so operators see the run move past pre-flight before the
     # first subagent dispatch, and persist progress atomically into
@@ -1007,9 +1188,21 @@ def _phase2_task_loop(
             )
             for phase in _PHASE_ORDER[phase_idx:]:
                 pre_phase_sha = _current_head_sha(root)
-                superpowers_dispatch.test_driven_development(
-                    args=[f"--phase={phase}"], cwd=str(root)
-                )
+                # v0.3.0 Feature E: gate on ``implementer_model is None``
+                # so the kwargs are omitted entirely when the cascade
+                # resolved to None. Stubs that do NOT accept the new
+                # kwargs (test fixtures pre-dating v0.3.0) keep working.
+                if implementer_model is None:
+                    superpowers_dispatch.test_driven_development(
+                        args=[f"--phase={phase}"], cwd=str(root)
+                    )
+                else:
+                    superpowers_dispatch.test_driven_development(
+                        args=[f"--phase={phase}"],
+                        cwd=str(root),
+                        model=implementer_model,
+                        skill_field_name="implementer_model",
+                    )
                 _run_verification_with_retries(root, retries)
                 prefix = _phase_prefix(phase)
                 try:
@@ -1112,7 +1305,12 @@ def _phase2_task_loop(
                     else:
                         review_started = time.monotonic()
                         try:
-                            _run_spec_review_gate(current.current_task_id, plan_path, root)
+                            _run_spec_review_gate(
+                                current.current_task_id,
+                                plan_path,
+                                root,
+                                model=spec_reviewer_model,
+                            )
                             spec_review_elapsed += time.monotonic() - review_started
                         except SpecReviewError as exc:
                             # B6 (v0.2.1): spec-reviewer raised; route findings
@@ -1400,6 +1598,12 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd auto (shoot-and-forget full-cycle)."""
     parser = _build_parser()
     ns = parser.parse_args(argv)
+    # v0.3.0 Feature E -- decode --model-override tokens into a dict and
+    # stash on the namespace so downstream phases can read it without
+    # re-parsing. Malformed tokens raise ValidationError BEFORE any
+    # filesystem / subprocess work so the dispatcher (run_sbtdd.py)
+    # can map them to exit 1 (USER_ERROR) without leaving partial state.
+    ns.model_override_map = _parse_model_overrides(ns.model_override or [])
     # Dry-run short-circuit BEFORE any subprocess work (Finding 4). The
     # cheap parser.parse_args above does not touch the filesystem;
     # stopping here guarantees a preview never invokes preflight,
