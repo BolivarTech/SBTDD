@@ -52,8 +52,8 @@ for v0.2.1 alongside B6.
 WARNING #12 (INV-31 default-on surprise risk): v0.2 ships with
 spec-review default-on per the original INV-31 wording; field data
 from v0.2/v0.2.1 will drive whether v0.3 flips to opt-in or keeps
-the default. Document the operational impact more prominently in the
-v0.2.0 CHANGELOG BREAKING section (follow-up).
+the default. Operational impact documented in `## [0.2.0] BREAKING`
+(INV-31 hard-block entry).
 
 WARNING #17 (pending-marker race): atomic rename pattern for
 `.claude/magi-escalation-pending.md` write. ~20 LOC in
@@ -282,6 +282,19 @@ WARNING #17 (pending-marker race): atomic rename pattern for
   existing dict fields using `AutoRunAudit(**payload_dict)`. Field
   validation now raises `TypeError` on schema mismatch (previously
   silent dict-passthrough).
+- INV-31 spec-reviewer gate ships as a HARD BLOCK in v0.2.0 (scope
+  deviation from `sbtdd/spec-behavior-base.md` §2.2). Any spec-reviewer
+  `issue` raises `SpecReviewError` (exit 12) and aborts the current
+  task close. The §2.2 promise of routing through
+  `/receiving-code-review` + mini-cycle TDD fix + re-dispatch up to the
+  3-iter safety valve is **deferred to v0.2.1** (see Unreleased
+  "B6 auto-feedback loop — LOCKED v0.2.1 release blocker"). Operators
+  recover by either (a) passing `--skip-spec-review` to
+  `close_task_cmd` / `auto_cmd` and reviewing manually, or (b) fixing
+  the diff and re-running the subcommand. As a corollary,
+  `dispatch_spec_reviewer` ships with default `max_iterations=1` in
+  v0.2 (will revert to `3` in v0.2.1). Flagged by MAGI Loop 2 v0.2
+  pre-merge 2026-04-24 as CRITICAL findings #4/#14 + WARNING #13.
 
 ### Added
 
@@ -365,6 +378,17 @@ WARNING #17 (pending-marker race): atomic rename pattern for
 
 - `README.md`: rewrote from the previous single-line stub into the full
   user-facing GitHub README.
+
+### Fixed
+
+- `dispatch_spec_reviewer` default `max_iterations` pinned to `1` (was
+  `3` in the original B6 design). v0.2 ships INV-31 as a HARD BLOCK: no
+  feedback path mutates the reviewer input between iterations, so any
+  iteration count above 1 would just re-emit the same `issues` and waste
+  quota. The default reverts to `3` in v0.2.1 once the auto-feedback
+  loop (B6) lands and gives the safety valve real work to do. See the
+  Unreleased "B6 auto-feedback loop" entry above for the v0.2.1
+  deliverables.
 
 ### Deferred (tracked for v0.2.0 — LOCKED release blockers only)
 
