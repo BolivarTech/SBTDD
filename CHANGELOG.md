@@ -36,6 +36,70 @@ v1.0.0 LOCKED items remaining:
   user has validated empirically in adjacent projects -- catches MAGI
   false-positive CRITICALs before INV-29 gate).
 
+## [0.4.0] - 2026-04-25
+
+### Added
+
+- **Feature F — MAGI dispatch hardening** (post-v0.3.0 pre-1.0 work):
+  - `magi_dispatch._discover_verdict_marker(output_dir)` enumerates
+    `MAGI_VERDICT_MARKER.json` files via recursive glob and returns the
+    most recent by mtime (F43). Iter 2 wires the helper as the primary
+    discovery path inside `invoke_magi`, with graceful fallback to the
+    legacy `magi-report.json` lookup so MAGI 2.x layouts (which still
+    write `magi-report.json`) continue to work unchanged. Forward-compat
+    for future MAGI versions that emit `MAGI_VERDICT_MARKER.json`.
+  - `MAGIVerdict.retried_agents: tuple[str, ...]` consumes the new
+    MAGI 2.2.1+ telemetry field with default `()` for MAGI 2.1.x
+    backward compat (F44). v0.4.0 ships the dataclass field + parser
+    + JSON-serialisability guarantee, sufficient for downstream
+    consumers (`escalation_prompt`) to read the field directly from
+    `MAGIVerdict` instances when they hold them. Note: full propagation
+    of `retried_agents` into the `auto-run.json` audit field is
+    **deferred to v1.0.0** alongside Features G/H per scope balance --
+    the field is parsed and serialisable today but not yet written
+    into the persistent audit chain by `auto_cmd._write_auto_run_audit`.
+  - `magi_dispatch._tolerant_agent_parse(raw_json_path)` (F45) parses
+    a single agent's `*.raw.json` file accepting both pure-JSON
+    `result` payloads (preserving v0.3.x strict-parser semantics) and
+    preamble-wrapped payloads where the verdict JSON is preceded by a
+    narrative paragraph. Iter 2 hardens validation so every accepted
+    candidate dict carries an `agent` field in `{melchior, balthasar,
+    caspar}` AND a `verdict` field in
+    `models.VERDICT_RANK ∪ {approve, conditional, reject}`; verdict
+    typos (e.g. `"GO_LATER"`) no longer slip through to silently
+    weigh as 0.0 in `_manual_synthesis_recovery`.
+  - `magi_dispatch._manual_synthesis_recovery(run_dir)` (F46) rescues a
+    `MAGIVerdict` when the MAGI synthesizer crashed (`"Only N agent(s)
+    succeeded"` stderr) but at least one agent persisted recoverable
+    JSON. Wires into `invoke_magi` after `quota_detector.detect` so
+    credit exhaustion is never masked by recovery (sec.S.11.4).
+    Persists a `manual-synthesis.json` recovery report flagged
+    `recovered: true` / `recovery_reason: "synthesizer-failure"` for
+    audit trails.
+- **Feature J — v0.3.0 streaming follow-through**: `pre_merge_cmd`
+  Loop 1 + Loop 2 + per-finding dispatches now thread the
+  `stream_prefix` parameter end-to-end so MAGI/code-review subprocess
+  output reaches the orchestrator's stderr line-by-line during
+  multi-minute consensus runs (J8). `_update_progress` swallows
+  `OSError` and preserves the existing `auto-run.json` (J4).
+  `_write_auto_run_audit` reads the on-disk payload before writing so
+  the existing `progress` field survives audit merges (J6).
+
+### Changed
+
+- **`magi_dispatch.invoke_magi(allow_recovery: bool = True)`** —
+  auto-recovery on synthesizer crash now defaults ON (F46.5). Existing
+  callers silently pick up the recovery path, which converts an
+  expensive class of failure (manual rerun on synthesizer crash) into
+  an audited automatic recovery with a `[sbtdd magi] synthesizer
+  failed; manual synthesis recovery applied (N findings)` stderr
+  breadcrumb. Pass `allow_recovery=False` to restore strict
+  behavior (synthesizer crash → `MAGIGateError` propagation) for
+  callers that need to detect the original failure mode.
+- SKILL.md v0.3 flags section corrected to use exit `1` (matching the
+  actual `argparse`/`SystemExit` taxonomy) instead of exit `2`
+  documented during the v0.3.0 ship (J5).
+
 ## [0.3.0] - 2026-04-25
 
 ### Added
