@@ -1,24 +1,24 @@
-# sbtdd-workflow v0.3.0 Implementation Plan
+# sbtdd-workflow v0.4.0 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship v0.3.0 (operational hardening MINOR bump) with two additive feature surfaces — auto progress streaming (Feature D) + per-skill model selection flag (Feature E). Non-BREAKING: default null preserves v0.2.x argv byte-identical.
+**Goal:** Ship v0.4.0 (MAGI dispatch hardening + v0.3.0 streaming follow-through) as MINOR non-BREAKING bump 0.3.0 → 0.4.0. Two surfaces 100% disjoint dispatched in true parallel.
 
-**Architecture:** Two independent feature surfaces dispatched to two parallel subagents. D touches `auto_cmd.py` only (streaming primitives + progress field). E touches `config.py`, `models.py`, three `*_dispatch.py` modules, `dependency_check.py`, `auto_cmd.py` (CLI parser only), and `templates/plugin.local.md.template`. Surfaces in `auto_cmd.py` are disjoint functions (D defines `_stream_subprocess` / `_update_progress`; E defines `_parse_model_overrides` / `_apply_inv0_model_check`) so parallel subagents do not clash. After both subagents land, the orchestrator drives a final review loop (MAGI → /receiving-code-review, cap 5 iter, exit when verdict ≥ GO_WITH_CAVEATS full with zero CRITICAL + zero WARNING + zero Conditions for Approval).
+**Architecture:** Feature F adds 4 helpers to `magi_dispatch.py` + 1 field to `MAGIVerdict` + 1 schema constant in `models.py`. The helpers replace path-based MAGI report discovery with marker-based discovery, propagate the new MAGI 2.2.1+ `retried_agents` field, tolerate preamble-wrapped agent JSON, and provide automatic manual-synthesis recovery when `run_magi.py` synthesizer crashes with ≥1 agent succeeded. J subset extends `auto_cmd.py` (OSError handling around `_update_progress`, audit progress preservation), `pre_merge_cmd.py` (stream_prefix wiring), and SKILL.md (exit-code docs hotfix). All additive, no behavior flips.
 
-**Tech Stack:** Python 3.9+ stdlib only on hot paths, PyYAML at config-load, pytest + ruff + mypy --strict for verification. Cross-platform Windows + POSIX.
+**Tech Stack:** Python 3.9+ stdlib + PyYAML, pytest + ruff + mypy --strict, cross-platform Windows + POSIX.
 
 ---
 
 ## Reference materials
 
 Before starting any task, read:
-
-- **Spec**: `sbtdd/spec-behavior.md` (BDD overlay v0.3.0 — escenarios D1.1..R1.7).
-- **Spec base**: `sbtdd/spec-behavior-base.md` (raw input v1.0.0; defines deferred items D5/E2/F/G/H).
-- **Authoritative contract**: `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 (invariants INV-0..INV-31).
-- **Project rules**: `CLAUDE.local.md` (TDD discipline, commit prefixes, plan-approved contract).
-- **Global rules**: `~/.claude/CLAUDE.md` (INV-0 absolute precedence: English commits, no AI refs, no Co-Authored-By, atomic commits).
+- **Spec**: `sbtdd/spec-behavior.md` (BDD overlay v0.4.0 — escenarios F43.1..F46.5, J4.1..J8.3, R2.1..R2.2).
+- **Spec base**: `sbtdd/spec-behavior-base.md` (raw input v1.0.0 post-v0.3.0).
+- **v0.3.0 ship record**: memory `project_v030_shipped.md` (rationale + empirical findings).
+- **MAGI iter 2 raw outputs**: `.claude/magi-runs/v030-iter2/{melchior,balthasar,caspar}.raw.json` (concrete preamble-wrapped JSON examples for F45 fixture data).
+- **CLAUDE.local.md sec.3** (TDD discipline) and **sec.5** (commit prefixes).
+- **Authoritative invariants**: `sbtdd/sbtdd-workflow-plugin-spec-base.md` sec.S.10 (INV-0..INV-31).
 
 ---
 
@@ -26,79 +26,71 @@ Before starting any task, read:
 
 | File | Track | Responsibility | Status |
 |------|-------|----------------|--------|
-| `skills/sbtdd/scripts/auto_cmd.py` | D + E | D: `_stream_subprocess`, `_update_progress`, breadcrumbs hooks. E: `_parse_model_overrides`, `_apply_inv0_model_check`, propagate model kwargs through dispatch calls | Modify |
-| `skills/sbtdd/scripts/config.py` | E | `PluginConfig` adds 4 Optional[str] model fields; loader tolerates absence | Modify |
-| `skills/sbtdd/scripts/superpowers_dispatch.py` | E | `invoke_skill` accepts `model: str \| None = None`; `_build_skill_cmd` injects `--model <id>` before `-p` when set; INV-0 check ignores model when CLAUDE.md pinned | Modify |
-| `skills/sbtdd/scripts/spec_review_dispatch.py` | E | `dispatch_spec_reviewer` accepts model kwargs (uses `code_review_model` + `spec_reviewer_model` fields); propagates to `invoke_skill` | Modify |
-| `skills/sbtdd/scripts/magi_dispatch.py` | E | `dispatch_magi` accepts `model` kwarg (uses `magi_dispatch_model`); injects `--model` in `_build_magi_cmd` argv | Modify |
-| `skills/sbtdd/scripts/models.py` | E | Add `ALLOWED_CLAUDE_MODEL_IDS: tuple[str, ...]` + `INV_0_PINNED_MODEL_RE` regex constant | Modify |
-| `skills/sbtdd/scripts/dependency_check.py` | E | Add `check_model_ids(config) -> DependencyCheck` returning warning (init) or hard fail (runtime via raise) | Modify |
-| `templates/plugin.local.md.template` | E | Append commented Sonnet+Haiku baseline block (4 fields commented) | Modify |
-| `tests/test_auto_streaming.py` | D | Cover D1.1, D1.2, D1.3, D2.1, D3.1, D3.2 | Create |
-| `tests/test_auto_progress.py` | D | Cover D4.1, D4.2, D4.3 | Create |
-| `tests/test_config_model_fields.py` | E | Cover E1.1, E1.2, E1.3 | Create |
-| `tests/test_dispatch_model_arg.py` | E | Cover E3.1, E3.2, E3.3, E3.4 (across 3 dispatch modules) | Create |
-| `tests/test_cli_model_override.py` | E | Cover E4.1, E4.2, E4.3, E4.4, E4.5 | Create |
-| `tests/test_dependency_check_models.py` | E | Cover E5.1, E5.2 | Create |
-| `tests/test_models_constants.py` | E | Cover E6.1, E6.2 | Create |
-| `tests/test_init_cmd.py` | E | Extend with E7.1 + E7.2 (template baseline assertions) | Modify (existing) |
-| `CHANGELOG.md` | Final | Add `[0.3.0]` section | Modify |
-| `README.md` | Final | Add Cost optimization section + matrix | Modify |
-| `skills/sbtdd/SKILL.md` | Final | Add `## v0.3 flags` section + INV-0 cascade docs | Modify |
-| `.claude-plugin/plugin.json` | Final | 0.2.2 → 0.3.0 | Modify |
-| `.claude-plugin/marketplace.json` | Final | 0.2.2 → 0.3.0 (two occurrences) | Modify |
+| `skills/sbtdd/scripts/magi_dispatch.py` | F | Add `_discover_verdict_marker`, `_tolerant_agent_parse`, `_manual_synthesis_recovery`. Extend `MAGIVerdict` with `retried_agents`. Modify `invoke_magi` to consume marker discovery + auto-recovery on crash. | Modify |
+| `skills/sbtdd/scripts/models.py` | F | Add `MAGI_VERDICT_MARKER_FIELDS` constant tuple (schema fixed) | Modify |
+| `tests/test_magi_hardening.py` | F | Cover F43.1, F43.2, F43.3, F44.1, F44.2, F44.3, F45.1, F45.2, F45.3, F45.4 | Create |
+| `tests/test_manual_synthesis_recovery.py` | F | Cover F46.1, F46.2, F46.3, F46.4, F46.5 | Create |
+| `skills/sbtdd/scripts/auto_cmd.py` | J | J4 OSError wrap around `_update_progress` write site. J6 `_write_auto_run_audit` preserves existing `progress` field. | Modify |
+| `skills/sbtdd/scripts/pre_merge_cmd.py` | J | J8 thread `stream_prefix` into Loop 1 + Loop 2 + mini-cycle dispatch sites | Modify |
+| `skills/sbtdd/SKILL.md` | J | J5 line 78 docs hotfix (exit 2 → exit 1) | Modify |
+| `tests/test_auto_progress.py` | J | Extend with J4.1, J4.2, J6.1, J6.2 | Modify (existing) |
+| `tests/test_skill_md.py` | J | Extend with J5.1 | Modify (existing) |
+| `tests/test_pre_merge_streaming.py` | J | Cover J8.1, J8.2, J8.3 | Create |
+| `CHANGELOG.md` | Final | Add `[0.4.0]` section | Modify |
+| `tests/test_plugin_manifest.py` | Final | Bump version tripwire from v0.3.x to v0.4.x | Modify |
+| `.claude-plugin/plugin.json` | Final | 0.3.0 → 0.4.0 | Modify |
+| `.claude-plugin/marketplace.json` | Final | 0.3.0 → 0.4.0 (two occurrences) | Modify |
 
 ---
 
 ## Subagent dispatch contracts
 
-### Subagent #1 — Track D (auto streaming)
+### Subagent #1 — Track F (MAGI hardening)
 
-- **Reads**: `sbtdd/spec-behavior.md` sec.2 (Feature D). `skills/sbtdd/scripts/auto_cmd.py` (current state). `skills/sbtdd/scripts/state_file.py` (atomic write pattern reference).
-- **Writes**: `skills/sbtdd/scripts/auto_cmd.py` (extension). `tests/test_auto_streaming.py` (new). `tests/test_auto_progress.py` (new).
-- **Forbidden**: any file in track E above.
+- **Reads**: spec sec.2 + plan tasks F-1 to F-4. Current `magi_dispatch.py` (lines 1-450 covering `MAGIVerdict`, `parse_magi_report`, `_build_magi_cmd`, `invoke_magi`). Current `models.py`. The `.raw.json` files in `.claude/magi-runs/v030-iter2/` for fixture data.
+- **Writes**: `magi_dispatch.py` (extension), `models.py` (extension), 2 new test files.
+- **Forbidden**: `auto_cmd.py`, `pre_merge_cmd.py`, `SKILL.md`, any `tests/test_auto_*` or `tests/test_pre_merge_*` files.
 - **TDD-Guard**: ON.
-- **Tasks**: D1, D2, D3, D4 (in any order; recommended order below).
+- **Tasks**: F-1 through F-4 (recommended order).
 - **Done**: 4 deliverables landed + tests pass + `make verify` clean.
 
-### Subagent #2 — Track E (per-skill model flag)
+### Subagent #2 — Track J (v0.3.0 streaming follow-through)
 
-- **Reads**: `sbtdd/spec-behavior.md` sec.3. `skills/sbtdd/scripts/config.py`. `skills/sbtdd/scripts/superpowers_dispatch.py`. `skills/sbtdd/scripts/magi_dispatch.py`. `skills/sbtdd/scripts/spec_review_dispatch.py`. `skills/sbtdd/scripts/models.py`. `skills/sbtdd/scripts/dependency_check.py`. `templates/plugin.local.md.template`.
-- **Writes**: 7 production modules + 6 test modules (1 modified, 5 new) + 1 template.
-- **Forbidden**: `_stream_subprocess` / `_update_progress` / breadcrumb logic in `auto_cmd.py` (track D).
+- **Reads**: spec sec.3 + plan tasks J-1 to J-4. Current `auto_cmd.py` `_update_progress` and `_write_auto_run_audit`. Current `pre_merge_cmd.py` Loop 1 + Loop 2 + mini-cycle dispatch sites. SKILL.md line 78.
+- **Writes**: `auto_cmd.py` (J4 + J6), `pre_merge_cmd.py` (J8), `SKILL.md` (J5), 2 modified existing test files + 1 new test file.
+- **Forbidden**: `magi_dispatch.py`, `models.py`, any `tests/test_magi_*` or `tests/test_manual_synthesis_*` files.
 - **TDD-Guard**: ON.
-- **Tasks**: E6 → E1 → E3 → E4 → E5 → E7 (recommended order: constants first, then config, then dispatch wiring, then CLI, then validation, then template).
-- **Done**: 6 deliverables landed + tests pass + `make verify` clean.
+- **Tasks**: J-1 through J-4 (recommended order J5 → J4 → J6 → J8).
+- **Done**: 4 deliverables landed + tests pass + `make verify` clean.
 
 ### Coordination
 
-- Both subagents commit to `main`. If a commit conflict occurs in `auto_cmd.py`, subagent #2 rebases onto subagent #1's HEAD (D code lands first by convention).
-- Each subagent invokes `make verify` before its final commit.
-- Each subagent reports DONE to the orchestrator with the commit SHA range.
+Surfaces 100% disjoint — both subagents commit to `main` simultaneously without merge conflict risk. Orchestrator dispatches both in parallel via two `Agent` tool calls in a single message. Waits for both DONE before final review.
 
 ---
 
-# Track D — Auto progress streaming (Subagent #1)
+# Track F — MAGI dispatch hardening (Subagent #1)
 
-## Task D1: Subprocess streaming primitive
+## Task F-1: Marker-based verdict discovery (F43)
 
 **Files:**
-- Create: `tests/test_auto_streaming.py`
-- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `_stream_subprocess` helper)
+- Create: `tests/test_magi_hardening.py`
+- Modify: `skills/sbtdd/scripts/magi_dispatch.py` (add `_discover_verdict_marker`)
 
-- [ ] **Step 1: Write failing test for D1.1 (line-by-line flush)**
+- [ ] **Step 1: Write failing test F43.1 (picks newest by mtime)**
 
 ```python
-# tests/test_auto_streaming.py (new file)
+# tests/test_magi_hardening.py (new file)
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-25
-"""Tests for v0.3.0 Feature D auto streaming primitives."""
+"""Tests for v0.4.0 Feature F MAGI dispatch hardening."""
 
 from __future__ import annotations
 
-import subprocess
+import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -107,384 +99,873 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
 
-import auto_cmd
+import magi_dispatch
+from errors import ValidationError
 
 
-def test_stream_subprocess_flushes_lines_individually(tmp_path, capfd):
-    """D1.1: streaming flushes subprocess output line-by-line within 250ms."""
-    script = tmp_path / "emit5.py"
-    script.write_text(
-        "import sys, time\n"
-        "for i in range(5):\n"
-        "    print(f'line{i}', flush=True)\n"
-        "    time.sleep(0.05)\n"
-    )
-    proc = subprocess.Popen(
-        [sys.executable, "-u", str(script)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        text=True,
-    )
-    start = time.monotonic()
-    auto_cmd._stream_subprocess(proc, prefix="[sbtdd test phase]")
-    elapsed = time.monotonic() - start
-    proc.wait(timeout=2)
-    captured = capfd.readouterr()
-    assert "line0" in captured.err
-    assert "line4" in captured.err
-    assert elapsed < 1.0  # 5 lines * 50ms + slack, not blocking till end
+def test_discover_verdict_marker_picks_newest_by_mtime(tmp_path):
+    """F43.1: enumerator returns marker with max mtime."""
+    old = tmp_path / "marker_old.json"
+    new = tmp_path / "marker_new.json"
+    old.write_text(json.dumps({"verdict": "GO"}))
+    time.sleep(0.05)
+    new.write_text(json.dumps({"verdict": "GO_WITH_CAVEATS"}))
+    # ensure mtime ordering (Windows clock granularity)
+    os.utime(old, (old.stat().st_atime, old.stat().st_mtime - 10))
+    result = magi_dispatch._discover_verdict_marker(tmp_path, marker_name="MAGI_VERDICT_MARKER.json")
+    # rename to expected marker name
+    old_renamed = tmp_path / "MAGI_VERDICT_MARKER.json.old"
+    old.rename(tmp_path / "MAGI_VERDICT_MARKER.json")
+    new.rename(tmp_path / "MAGI_VERDICT_MARKER_new.json")
+    # actually we need both with the same name in different subdirs
+    # simpler: use rglob, place both with same name
+    sub_old = tmp_path / "old"
+    sub_new = tmp_path / "new"
+    sub_old.mkdir(exist_ok=True)
+    sub_new.mkdir(exist_ok=True)
+    (sub_old / "MAGI_VERDICT_MARKER.json").write_text(json.dumps({"verdict": "GO"}))
+    time.sleep(0.05)
+    (sub_new / "MAGI_VERDICT_MARKER.json").write_text(json.dumps({"verdict": "GO_WITH_CAVEATS"}))
+    found = magi_dispatch._discover_verdict_marker(tmp_path)
+    assert found.parent.name == "new"
 ```
 
-- [ ] **Step 2: Run test, verify it fails**
+(Simplify: write helper that creates two subdirs with markers staggered by mtime, asserts newest picked.)
+
+- [ ] **Step 2: Run test, verify FAIL**
 
 ```bash
 cd D:/jbolivarg/PythonProjects/SBTDD
-python -m pytest tests/test_auto_streaming.py::test_stream_subprocess_flushes_lines_individually -v
+python -m pytest tests/test_magi_hardening.py::test_discover_verdict_marker_picks_newest_by_mtime -v
 ```
-Expected: FAIL with `AttributeError: module 'auto_cmd' has no attribute '_stream_subprocess'`.
+Expected: FAIL — `AttributeError: module 'magi_dispatch' has no attribute '_discover_verdict_marker'`.
 
-- [ ] **Step 3: Implement `_stream_subprocess` in auto_cmd.py**
+- [ ] **Step 3: Implement `_discover_verdict_marker`**
 
-Add near the top of `auto_cmd.py` (after existing imports), function:
+Append to `magi_dispatch.py`:
 
 ```python
-def _stream_subprocess(
-    proc: subprocess.Popen[str],
-    prefix: str,
-) -> tuple[str, str]:
-    """Read subprocess stdout/stderr line-by-line, rewrite to orchestrator stderr.
+_MARKER_FILENAME = "MAGI_VERDICT_MARKER.json"
 
-    Reads pipes via select-based polling so neither stream starves. Each
-    line is prefixed with ``prefix`` and emitted to ``sys.stderr`` of the
-    orchestrator. Returns the accumulated (stdout, stderr) for the caller's
-    diagnostic / commit-error recovery paths (CommitError v0.1.6 expects
-    captured strings).
 
-    Cross-platform: uses :func:`select.select` on POSIX and a thread-pair
-    fallback on Windows where ``select`` does not work on pipes (PEP 446).
+def _discover_verdict_marker(output_dir: Path | str) -> Path:
+    """Discover the most recent MAGI verdict marker in an output directory.
+
+    v0.4.0 Feature F (F43): replaces fragile path-based discovery
+    (``output_dir / "magi-report.json"``) with marker enumeration via
+    ``Path.rglob("MAGI_VERDICT_MARKER.json")``. Picks the marker with
+    max mtime so re-runs in the same dir return the latest result.
+
+    Args:
+        output_dir: Directory to scan recursively.
+
+    Returns:
+        Path to the most recent marker file.
+
+    Raises:
+        ValidationError: If no markers found, with detail listing files
+            actually present for debugability.
     """
-    import io
-    import threading
-
-    stdout_buf: list[str] = []
-    stderr_buf: list[str] = []
-
-    def _pump(stream: io.TextIOBase, sink: list[str], is_err: bool) -> None:
-        for line in iter(stream.readline, ""):
-            sink.append(line)
-            sys.stderr.write(f"{prefix} {line}")
-            sys.stderr.flush()
-        stream.close()
-
-    t_out = threading.Thread(target=_pump, args=(proc.stdout, stdout_buf, False), daemon=True)
-    t_err = threading.Thread(target=_pump, args=(proc.stderr, stderr_buf, True), daemon=True)
-    t_out.start()
-    t_err.start()
-    t_out.join()
-    t_err.join()
-    return ("".join(stdout_buf), "".join(stderr_buf))
+    base = Path(output_dir)
+    candidates = sorted(base.rglob(_MARKER_FILENAME), key=lambda p: p.stat().st_mtime)
+    if not candidates:
+        present = sorted(p.name for p in base.iterdir()) if base.exists() else []
+        raise ValidationError(
+            f"No {_MARKER_FILENAME} found in {base}. Files present: {present}"
+        )
+    return candidates[-1]
 ```
-
-- [ ] **Step 4: Run test, verify it passes**
-
-```bash
-python -m pytest tests/test_auto_streaming.py::test_stream_subprocess_flushes_lines_individually -v
-```
-Expected: PASS.
-
-- [ ] **Step 5: Add D1.2 test (prefix consistency)**
-
-```python
-def test_stream_subprocess_applies_prefix(tmp_path, capfd):
-    """D1.2: stderr lines carry the supplied prefix."""
-    script = tmp_path / "emit_to_stderr.py"
-    script.write_text(
-        "import sys\n"
-        "sys.stderr.write('[skill] starting red phase\\n')\n"
-        "sys.stderr.flush()\n"
-    )
-    proc = subprocess.Popen(
-        [sys.executable, "-u", str(script)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        text=True,
-    )
-    auto_cmd._stream_subprocess(proc, prefix="[sbtdd task-7 green]")
-    proc.wait(timeout=2)
-    captured = capfd.readouterr()
-    assert "[sbtdd task-7 green] [skill] starting red phase" in captured.err
-```
-
-- [ ] **Step 6: Run test, expect PASS**
-
-```bash
-python -m pytest tests/test_auto_streaming.py::test_stream_subprocess_applies_prefix -v
-```
-Already passes given the prefix-aware implementation in step 3.
-
-- [ ] **Step 7: Add D1.3 test (SIGTERM flush)**
-
-```python
-def test_stream_subprocess_flushes_on_sigterm(tmp_path, capfd):
-    """D1.3: streaming flushes pending buffers on subprocess termination."""
-    script = tmp_path / "emit_then_hang.py"
-    script.write_text(
-        "import sys, time\n"
-        "print('first', flush=True)\n"
-        "time.sleep(60)\n"
-    )
-    proc = subprocess.Popen(
-        [sys.executable, "-u", str(script)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-        text=True,
-    )
-    time.sleep(0.5)
-    proc.terminate()
-    proc.wait(timeout=5)
-    auto_cmd._stream_subprocess(proc, prefix="[sbtdd]")
-    captured = capfd.readouterr()
-    assert "first" in captured.err
-```
-
-- [ ] **Step 8: Verify all D1 tests pass + run full suite**
-
-```bash
-python -m pytest tests/test_auto_streaming.py -v
-make verify
-```
-Expected: 3 D1 tests PASS, 735+ baseline tests pass, ruff + mypy clean.
-
-- [ ] **Step 9: Commit (Red→Green collapsed since helper is new)**
-
-```bash
-git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_streaming.py
-git commit -m "feat: add _stream_subprocess line-buffered output for auto runs"
-```
-
----
-
-## Task D2: python -u flag in subprocess invocation
-
-**Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py` (subprocess argv construction site)
-- Modify: `tests/test_auto_streaming.py`
-
-- [ ] **Step 1: Write failing test D2.1**
-
-```python
-# Append to tests/test_auto_streaming.py
-def test_subprocess_argv_includes_dash_u():
-    """D2.1: auto_cmd subprocess argv is prefixed with python -u."""
-    argv = auto_cmd._build_run_sbtdd_argv(subcommand="close-phase", extra_args=["--variant", "fix"])
-    assert argv[0:2] == [sys.executable, "-u"]
-    assert "run_sbtdd.py" in argv[2]
-    assert "close-phase" in argv
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-```bash
-python -m pytest tests/test_auto_streaming.py::test_subprocess_argv_includes_dash_u -v
-```
-Expected: FAIL — `_build_run_sbtdd_argv` not defined OR existing argv lacks `-u`.
-
-- [ ] **Step 3: Implement / refactor**
-
-Locate the existing site in `auto_cmd.py` where the subprocess argv is built (search for `subprocess.run(...)` invocation that targets `run_sbtdd.py`). Extract it into:
-
-```python
-def _build_run_sbtdd_argv(subcommand: str, extra_args: list[str] | None = None) -> list[str]:
-    """Build subprocess argv for invoking run_sbtdd.py with python -u.
-
-    The ``-u`` flag disables Python output buffering at the dispatcher
-    level so :func:`_stream_subprocess` reads complete lines as the
-    sub-process emits them (sec.S.6.D).
-    """
-    run_sbtdd = (Path(__file__).resolve().parent / "run_sbtdd.py").as_posix()
-    argv = [sys.executable, "-u", run_sbtdd, subcommand]
-    if extra_args:
-        argv.extend(extra_args)
-    return argv
-```
-
-Then replace each existing argv construction site with a call to this helper. Preserve any environment variables / cwd kwargs from the original call sites.
 
 - [ ] **Step 4: Run test, verify PASS**
 
+- [ ] **Step 5: Add F43.2 test (no markers raises with detail)**
+
+```python
+def test_discover_verdict_marker_raises_when_empty(tmp_path):
+    """F43.2: ValidationError when no markers found, lists present files."""
+    (tmp_path / "stray.json").write_text("{}")
+    with pytest.raises(ValidationError) as ei:
+        magi_dispatch._discover_verdict_marker(tmp_path)
+    assert "MAGI_VERDICT_MARKER.json" in str(ei.value)
+    assert "stray.json" in str(ei.value)
+```
+
+- [ ] **Step 6: Add F43.3 test (recursive discovery)**
+
+```python
+def test_discover_verdict_marker_finds_in_subdir(tmp_path):
+    """F43.3: rglob finds markers in nested subdirs."""
+    sub = tmp_path / "run-XYZ"
+    sub.mkdir()
+    (sub / "MAGI_VERDICT_MARKER.json").write_text(json.dumps({"verdict": "GO"}))
+    found = magi_dispatch._discover_verdict_marker(tmp_path)
+    assert found.parent.name == "run-XYZ"
+```
+
+- [ ] **Step 7: make verify**
+
 ```bash
-python -m pytest tests/test_auto_streaming.py::test_subprocess_argv_includes_dash_u -v
 make verify
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit (Red→Green collapsed since helper is new)**
 
 ```bash
-git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_streaming.py
-git commit -m "feat: prefix run_sbtdd subprocess invocation with python -u"
+git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_hardening.py
+git commit -m "feat: add _discover_verdict_marker for marker-based MAGI report discovery"
 ```
 
 ---
 
-## Task D3: State-machine breadcrumbs per phase transition
+## Task F-2: retried_agents field on MAGIVerdict (F44)
 
 **Files:**
-- Modify: `skills/sbtdd/scripts/auto_cmd.py`
-- Modify: `tests/test_auto_streaming.py`
+- Modify: `skills/sbtdd/scripts/magi_dispatch.py` (extend `MAGIVerdict`, parser)
+- Modify: `tests/test_magi_hardening.py`
 
-- [ ] **Step 1: Failing test D3.1 (red→green breadcrumb)**
+- [ ] **Step 1: Write failing test F44.1 (field parsed when present)**
 
 ```python
-def test_breadcrumb_on_red_to_green_transition(capfd):
-    """D3.1: state-machine emits breadcrumb before phase advance dispatch."""
-    auto_cmd._emit_phase_breadcrumb(phase=2, total_phases=5, task_index=14, task_total=36, sub_phase="green")
-    captured = capfd.readouterr()
-    assert "[sbtdd] phase 2/5: task loop -- task 14/36 (green)" in captured.err
+def test_retried_agents_parsed_when_present(tmp_path):
+    """F44.1: retried_agents from marker JSON becomes tuple."""
+    marker = tmp_path / "MAGI_VERDICT_MARKER.json"
+    marker.write_text(json.dumps({
+        "verdict": "GO_WITH_CAVEATS",
+        "iteration": 1,
+        "agents": ["melchior", "balthasar", "caspar"],
+        "retried_agents": ["caspar"],
+        "consensus": {"label": "GO_WITH_CAVEATS", "degraded": False, "findings": [], "conditions_for_approval": []},
+    }))
+    verdict = magi_dispatch.MAGIVerdict.from_marker(marker)
+    assert verdict.retried_agents == ("caspar",)
 ```
 
-- [ ] **Step 2: Run, verify FAIL**
+- [ ] **Step 2: Run, verify FAIL** — `MAGIVerdict.from_marker` not defined OR field missing.
+
+- [ ] **Step 3: Add field + factory to MAGIVerdict**
+
+In `magi_dispatch.py`, locate `MAGIVerdict` dataclass declaration. Extend:
+
+```python
+@dataclass(frozen=True)
+class MAGIVerdict:
+    verdict: str
+    degraded: bool
+    conditions: tuple[str, ...]
+    findings: tuple[dict[str, Any], ...]
+    raw_output: str
+    # v0.4.0 Feature F (F44): MAGI 2.2.1+ retried_agents telemetry.
+    # Parser tolerates absence; defaults to empty tuple for backward
+    # compat with MAGI 2.1.x markers.
+    retried_agents: tuple[str, ...] = ()
+
+    @classmethod
+    def from_marker(cls, marker_path: Path | str) -> MAGIVerdict:
+        """Parse a MAGI verdict marker JSON file into a MAGIVerdict.
+
+        Reads the marker, validates required fields, and extracts the
+        consensus block. Tolerates missing ``retried_agents`` field for
+        MAGI 2.1.x compat.
+        """
+        data = json.loads(Path(marker_path).read_text(encoding="utf-8"))
+        retried = tuple(data.get("retried_agents") or ())
+        # Reuse the existing report-shaped parser to preserve all the
+        # sec.S.10 invariants around verdict label validation.
+        verdict = parse_magi_report(data)
+        # Re-construct with the retried_agents populated since
+        # parse_magi_report does not yet know about that field.
+        return cls(
+            verdict=verdict.verdict,
+            degraded=verdict.degraded,
+            conditions=verdict.conditions,
+            findings=verdict.findings,
+            raw_output=verdict.raw_output,
+            retried_agents=retried,
+        )
+```
+
+- [ ] **Step 4: Run test, verify PASS**
+
+- [ ] **Step 5: Add F44.2 (default empty tuple when absent)**
+
+```python
+def test_retried_agents_defaults_empty_tuple(tmp_path):
+    """F44.2: MAGI 2.1.x marker without retried_agents loads cleanly."""
+    marker = tmp_path / "MAGI_VERDICT_MARKER.json"
+    marker.write_text(json.dumps({
+        "verdict": "GO",
+        "iteration": 1,
+        "agents": ["melchior", "balthasar", "caspar"],
+        "consensus": {"label": "GO", "degraded": False, "findings": [], "conditions_for_approval": []},
+    }))
+    verdict = magi_dispatch.MAGIVerdict.from_marker(marker)
+    assert verdict.retried_agents == ()
+```
+
+- [ ] **Step 6: Add F44.3 propagation test (auto-run.json)**
+
+```python
+def test_retried_agents_propagated_to_auto_run(tmp_path):
+    """F44.3: retried_agents reaches auto-run.json audit field."""
+    # Lightweight unit: assert auto_cmd has a helper to encode retried agents
+    # into the audit dict. Full integration deferred to integration suite.
+    import auto_cmd
+    audit = {"phase": 4, "iter": 2}
+    updated = auto_cmd._record_magi_retried_agents(audit, ("balthasar",), iter_num=2)
+    assert updated["magi_iter2_retried_agents"] == ["balthasar"]
+```
+
+(Implement `auto_cmd._record_magi_retried_agents(audit, retried, iter_num)` as a small helper that mutates audit dict. NOTE: this touches `auto_cmd.py` but in a forbidden-zone-for-Track-F file. Resolution: define `_record_magi_retried_agents` in `magi_dispatch.py` as a pure-function helper that returns a dict mutation, NOT in auto_cmd. Track J subagent won't touch it. Integration into auto_cmd.py audit writes is a v0.4.1 / v1.0.0 follow-up; for v0.4.0 the helper exists but is NOT yet wired into `_write_auto_run_audit` because that's J6's surface and would require coordination. Document in CHANGELOG that F44.3 ships the helper; integration follows.)
+
+Actually simpler resolution: re-scope F44.3 test to verify only that `MAGIVerdict.retried_agents` is a tuple of strings consumable by audit writers. Defer audit-side wiring to v1.0.0.
+
+```python
+def test_retried_agents_consumable_by_audit_writer():
+    """F44.3 (re-scoped): retried_agents tuple is JSON-serializable + ordered."""
+    verdict = magi_dispatch.MAGIVerdict(
+        verdict="GO_WITH_CAVEATS",
+        degraded=False,
+        conditions=(),
+        findings=(),
+        raw_output="{}",
+        retried_agents=("balthasar", "caspar"),
+    )
+    # Serialization round-trip
+    serialized = json.dumps(list(verdict.retried_agents))
+    assert json.loads(serialized) == ["balthasar", "caspar"]
+```
+
+- [ ] **Step 7: make verify + commit**
 
 ```bash
-python -m pytest tests/test_auto_streaming.py::test_breadcrumb_on_red_to_green_transition -v
+make verify
+git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_hardening.py
+git commit -m "feat: add retried_agents field to MAGIVerdict for MAGI 2.2.1+ compat"
 ```
-Expected: FAIL — `_emit_phase_breadcrumb` not defined.
 
-- [ ] **Step 3: Implement `_emit_phase_breadcrumb`**
+---
+
+## Task F-3: Tolerant agent JSON parsing (F45)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/magi_dispatch.py`
+- Modify: `tests/test_magi_hardening.py`
+
+- [ ] **Step 1: Write failing test F45.1 (preamble-wrapped JSON extraction)**
 
 ```python
-_PHASE_NAMES: tuple[str, ...] = (
-    "pre-flight",
-    "spec",
-    "task loop",
-    "pre-merge",
-    "checklist",
-)
+def test_tolerant_agent_parse_extracts_from_preamble(tmp_path):
+    """F45.1: extract JSON object from agent result wrapped in narrative."""
+    raw = tmp_path / "melchior.raw.json"
+    raw.write_text(json.dumps({
+        "type": "result",
+        "result": (
+            "Based on my review of the iter-2 fixes, the streaming wiring is correctly "
+            "threaded.\n\n"
+            "{\"agent\": \"melchior\", \"verdict\": \"GO\", \"confidence\": 0.88, "
+            "\"summary\": \"Iter 2 closes findings.\", \"reasoning\": \"...\", "
+            "\"findings\": [], \"recommendation\": \"Ship v0.3.0.\"}"
+        ),
+    }))
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "melchior"
+    assert parsed["verdict"] == "GO"
+    assert parsed["confidence"] == 0.88
+```
+
+- [ ] **Step 2: Run, verify FAIL** — `_tolerant_agent_parse` not defined.
+
+- [ ] **Step 3: Implement `_tolerant_agent_parse`**
+
+Append to `magi_dispatch.py`:
+
+```python
+import re as _re_for_tolerant_parse
+
+_VALID_AGENT_NAMES = frozenset({"melchior", "balthasar", "caspar"})
 
 
-def _emit_phase_breadcrumb(
-    phase: int,
-    total_phases: int,
-    *,
-    task_index: int | None = None,
-    task_total: int | None = None,
-    sub_phase: str | None = None,
-) -> None:
-    """Emit a one-line state-machine breadcrumb to orchestrator stderr.
+def _extract_first_balanced_json(text: str) -> str | None:
+    """Return the first balanced ``{...}`` JSON-looking substring, or None.
 
-    Format: ``[sbtdd] phase {p}/{t}: {phase_name} -- task {i}/{n} ({sub_phase})``.
-    Task-index and sub-phase are optional for non-task-loop phases.
+    Walks the text counting brace depth, ignoring braces inside strings.
+    Returns the full substring from the first ``{`` to its matching ``}``.
+    Pure stdlib; no regex backtracking needed.
     """
-    name = _PHASE_NAMES[phase] if 0 <= phase < len(_PHASE_NAMES) else f"phase-{phase}"
-    line = f"[sbtdd] phase {phase}/{total_phases}: {name}"
-    if task_index is not None and task_total is not None:
-        suffix = f" ({sub_phase})" if sub_phase else ""
-        line += f" -- task {task_index}/{task_total}{suffix}"
-    sys.stderr.write(line + "\n")
-    sys.stderr.flush()
+    depth = 0
+    start = -1
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                return text[start : i + 1]
+    return None
+
+
+def _tolerant_agent_parse(raw_json_path: Path | str) -> dict[str, Any]:
+    """Parse an agent's ``*.raw.json`` file with preamble tolerance.
+
+    v0.4.0 Feature F (F45): MAGI v2.2.2 agents sometimes wrap their
+    verdict JSON in a narrative preamble inside the ``result`` field
+    (e.g., ``"Based on my review...\\n\\n{json}"``). The strict parser
+    in ``run_magi.py:synthesize.py`` rejects these. This helper
+    extracts the first balanced ``{...}`` substring from ``result``
+    and JSON-parses it. Validates that the extracted dict has an
+    ``agent`` field naming one of the three canonical agents.
+
+    Args:
+        raw_json_path: Path to the agent's ``*.raw.json`` file written
+            by the MAGI orchestrator.
+
+    Returns:
+        Parsed agent verdict dict.
+
+    Raises:
+        ValidationError: If no recoverable JSON object is present, or
+            the extracted object lacks a valid ``agent`` field.
+    """
+    raw_data = json.loads(Path(raw_json_path).read_text(encoding="utf-8"))
+    result = raw_data.get("result")
+    if not isinstance(result, str):
+        raise ValidationError(
+            f"No 'result' string in {raw_json_path} "
+            f"(got {type(result).__name__})"
+        )
+    # Try direct JSON parse first (caspar v0.3.0 iter 2 case: pure JSON
+    # in result field, no preamble). Backward compat with strict parser.
+    try:
+        candidate = json.loads(result)
+        if isinstance(candidate, dict) and candidate.get("agent") in _VALID_AGENT_NAMES:
+            return candidate
+    except json.JSONDecodeError:
+        pass
+    # Preamble-tolerant path: extract first balanced JSON object that
+    # parses cleanly AND has a valid agent field.
+    remaining = result
+    while True:
+        substring = _extract_first_balanced_json(remaining)
+        if substring is None:
+            preview = result[:200].replace("\n", " ")
+            raise ValidationError(
+                f"No JSON object recoverable from {raw_json_path}: "
+                f"result preview: {preview!r}"
+            )
+        try:
+            candidate = json.loads(substring)
+        except json.JSONDecodeError:
+            # Skip this substring and search after it
+            idx = remaining.find(substring) + len(substring)
+            remaining = remaining[idx:]
+            continue
+        if isinstance(candidate, dict) and candidate.get("agent") in _VALID_AGENT_NAMES:
+            return candidate
+        # Skip this candidate (e.g., embedded code-example dict)
+        idx = remaining.find(substring) + len(substring)
+        remaining = remaining[idx:]
 ```
 
-- [ ] **Step 4: Verify D3.1 passes**
+- [ ] **Step 4: Run, verify PASS**
 
-```bash
-python -m pytest tests/test_auto_streaming.py::test_breadcrumb_on_red_to_green_transition -v
-```
-
-- [ ] **Step 5: Add D3.2 test (task close advance)**
+- [ ] **Step 5: Add F45.2 test (pure JSON works)**
 
 ```python
-def test_breadcrumb_on_task_close_advance(capfd):
-    """D3.2: state machine emits breadcrumb when advancing task index."""
-    auto_cmd._emit_phase_breadcrumb(phase=2, total_phases=5, task_index=15, task_total=36, sub_phase="red")
-    captured = capfd.readouterr()
-    assert "[sbtdd] phase 2/5: task loop -- task 15/36 (red)" in captured.err
+def test_tolerant_agent_parse_pure_json(tmp_path):
+    """F45.2: pure JSON result parses identically to strict parser."""
+    raw = tmp_path / "caspar.raw.json"
+    raw.write_text(json.dumps({
+        "type": "result",
+        "result": json.dumps({
+            "agent": "caspar",
+            "verdict": "approve",
+            "confidence": 0.85,
+            "summary": "Ship.",
+            "reasoning": "...",
+            "findings": [],
+            "recommendation": "Ship.",
+        }),
+    }))
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "caspar"
+    assert parsed["verdict"] == "approve"
 ```
 
-- [ ] **Step 6: Wire breadcrumb invocation into `_phase2_task_loop`**
+- [ ] **Step 6: Add F45.3 test (zero recoverable raises)**
 
-Locate `_phase2_task_loop` in `auto_cmd.py`. Insert `_emit_phase_breadcrumb(...)` calls at:
-- Phase entry (top of loop body — `phase=2`).
-- Each Red/Green/Refactor sub-phase advance (immediately AFTER state file save, BEFORE next subagent dispatch).
-- Each task close (immediately after `mark_and_advance` returns, BEFORE first dispatch on the new task).
+```python
+def test_tolerant_agent_parse_no_recoverable_json(tmp_path):
+    """F45.3: result with only narrative raises ValidationError with preview."""
+    raw = tmp_path / "broken.raw.json"
+    raw.write_text(json.dumps({
+        "type": "result",
+        "result": "I encountered an error and could not produce a verdict for this run.",
+    }))
+    with pytest.raises(ValidationError) as ei:
+        magi_dispatch._tolerant_agent_parse(raw)
+    assert "No JSON object recoverable" in str(ei.value)
+    assert "encountered an error" in str(ei.value)
+```
 
-Pass current `task_index` and `task_total` from the loop counters; `sub_phase` from `current_phase` field.
+- [ ] **Step 7: Add F45.4 test (skips code-example dicts, picks verdict)**
 
-- [ ] **Step 7: make verify clean**
+```python
+def test_tolerant_agent_parse_skips_code_examples(tmp_path):
+    """F45.4: parser skips embedded code-example dicts, finds verdict."""
+    raw = tmp_path / "balthasar.raw.json"
+    raw.write_text(json.dumps({
+        "type": "result",
+        "result": (
+            "Here is an example structure: {\"key\": \"val\"}.\n"
+            "And another: {\"name\": \"thing\"}.\n\n"
+            "{\"agent\": \"balthasar\", \"verdict\": \"approve\", "
+            "\"confidence\": 0.88, \"summary\": \"OK.\", "
+            "\"reasoning\": \"Reasonable trade-offs.\", "
+            "\"findings\": [], \"recommendation\": \"Ship.\"}"
+        ),
+    }))
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "balthasar"
+    assert parsed["verdict"] == "approve"
+```
+
+- [ ] **Step 8: make verify + commit**
 
 ```bash
 make verify
-```
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_streaming.py
-git commit -m "feat: emit state-machine breadcrumbs per auto phase transition"
+git add skills/sbtdd/scripts/magi_dispatch.py tests/test_magi_hardening.py
+git commit -m "feat: add _tolerant_agent_parse for preamble-wrapped agent JSON"
 ```
 
 ---
 
-## Task D4: auto-run.json progress field with atomic writes
+## Task F-4: Manual synthesis recovery (F46)
 
 **Files:**
-- Create: `tests/test_auto_progress.py`
-- Modify: `skills/sbtdd/scripts/auto_cmd.py` (add `_update_progress`)
+- Create: `tests/test_manual_synthesis_recovery.py`
+- Modify: `skills/sbtdd/scripts/magi_dispatch.py` (add `_manual_synthesis_recovery` + integrate into `invoke_magi`)
 
-- [ ] **Step 1: Failing test D4.2 (progress field schema)**
+- [ ] **Step 1: Write failing test F46.1 (recovery succeeds with 2/3 agents)**
 
 ```python
-# tests/test_auto_progress.py (new file)
+# tests/test_manual_synthesis_recovery.py (new file)
 #!/usr/bin/env python3
 # Author: Julian Bolivar
 # Version: 1.0.0
 # Date: 2026-04-25
-"""Tests for v0.3.0 Feature D auto-run.json progress field."""
+"""Tests for v0.4.0 Feature F manual synthesis recovery."""
 
 from __future__ import annotations
 
 import json
 import sys
-import threading
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
 
-import auto_cmd
+import magi_dispatch
+from errors import MAGIGateError
 
 
-def test_update_progress_writes_correct_schema(tmp_path):
-    """D4.2: progress field has shape {phase, task_index, task_total, sub_phase}."""
-    auto_run = tmp_path / "auto-run.json"
-    auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
-    auto_cmd._update_progress(
-        auto_run,
-        phase=2,
-        task_index=14,
-        task_total=36,
-        sub_phase="green",
-    )
-    data = json.loads(auto_run.read_text())
-    assert data["progress"] == {
-        "phase": 2,
-        "task_index": 14,
-        "task_total": 36,
-        "sub_phase": "green",
+def _write_raw_agent(path: Path, agent: str, verdict: str, preamble: bool = True) -> None:
+    body = {
+        "agent": agent,
+        "verdict": verdict,
+        "confidence": 0.88,
+        "summary": f"{agent} verdict {verdict}",
+        "reasoning": "...",
+        "findings": [],
+        "recommendation": "Ship." if verdict in ("approve", "GO", "GO_WITH_CAVEATS") else "HOLD.",
     }
-    assert data["started_at"] == "2026-04-25T10:00:00Z"  # preserved
+    if preamble:
+        result = f"Based on my review...\n\n{json.dumps(body)}"
+    else:
+        result = json.dumps(body)
+    path.write_text(json.dumps({"type": "result", "result": result}))
+
+
+def test_manual_synthesis_recovers_with_two_agents(tmp_path):
+    """F46.1: synthesizer crashed but 2/3 agents have valid raw JSON."""
+    _write_raw_agent(tmp_path / "melchior.raw.json", "melchior", "approve", preamble=True)
+    _write_raw_agent(tmp_path / "balthasar.raw.json", "balthasar", "approve", preamble=True)
+    _write_raw_agent(tmp_path / "caspar.raw.json", "caspar", "approve", preamble=False)
+    verdict = magi_dispatch._manual_synthesis_recovery(tmp_path)
+    assert verdict.verdict in ("GO", "STRONG_GO")
+    # Recovery report written
+    assert (tmp_path / "manual-synthesis.json").exists()
+    report = json.loads((tmp_path / "manual-synthesis.json").read_text())
+    assert report["recovered"] is True
+    assert report["recovery_reason"] == "synthesizer-failure"
+```
+
+- [ ] **Step 2: Run, verify FAIL** — `_manual_synthesis_recovery` not defined.
+
+- [ ] **Step 3: Implement `_manual_synthesis_recovery`**
+
+Append to `magi_dispatch.py`:
+
+```python
+# Verdict synthesis weights (mirror run_magi.py:synthesize.py).
+_VERDICT_WEIGHT = {
+    "approve": 1.0,
+    "GO": 1.0,
+    "STRONG_GO": 1.0,
+    "GO_WITH_CAVEATS": 0.5,
+    "conditional": 0.5,
+    "reject": -1.0,
+    "HOLD": -1.0,
+    "STRONG_NO_GO": -1.0,
+}
+
+
+def _manual_synthesis_recovery(run_dir: Path | str) -> MAGIVerdict:
+    """Recover a MAGI verdict when the synthesizer crashed.
+
+    v0.4.0 Feature F (F46): when ``run_magi.py`` aborts with a
+    ``RuntimeError`` (e.g., "Only N agent(s) succeeded"), this helper
+    walks the run dir for ``*.raw.json`` files, applies the tolerant
+    agent parser (F45), synthesizes a verdict using the same weight
+    scheme as ``synthesize.py``, and writes a ``manual-synthesis.json``
+    report flagged ``recovered: true``.
+
+    Args:
+        run_dir: Directory containing per-agent ``*.raw.json`` files.
+
+    Returns:
+        :class:`MAGIVerdict` rescued from the raw outputs.
+
+    Raises:
+        MAGIGateError: If zero agents have recoverable JSON.
+    """
+    base = Path(run_dir)
+    raw_files = sorted(base.glob("*.raw.json"))
+    parsed: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for raw in raw_files:
+        try:
+            parsed.append(_tolerant_agent_parse(raw))
+        except ValidationError as exc:
+            failures.append(f"{raw.name}: {exc}")
+    if not parsed:
+        raise MAGIGateError(
+            f"No recoverable agent verdicts in {base}; manual synthesis impossible. "
+            f"Failures: {failures}"
+        )
+    # Compute consensus score using the standard weights.
+    score = sum(_VERDICT_WEIGHT.get(p["verdict"], 0.0) for p in parsed) / len(parsed)
+    has_conditional = any(p["verdict"] in ("conditional", "GO_WITH_CAVEATS") for p in parsed)
+    approves = sum(1 for p in parsed if _VERDICT_WEIGHT.get(p["verdict"], 0.0) > 0)
+    rejects = sum(1 for p in parsed if _VERDICT_WEIGHT.get(p["verdict"], 0.0) < 0)
+    if score == 1.0:
+        label = "STRONG_GO"
+    elif score == -1.0:
+        label = "STRONG_NO_GO"
+    elif score > 0:
+        label = "GO_WITH_CAVEATS" if has_conditional else "GO"
+    elif score < 0:
+        label = "HOLD"
+    else:
+        label = "HOLD_TIE"
+    # Aggregate findings + dissent across agents.
+    findings: list[dict[str, Any]] = []
+    for p in parsed:
+        for f in p.get("findings", []) or []:
+            findings.append({**f, "from_agent": p["agent"]})
+    degraded = len(parsed) < 3
+    report = {
+        "recovered": True,
+        "recovery_reason": "synthesizer-failure",
+        "consensus": {
+            "label": label,
+            "score": score,
+            "approves": approves,
+            "rejects": rejects,
+            "degraded": degraded,
+        },
+        "agents": [p["agent"] for p in parsed],
+        "agents_failed": failures,
+        "findings": findings,
+    }
+    (base / "manual-synthesis.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+    return MAGIVerdict(
+        verdict=label,
+        degraded=degraded,
+        conditions=tuple(),
+        findings=tuple(findings),
+        raw_output=json.dumps(report),
+        retried_agents=(),
+    )
+```
+
+- [ ] **Step 4: Run test, verify PASS**
+
+- [ ] **Step 5: Add F46.2 (preserves dissent)**
+
+```python
+def test_manual_synthesis_preserves_dissent(tmp_path):
+    """F46.2: 2-1 majority recovers GO_WITH_CAVEATS-or-better with dissent visible."""
+    _write_raw_agent(tmp_path / "melchior.raw.json", "melchior", "reject")
+    _write_raw_agent(tmp_path / "balthasar.raw.json", "balthasar", "approve")
+    _write_raw_agent(tmp_path / "caspar.raw.json", "caspar", "approve")
+    verdict = magi_dispatch._manual_synthesis_recovery(tmp_path)
+    # 2 approves, 1 reject -> score = (1+1-1)/3 = 0.33 -> GO
+    assert verdict.verdict == "GO"
+    report = json.loads((tmp_path / "manual-synthesis.json").read_text())
+    assert report["consensus"]["approves"] == 2
+    assert report["consensus"]["rejects"] == 1
+```
+
+- [ ] **Step 6: Add F46.3 (zero recoverable raises)**
+
+```python
+def test_manual_synthesis_raises_when_zero_recoverable(tmp_path):
+    """F46.3: all agents broken -> MAGIGateError."""
+    (tmp_path / "melchior.raw.json").write_text(json.dumps({"type": "result", "result": "broken"}))
+    (tmp_path / "balthasar.raw.json").write_text(json.dumps({"type": "result", "result": "broken"}))
+    with pytest.raises(MAGIGateError) as ei:
+        magi_dispatch._manual_synthesis_recovery(tmp_path)
+    assert "No recoverable agent verdicts" in str(ei.value)
+```
+
+- [ ] **Step 7: Add F46.4 + F46.5 (auto-recovery integration + flag opt-out)**
+
+```python
+def test_invoke_magi_auto_recovers_on_synthesizer_crash(tmp_path, monkeypatch):
+    """F46.4: invoke_magi auto-invokes recovery when run_magi.py crashes."""
+    # Set up a fake tmpdir that already contains agent raw files.
+    # Mock subprocess_utils.run_with_timeout to return non-zero with the
+    # synthesizer-crash signature, leaving the raw files in place.
+    import subprocess_utils
+
+    captured_dir: dict[str, Path] = {}
+
+    def fake_run(cmd, **kwargs):
+        # Parse --output-dir from the prompt.
+        prompt = cmd[-1]
+        for token in prompt.split():
+            if token.startswith("/tmp") or token.startswith("D:") or "sbtdd-magi-" in token:
+                pass
+        # Find the output-dir in cmd (post --output-dir token in MAGI prompt syntax).
+        # Simpler: assume the last temp dir that exists in the env at fake-call time.
+        import re as _re
+        m = _re.search(r"--output-dir (\S+)", prompt)
+        assert m is not None
+        out = Path(m.group(1))
+        out.mkdir(parents=True, exist_ok=True)
+        _write_raw_agent(out / "melchior.raw.json", "melchior", "approve")
+        _write_raw_agent(out / "balthasar.raw.json", "balthasar", "approve")
+        _write_raw_agent(out / "caspar.raw.json", "caspar", "approve")
+        captured_dir["dir"] = out
+        # Simulate synthesizer crash: returncode != 0, no magi-report.json
+        from subprocess_utils import _SubprocessResult  # adapt to actual return type
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="RuntimeError: Only 2 agent(s) succeeded — fewer than 2 required for synthesis",
+        )
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    verdict = magi_dispatch.invoke_magi(["@spec.md"])
+    assert verdict.verdict in ("GO", "STRONG_GO", "GO_WITH_CAVEATS")
+    assert verdict.degraded is False  # 3 agents recovered
+```
+
+```python
+def test_invoke_magi_no_recovery_flag_skips_recovery(tmp_path, monkeypatch):
+    """F46.5: --no-magi-recovery suppresses auto-recovery."""
+    import subprocess_utils
+    from types import SimpleNamespace
+
+    def fake_run(cmd, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="RuntimeError: Only 1 agent(s) succeeded",
+        )
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    with pytest.raises(MAGIGateError) as ei:
+        magi_dispatch.invoke_magi(["@spec.md"], allow_recovery=False)
+    # Should be the original synthesizer error, not the recovery one.
+    assert "Only 1 agent(s)" in str(ei.value) or "/magi:magi failed" in str(ei.value)
+```
+
+- [ ] **Step 8: Wire auto-recovery into `invoke_magi`**
+
+Modify `invoke_magi` signature:
+
+```python
+def invoke_magi(
+    context_paths: list[str],
+    timeout: int = 1800,
+    cwd: str | None = None,
+    *,
+    model: str | None = None,
+    skill_field_name: str = "magi_dispatch_model",
+    stream_prefix: str | None = None,
+    allow_recovery: bool = True,
+) -> MAGIVerdict:
+    # ... existing setup unchanged ...
+    if result.returncode != 0:
+        exhaustion = quota_detector.detect(result.stderr)
+        if exhaustion is not None:
+            # ... existing quota handling ...
+            raise QuotaExhaustedError(...)
+        # v0.4.0 Feature F (F46): auto-recovery on synthesizer crash.
+        if allow_recovery and "Only " in result.stderr and " agent(s) succeeded" in result.stderr:
+            try:
+                rescued = _manual_synthesis_recovery(Path(tmpdir))
+                _sys.stderr.write(
+                    f"[sbtdd magi] synthesizer failed; manual synthesis "
+                    f"recovery applied ({len(rescued.findings)} findings)\n"
+                )
+                return rescued
+            except MAGIGateError:
+                pass  # fall through to original error
+        raise MAGIGateError(
+            f"/magi:magi failed (returncode={result.returncode}): {result.stderr.strip()}"
+        )
+    # ... existing report-found path ...
+```
+
+- [ ] **Step 9: make verify + commit**
+
+```bash
+make verify
+git add skills/sbtdd/scripts/magi_dispatch.py tests/test_manual_synthesis_recovery.py tests/test_magi_hardening.py
+git commit -m "feat: auto-recovery via _manual_synthesis_recovery on MAGI synthesizer crash"
+```
+
+---
+
+## Track F — done criteria
+
+- [ ] All 4 deliverables F43-F46 implemented per plan.
+- [ ] `tests/test_magi_hardening.py` + `tests/test_manual_synthesis_recovery.py` pass.
+- [ ] 789 baseline tests still pass.
+- [ ] `make verify` exit 0.
+- [ ] Working tree clean.
+- [ ] Did not touch any forbidden file.
+- [ ] Subagent #1 reports DONE with commit SHA range.
+
+---
+
+# Track J — v0.3.0 streaming follow-through (Subagent #2)
+
+## Task J-1: SKILL.md exit code docs hotfix (J5)
+
+**Files:**
+- Modify: `skills/sbtdd/SKILL.md`
+- Modify: `tests/test_skill_md.py` (extend with assertion)
+
+- [ ] **Step 1: Write failing test J5.1**
+
+```python
+# Append to tests/test_skill_md.py
+def test_v03_flags_section_documents_exit_1_for_invalid_model_override():
+    """J5.1: SKILL.md v0.3 flags section uses 'exit 1' not 'exit 2'."""
+    skill = (Path(__file__).parent.parent / "skills" / "sbtdd" / "SKILL.md").read_text(encoding="utf-8")
+    # Find the v0.3 flags section
+    assert "### v0.3 flags" in skill
+    section_start = skill.index("### v0.3 flags")
+    section_end = skill.index("##", section_start + 1)
+    section = skill[section_start:section_end]
+    # Must say exit 1 (USER_ERROR), not exit 2
+    assert "exit 1 (USER_ERROR)" in section or "exit `1`" in section
+    # Must NOT claim exit 2
+    assert "exit `2`" not in section
+    assert "exit 2 (PRECONDITION_FAILED)" not in section
 ```
 
 - [ ] **Step 2: Run, verify FAIL**
 
 ```bash
-python -m pytest tests/test_auto_progress.py::test_update_progress_writes_correct_schema -v
+python -m pytest tests/test_skill_md.py::test_v03_flags_section_documents_exit_1_for_invalid_model_override -v
 ```
-Expected: FAIL — `_update_progress` not defined.
 
-- [ ] **Step 3: Implement `_update_progress`**
+Expected: FAIL — current SKILL.md says `exit 2 (PRECONDITION_FAILED)`.
+
+- [ ] **Step 3: Edit SKILL.md line ~78**
+
+Locate in `skills/sbtdd/SKILL.md`:
+```
+  Unknown skill names or model IDs exit `2` (PRECONDITION_FAILED) before any subprocess work.
+```
+
+Replace with:
+```
+  Unknown skill names or model IDs exit `1` (USER_ERROR) before any subprocess work, since `_parse_model_overrides` raises `ValidationError`.
+```
+
+- [ ] **Step 4: Run test, verify PASS**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add skills/sbtdd/SKILL.md tests/test_skill_md.py
+git commit -m "docs: correct v0.3 flags exit code from 2 to 1 in SKILL.md"
+```
+
+---
+
+## Task J-2: _update_progress OSError handling (J4)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (wrap `_update_progress` body)
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Write failing test J4.1 (OSError caught, breadcrumb emitted)**
+
+```python
+# Append to tests/test_auto_progress.py
+def test_update_progress_swallows_oserror_and_continues(tmp_path, monkeypatch, capfd):
+    """J4.1: OSError on write does not kill the auto run."""
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text(json.dumps({"started_at": "..."}))
+    # Force OSError on tmp file write
+    real_write_text = Path.write_text
+
+    def boom(self, *args, **kwargs):
+        if str(self).endswith(".tmp"):
+            raise OSError(28, "No space left on device")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", boom)
+    # Should NOT raise
+    auto_cmd._update_progress(auto_run, phase=2, task_index=1, task_total=10, sub_phase="red")
+    captured = capfd.readouterr()
+    assert "[sbtdd]" in captured.err
+    assert "progress write failed" in captured.err
+    # Original auto-run.json preserved
+    data = json.loads(auto_run.read_text())
+    assert data["started_at"] == "..."
+```
+
+- [ ] **Step 2: Run, verify FAIL** — current implementation likely raises.
+
+- [ ] **Step 3: Wrap _update_progress body in try/except OSError**
+
+Modify `_update_progress` in `auto_cmd.py`:
 
 ```python
 def _update_progress(
@@ -495,990 +976,271 @@ def _update_progress(
     task_total: int | None,
     sub_phase: str | None,
 ) -> None:
-    """Write the progress field of auto-run.json atomically (tmp + os.replace).
+    """Write the progress field of auto-run.json atomically.
 
-    Mirrors the atomic-write pattern of state_file.save and
-    escalation_prompt._write_pending_marker_atomically (v0.2.1). A
-    concurrent reader sees either the prior progress payload or the
-    new one, never a torn JSON document.
+    v0.4.0 J4: OSError during write (disk full, locked file, etc.) is
+    caught and logged as a stderr breadcrumb rather than killing the
+    auto run. Observability degrades gracefully; the run continues.
     """
-    if auto_run_path.exists():
-        existing = json.loads(auto_run_path.read_text(encoding="utf-8"))
-    else:
-        existing = {}
-    progress: dict[str, object] = {"phase": phase}
-    if task_index is not None:
-        progress["task_index"] = task_index
-    if task_total is not None:
-        progress["task_total"] = task_total
-    if sub_phase is not None:
-        progress["sub_phase"] = sub_phase
-    existing["progress"] = progress
-    tmp = auto_run_path.with_suffix(auto_run_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-    os.replace(str(tmp), str(auto_run_path))
-```
-
-(Add `import os, json` at top of `auto_cmd.py` if not already present.)
-
-- [ ] **Step 4: Verify D4.2 passes**
-
-- [ ] **Step 5: Add D4.1 test (atomicity under concurrent reads)**
-
-```python
-def test_update_progress_is_atomic_under_concurrent_reads(tmp_path):
-    """D4.1: concurrent readers never observe torn JSON."""
-    auto_run = tmp_path / "auto-run.json"
-    auto_run.write_text(json.dumps({"progress": {"phase": 2, "task_index": 13, "task_total": 36, "sub_phase": "refactor"}}))
-    failures: list[str] = []
-    stop = threading.Event()
-
-    def reader() -> None:
-        while not stop.is_set():
-            try:
-                json.loads(auto_run.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as e:
-                failures.append(str(e))
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-    for i in range(50):
-        auto_cmd._update_progress(
-            auto_run, phase=2, task_index=14 + i, task_total=36, sub_phase="green"
+    try:
+        # ... existing implementation unchanged ...
+    except OSError as exc:
+        sys.stderr.write(
+            f"[sbtdd] warning: progress write failed: {type(exc).__name__}"
+            f"({exc.errno if hasattr(exc, 'errno') else ''}, {exc!s}). "
+            f"Auto run continues (observability degraded).\n"
         )
-    stop.set()
-    t.join(timeout=2)
-    assert failures == [], f"reader saw torn JSON: {failures}"
+        sys.stderr.flush()
 ```
 
-- [ ] **Step 6: Run + expect PASS** (atomic write via os.replace ensures no torn JSON)
-
-- [ ] **Step 7: Add D4.3 test (absent progress is tolerated)**
-
-```python
-def test_progress_field_absent_is_tolerated(tmp_path):
-    """D4.3: parser tolerates auto-run.json without progress field."""
-    auto_run = tmp_path / "auto-run.json"
-    auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
-    data = json.loads(auto_run.read_text())
-    assert data.get("progress") is None  # absent is fine
-```
-
-- [ ] **Step 8: Wire `_update_progress` into `_phase2_task_loop` (and other phases)**
-
-Same hooks as D3 breadcrumbs — at every state machine transition, call `_update_progress` AFTER `state_file.save` succeeds and BEFORE the next dispatch. The `auto_run_path` is constructed from `Path(".claude") / "auto-run.json"` (already used elsewhere in the file).
-
-- [ ] **Step 9: make verify**
-
-```bash
-make verify
-```
-
-- [ ] **Step 10: Commit**
-
-```bash
-git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
-git commit -m "feat: write auto-run.json progress field atomically per phase transition"
-```
-
----
-
-## Track D — done criteria
-
-- [ ] All 3 test files (`test_auto_streaming.py`, `test_auto_progress.py`) pass.
-- [ ] 4 atomic commits landed: streaming primitive, python -u, breadcrumbs, progress field.
-- [ ] `make verify` clean.
-- [ ] Cross-platform sanity: tests pass on Windows (current dev env) AND POSIX (CI deferred to v1.1; manual verification on WSL or local Linux container if available).
-- [ ] Subagent #1 reports DONE with commit SHA range to orchestrator.
-
----
-
-# Track E — Per-skill model selection flag (Subagent #2)
-
-## Task E6: ALLOWED_CLAUDE_MODEL_IDS + INV_0_PINNED_MODEL_RE constants
-
-**Files:**
-- Create: `tests/test_models_constants.py`
-- Modify: `skills/sbtdd/scripts/models.py`
-
-- [ ] **Step 1: Failing test E6.1 (immutability)**
-
-```python
-# tests/test_models_constants.py (new file)
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-25
-"""Tests for v0.3.0 Feature E model registry constants."""
-
-from __future__ import annotations
-
-import re
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
-
-import models
-
-
-def test_allowed_claude_model_ids_is_tuple():
-    """E6.1: ALLOWED_CLAUDE_MODEL_IDS is immutable (tuple, not list)."""
-    assert isinstance(models.ALLOWED_CLAUDE_MODEL_IDS, tuple)
-    with pytest.raises((AttributeError, TypeError)):
-        models.ALLOWED_CLAUDE_MODEL_IDS.append("foo")  # type: ignore[attr-defined]
-
-
-def test_allowed_claude_model_ids_contains_current_4x_families():
-    """E6.2: tuple contains at least Opus 4.7, Sonnet 4.6, Haiku 4.5."""
-    ids = set(models.ALLOWED_CLAUDE_MODEL_IDS)
-    assert "claude-opus-4-7" in ids
-    assert "claude-sonnet-4-6" in ids
-    assert "claude-haiku-4-5-20251001" in ids
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-```bash
-python -m pytest tests/test_models_constants.py -v
-```
-Expected: FAIL — `ALLOWED_CLAUDE_MODEL_IDS` not defined.
-
-- [ ] **Step 3: Add constants to models.py**
-
-Append at the end of `models.py`:
-
-```python
-#: Claude model IDs the plugin recognizes as valid for ``--model`` arg
-#: passing in dispatch wrappers. v0.3.0 ships the 4.x family snapshot
-#: (Opus 4.7, Sonnet 4.6, Haiku 4.5). Bump this tuple when Anthropic
-#: ships a new family; update SKILL.md operational impact accordingly.
-ALLOWED_CLAUDE_MODEL_IDS: tuple[str, ...] = (
-    "claude-opus-4-7",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5",
-    "claude-haiku-4-5-20251001",
-)
-
-
-#: Regex used by superpowers_dispatch / magi_dispatch to detect when the
-#: developer's global ``~/.claude/CLAUDE.md`` pins a Claude model
-#: explicitly. INV-0 cascade: if the global file pins, plugin.local.md
-#: model fields are ignored and a stderr breadcrumb is emitted. The
-#: regex matches phrases like ``use claude-X-Y for``, ``pin claude-X-Y``,
-#: or ``always claude-X-Y``. Word-boundary anchored to avoid false
-#: positives in narrative prose.
-INV_0_PINNED_MODEL_RE: "re.Pattern[str]" = re.compile(
-    r"\b(?:use|pin|pinned|always|stick to|enforce)\s+(claude-(?:opus|sonnet|haiku)-\d+(?:-\d+)?(?:-\d{8})?)\b",
-    re.IGNORECASE,
-)
-```
-
-(Add `import re` at top of `models.py` if missing.)
-
-- [ ] **Step 4: Verify tests pass + make verify**
-
-```bash
-python -m pytest tests/test_models_constants.py -v
-make verify
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add skills/sbtdd/scripts/models.py tests/test_models_constants.py
-git commit -m "feat: add ALLOWED_CLAUDE_MODEL_IDS + INV_0_PINNED_MODEL_RE constants"
-```
-
----
-
-## Task E1: PluginConfig adds 4 model fields
-
-**Files:**
-- Create: `tests/test_config_model_fields.py`
-- Modify: `skills/sbtdd/scripts/config.py`
-
-- [ ] **Step 1: Failing test E1.2 (backward compat — fields default None)**
-
-```python
-# tests/test_config_model_fields.py (new file)
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-25
-"""Tests for v0.3.0 Feature E PluginConfig model field extension."""
-
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
-
-from config import load_plugin_local
-
-
-def _write_minimal_plugin_local(tmp_path: Path, extra: str = "") -> Path:
-    p = tmp_path / "plugin.local.md"
-    p.write_text(
-        "---\n"
-        "stack: python\n"
-        "author: Test\n"
-        "error_type: TestError\n"
-        "verification_commands:\n"
-        "  - pytest\n"
-        "plan_path: planning/claude-plan-tdd.md\n"
-        "plan_org_path: planning/claude-plan-tdd-org.md\n"
-        "spec_base_path: sbtdd/spec-behavior-base.md\n"
-        "spec_path: sbtdd/spec-behavior.md\n"
-        "state_file_path: .claude/session-state.json\n"
-        "magi_threshold: GO_WITH_CAVEATS\n"
-        "magi_max_iterations: 3\n"
-        "auto_magi_max_iterations: 5\n"
-        "auto_verification_retries: 2\n"
-        "auto_max_spec_review_seconds: 3600\n"
-        "tdd_guard_enabled: true\n"
-        "worktree_policy: optional\n"
-        f"{extra}"
-        "---\n# rules\n",
-        encoding="utf-8",
-    )
-    return p
-
-
-def test_v02_plugin_local_loads_with_model_fields_default_none(tmp_path):
-    """E1.2: v0.2 plugin.local.md (no model fields) loads with defaults."""
-    p = _write_minimal_plugin_local(tmp_path)
-    cfg = load_plugin_local(p)
-    assert cfg.implementer_model is None
-    assert cfg.spec_reviewer_model is None
-    assert cfg.code_review_model is None
-    assert cfg.magi_dispatch_model is None
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-```bash
-python -m pytest tests/test_config_model_fields.py::test_v02_plugin_local_loads_with_model_fields_default_none -v
-```
-Expected: FAIL — `PluginConfig` lacks the 4 fields.
-
-- [ ] **Step 3: Add 4 fields to PluginConfig dataclass**
-
-Modify `skills/sbtdd/scripts/config.py` PluginConfig declaration:
-
-```python
-@dataclass(frozen=True)
-class PluginConfig:
-    """Parsed configuration from .claude/plugin.local.md (sec.S.4.2)."""
-
-    stack: Literal["rust", "python", "cpp"]
-    author: str
-    error_type: str | None
-    verification_commands: tuple[str, ...]
-    plan_path: str
-    plan_org_path: str
-    spec_base_path: str
-    spec_path: str
-    state_file_path: str
-    magi_threshold: Literal["STRONG_GO", "GO", "GO_WITH_CAVEATS"]
-    magi_max_iterations: int
-    auto_magi_max_iterations: int
-    auto_verification_retries: int
-    auto_max_spec_review_seconds: int
-    tdd_guard_enabled: bool
-    worktree_policy: Literal["optional", "required"]
-    # v0.3.0 Feature E -- per-skill model selection (default None = inherit
-    # session model, byte-identical argv to v0.2.x).
-    implementer_model: str | None = None
-    spec_reviewer_model: str | None = None
-    code_review_model: str | None = None
-    magi_dispatch_model: str | None = None
-```
-
-In `load_plugin_local`, after the existing validation, BEFORE building the dataclass instance, add:
-
-```python
-# v0.3.0 Feature E -- per-skill model fields (optional).
-for field_name in (
-    "implementer_model",
-    "spec_reviewer_model",
-    "code_review_model",
-    "magi_dispatch_model",
-):
-    val = data.get(field_name)
-    if val is not None and not isinstance(val, str):
-        raise ValidationError(
-            f"{field_name} must be a string or null, got {type(val).__name__}"
-        )
-```
-
-Then ensure the `PluginConfig(...)` constructor at the bottom of the function passes these fields (or relies on the default None when missing). Use `data.get(field_name)` to default to None.
+(Move the existing body into the try block. The existing tmp + os.replace + retry loop stays inside try.)
 
 - [ ] **Step 4: Run test, verify PASS**
 
-```bash
-python -m pytest tests/test_config_model_fields.py -v
-```
-
-- [ ] **Step 5: Add E1.1 test (4 fields parsed when present)**
+- [ ] **Step 5: Add J4.2 (retry exhaustion preserves original)**
 
 ```python
-def test_4_model_fields_parsed_from_plugin_local(tmp_path):
-    """E1.1: all 4 model fields parsed when present in YAML."""
-    extra = (
-        "implementer_model: claude-sonnet-4-6\n"
-        "spec_reviewer_model: claude-haiku-4-5\n"
-        "code_review_model: claude-sonnet-4-6\n"
-        "magi_dispatch_model: null\n"
-    )
-    p = _write_minimal_plugin_local(tmp_path, extra=extra)
-    cfg = load_plugin_local(p)
-    assert cfg.implementer_model == "claude-sonnet-4-6"
-    assert cfg.spec_reviewer_model == "claude-haiku-4-5"
-    assert cfg.code_review_model == "claude-sonnet-4-6"
-    assert cfg.magi_dispatch_model is None
-```
+def test_update_progress_retry_exhaustion_preserves_original(tmp_path, monkeypatch, capfd):
+    """J4.2: retry loop exhaustion does not corrupt auto-run.json."""
+    auto_run = tmp_path / "auto-run.json"
+    original = {"progress": {"phase": 1, "task_index": 0, "task_total": 5, "sub_phase": "red"}}
+    auto_run.write_text(json.dumps(original))
+    real_replace = os.replace
 
-- [ ] **Step 6: Add E1.3 test (typo warning)**
+    def always_fail(src, dst):
+        raise PermissionError(13, "Locked")
 
-```python
-def test_typo_in_model_field_emits_warning(tmp_path, capfd):
-    """E1.3: dash-typo'd YAML key triggers warning, defaults None."""
-    extra = "implementer-model: claude-sonnet-4-6\n"
-    p = _write_minimal_plugin_local(tmp_path, extra=extra)
-    cfg = load_plugin_local(p)
+    monkeypatch.setattr(os, "replace", always_fail)
+    auto_cmd._update_progress(auto_run, phase=2, task_index=1, task_total=5, sub_phase="green")
     captured = capfd.readouterr()
-    assert cfg.implementer_model is None
-    assert "did you mean implementer_model" in captured.err
+    assert "progress write failed" in captured.err
+    # Original preserved
+    data = json.loads(auto_run.read_text())
+    assert data["progress"]["phase"] == 1
 ```
 
-To make this pass, in `load_plugin_local` add a typo-detection pass after parsing YAML:
+- [ ] **Step 6: make verify + commit**
+
+```bash
+make verify
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "fix: _update_progress swallows OSError and preserves auto-run.json"
+```
+
+---
+
+## Task J-3: _write_auto_run_audit preserves progress field (J6)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/auto_cmd.py` (`_write_auto_run_audit`)
+- Modify: `tests/test_auto_progress.py`
+
+- [ ] **Step 1: Write failing test J6.1 (audit preserves existing progress)**
 
 ```python
-_MODEL_FIELDS = (
-    "implementer_model",
-    "spec_reviewer_model",
-    "code_review_model",
-    "magi_dispatch_model",
-)
-for key in list(data.keys()):
-    if "-" in key and key.replace("-", "_") in _MODEL_FIELDS:
-        sys.stderr.write(
-            f"[sbtdd] unknown plugin.local.md key: {key} -- did you mean "
-            f"{key.replace('-', '_')}?\n"
+def test_write_auto_run_audit_preserves_progress_field(tmp_path, monkeypatch):
+    """J6.1: AutoRunAudit serialization preserves existing progress key."""
+    auto_run = tmp_path / "auto-run.json"
+    pre_state = {
+        "progress": {"phase": 2, "task_index": 14, "task_total": 36, "sub_phase": "green"},
+        "started_at": "2026-04-25T10:00:00Z",
+    }
+    auto_run.write_text(json.dumps(pre_state))
+    # Patch the path the helper uses
+    monkeypatch.setattr(auto_cmd, "_AUTO_RUN_PATH", auto_run)
+    audit = auto_cmd.AutoRunAudit(phase="task-loop", iter=0, started_at="2026-04-25T10:00:00Z")
+    auto_cmd._write_auto_run_audit(audit)
+    data = json.loads(auto_run.read_text())
+    assert data["progress"]["phase"] == 2  # preserved
+    assert data["progress"]["task_index"] == 14
+    # Audit fields also present
+    assert data["phase"] == "task-loop" or data.get("audit", {}).get("phase") == "task-loop"
+```
+
+(Note: adapt to the actual `_AUTO_RUN_PATH` constant name and `AutoRunAudit` API in `auto_cmd.py`. Read the file to confirm.)
+
+- [ ] **Step 2: Run, verify FAIL** — current implementation overwrites.
+
+- [ ] **Step 3: Modify _write_auto_run_audit to read-modify-write**
+
+In `auto_cmd.py`, locate `_write_auto_run_audit`. Change from:
+
+```python
+# Current (overwrites):
+def _write_auto_run_audit(audit: AutoRunAudit) -> None:
+    _AUTO_RUN_PATH.write_text(json.dumps(audit.to_dict(), indent=2))
+```
+
+To:
+
+```python
+def _write_auto_run_audit(audit: AutoRunAudit) -> None:
+    """Write the audit snapshot, preserving any existing progress field.
+
+    v0.4.0 J6: audit writes used to overwrite the file, transiently
+    dropping the progress field until the next _update_progress fired.
+    Now we read the existing file (if any), merge audit + preserved
+    progress, and atomically replace.
+    """
+    audit_dict = audit.to_dict()
+    if _AUTO_RUN_PATH.exists():
+        try:
+            existing = json.loads(_AUTO_RUN_PATH.read_text(encoding="utf-8"))
+            if isinstance(existing, dict) and "progress" in existing:
+                audit_dict["progress"] = existing["progress"]
+        except (OSError, json.JSONDecodeError):
+            pass  # corrupted or missing -> proceed with audit-only write
+    tmp = _AUTO_RUN_PATH.with_suffix(_AUTO_RUN_PATH.suffix + ".tmp")
+    tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
+    os.replace(str(tmp), str(_AUTO_RUN_PATH))
+```
+
+- [ ] **Step 4: Run test, verify PASS**
+
+- [ ] **Step 5: Add J6.2 (audit when progress absent)**
+
+```python
+def test_write_auto_run_audit_when_progress_absent(tmp_path, monkeypatch):
+    """J6.2: audit writes correctly when no prior progress field exists."""
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text(json.dumps({"started_at": "2026-04-25T10:00:00Z"}))
+    monkeypatch.setattr(auto_cmd, "_AUTO_RUN_PATH", auto_run)
+    audit = auto_cmd.AutoRunAudit(phase="pre-flight", iter=0, started_at="2026-04-25T10:00:00Z")
+    auto_cmd._write_auto_run_audit(audit)
+    data = json.loads(auto_run.read_text())
+    assert "progress" not in data  # absent stays absent
+```
+
+- [ ] **Step 6: make verify + commit**
+
+```bash
+make verify
+git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
+git commit -m "fix: _write_auto_run_audit preserves existing progress field"
+```
+
+---
+
+## Task J-4: pre-merge stream_prefix wiring (J8)
+
+**Files:**
+- Modify: `skills/sbtdd/scripts/pre_merge_cmd.py`
+- Create: `tests/test_pre_merge_streaming.py`
+
+- [ ] **Step 1: Read current pre_merge_cmd dispatch sites**
+
+```bash
+cd D:/jbolivarg/PythonProjects/SBTDD
+grep -n "invoke_magi\|invoke_skill\|dispatch_spec_reviewer" skills/sbtdd/scripts/pre_merge_cmd.py
+```
+
+Identify the Loop 1 / Loop 2 / mini-cycle sites (typically 3-5 call sites).
+
+- [ ] **Step 2: Write failing test J8.1 (Loop 2 MAGI gets stream_prefix)**
+
+```python
+# tests/test_pre_merge_streaming.py (new file)
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.4.0 J8 pre-merge stream_prefix wiring."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import pre_merge_cmd
+
+
+def test_loop2_magi_dispatch_passes_stream_prefix(monkeypatch):
+    """J8.1: pre_merge Loop 2 MAGI dispatch threads stream_prefix."""
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_invoke_magi(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        # Return a minimal verdict that satisfies the loop-exit check
+        from magi_dispatch import MAGIVerdict
+        return MAGIVerdict(
+            verdict="GO",
+            degraded=False,
+            conditions=(),
+            findings=(),
+            raw_output="{}",
         )
+
+    monkeypatch.setattr(pre_merge_cmd, "invoke_magi", fake_invoke_magi)
+    # ... call pre_merge's Loop 2 entry point, possibly with mocked args ...
+    # Specific call depends on the public API. Adapt:
+    # pre_merge_cmd._loop2(..., iter_num=1)
+    # assert captured_kwargs.get("stream_prefix") and "[sbtdd pre-merge magi-loop2]" in captured_kwargs["stream_prefix"]
+    # If _loop2 is not directly testable, drive via run() with mocks.
+    raise NotImplementedError("Adapt to actual _loop2 signature after reading pre_merge_cmd.py")
 ```
 
-(Add `import sys` if missing.)
+(The specific test shape depends on `pre_merge_cmd`'s actual API. The subagent should read the file first, identify the simplest test seam, write a real failing test, then implement.)
 
-- [ ] **Step 7: make verify**
+- [ ] **Step 3: Run, verify FAIL**
+
+- [ ] **Step 4: Thread `stream_prefix` parameter through dispatch sites**
+
+Identify each `invoke_magi(...)`, `invoke_skill(...)`, `dispatch_spec_reviewer(...)` call in `pre_merge_cmd.py`. For each, add `stream_prefix=` kwarg with the appropriate per-site string:
+
+- Loop 1 iter N: `stream_prefix=f"[sbtdd pre-merge loop1 iter-{iter_num}]"`
+- Loop 2 MAGI iter N: `stream_prefix=f"[sbtdd pre-merge magi-loop2 iter-{iter_num}]"`
+- Mini-cycle finding N phase X: `stream_prefix=f"[sbtdd pre-merge fix-finding-{n} {phase}]"`
+
+- [ ] **Step 5: Add J8.2 + J8.3 tests**
+
+```python
+def test_loop1_code_review_passes_stream_prefix(monkeypatch):
+    """J8.2: pre_merge Loop 1 code-review dispatch threads stream_prefix."""
+    captured: list[dict[str, object]] = []
+    def fake_invoke_skill(*args, **kwargs):
+        captured.append(kwargs)
+        # ... return clean-to-go verdict ...
+    monkeypatch.setattr(pre_merge_cmd, "invoke_skill", fake_invoke_skill)
+    # ... drive Loop 1 ...
+    assert any("loop1" in (kw.get("stream_prefix") or "") for kw in captured)
+
+
+def test_minicycle_dispatch_passes_phase_specific_stream_prefix(monkeypatch):
+    """J8.3: mini-cycle implementer dispatch includes finding+phase prefix."""
+    captured: list[dict[str, object]] = []
+    def fake_invoke_skill(*args, **kwargs):
+        captured.append(kwargs)
+    monkeypatch.setattr(pre_merge_cmd, "invoke_skill", fake_invoke_skill)
+    # ... drive mini-cycle for one finding ...
+    found = any(
+        "fix-finding-" in (kw.get("stream_prefix") or "") for kw in captured
+    )
+    assert found
+```
+
+- [ ] **Step 6: make verify + commit**
 
 ```bash
 make verify
-```
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add skills/sbtdd/scripts/config.py tests/test_config_model_fields.py
-git commit -m "feat: add 4 optional model fields to PluginConfig"
+git add skills/sbtdd/scripts/pre_merge_cmd.py tests/test_pre_merge_streaming.py
+git commit -m "feat: thread stream_prefix into pre_merge_cmd Loop 1 + Loop 2 + mini-cycle dispatches"
 ```
 
 ---
 
-## Task E3: Dispatch wiring + INV-0 precedence
-
-**Files:**
-- Create: `tests/test_dispatch_model_arg.py`
-- Modify: `skills/sbtdd/scripts/superpowers_dispatch.py`
-- Modify: `skills/sbtdd/scripts/spec_review_dispatch.py`
-- Modify: `skills/sbtdd/scripts/magi_dispatch.py`
-
-- [ ] **Step 1: Failing test E3.1 (default null = byte-identical argv)**
-
-```python
-# tests/test_dispatch_model_arg.py (new file)
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-25
-"""Tests for v0.3.0 Feature E dispatch model arg propagation + INV-0."""
-
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
-
-import superpowers_dispatch
-
-
-def test_dispatch_with_model_none_byte_identical_to_v02():
-    """E3.1: default model=None preserves v0.2.x argv shape."""
-    argv = superpowers_dispatch._build_skill_cmd(
-        "test-driven-development", ["--phase=red"], model=None
-    )
-    assert argv == ["claude", "-p", "/test-driven-development --phase=red"]
-    assert "--model" not in argv
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-```bash
-python -m pytest tests/test_dispatch_model_arg.py::test_dispatch_with_model_none_byte_identical_to_v02 -v
-```
-Expected: FAIL — `_build_skill_cmd` does not accept `model` kwarg.
-
-- [ ] **Step 3: Extend `_build_skill_cmd` with model kwarg**
-
-Modify `skills/sbtdd/scripts/superpowers_dispatch.py`:
-
-```python
-def _build_skill_cmd(
-    skill: str,
-    args: list[str] | None,
-    model: str | None = None,
-) -> list[str]:
-    """Build argv for ``claude -p`` invoking ``skill``, optionally with --model.
-
-    When ``model`` is provided, ``--model <id>`` is inserted before the
-    ``-p`` flag (claude CLI flag ordering convention). When ``model`` is
-    None (default), argv is byte-identical to v0.2.x.
-    """
-    prompt_parts = [f"/{skill}"]
-    if args:
-        prompt_parts.extend(args)
-    cmd = ["claude"]
-    if model is not None:
-        cmd.extend(["--model", model])
-    cmd.extend(["-p", " ".join(prompt_parts)])
-    return cmd
-```
-
-- [ ] **Step 4: Verify E3.1 passes**
-
-- [ ] **Step 5: Add E3.2 test (--model injection)**
-
-```python
-def test_dispatch_with_model_injects_flag():
-    """E3.2: model=claude-haiku-4-5 inserts --model BEFORE -p."""
-    argv = superpowers_dispatch._build_skill_cmd(
-        "test-driven-development", ["--phase=red"], model="claude-haiku-4-5"
-    )
-    assert argv == [
-        "claude",
-        "--model",
-        "claude-haiku-4-5",
-        "-p",
-        "/test-driven-development --phase=red",
-    ]
-```
-
-- [ ] **Step 6: Add E3.3 + E3.4 tests (INV-0 cascade)**
-
-```python
-def test_inv0_precedence_pinned_model_wins(tmp_path, capfd, monkeypatch):
-    """E3.3: CLAUDE.md pinned model wins, breadcrumb emitted."""
-    fake_home = tmp_path
-    (fake_home / ".claude").mkdir()
-    (fake_home / ".claude" / "CLAUDE.md").write_text(
-        "Use claude-opus-4-7 for all sessions.\n"
-    )
-    monkeypatch.setattr(Path, "home", lambda: fake_home)
-    effective = superpowers_dispatch._apply_inv0_model_check(
-        configured_model="claude-sonnet-4-6", skill_field_name="implementer_model"
-    )
-    captured = capfd.readouterr()
-    assert effective is None  # config ignored
-    assert "[sbtdd inv-0]" in captured.err
-    assert "claude-opus-4-7" in captured.err
-    assert "implementer_model=claude-sonnet-4-6" in captured.err
-
-
-def test_inv0_no_pinned_model_config_respected(tmp_path, monkeypatch, capfd):
-    """E3.4: when CLAUDE.md does not pin, configured model passes through."""
-    fake_home = tmp_path
-    (fake_home / ".claude").mkdir()
-    (fake_home / ".claude" / "CLAUDE.md").write_text(
-        "Code Standards. Prefer OOP. Use snake_case.\n"
-    )
-    monkeypatch.setattr(Path, "home", lambda: fake_home)
-    effective = superpowers_dispatch._apply_inv0_model_check(
-        configured_model="claude-sonnet-4-6", skill_field_name="implementer_model"
-    )
-    captured = capfd.readouterr()
-    assert effective == "claude-sonnet-4-6"
-    assert "[sbtdd inv-0]" not in captured.err
-```
-
-- [ ] **Step 7: Implement `_apply_inv0_model_check`**
-
-Add to `superpowers_dispatch.py`:
-
-```python
-from pathlib import Path
-from models import INV_0_PINNED_MODEL_RE
-
-
-def _apply_inv0_model_check(
-    configured_model: str | None,
-    skill_field_name: str,
-) -> str | None:
-    """Apply INV-0 cascade: if ~/.claude/CLAUDE.md pins a model, ignore config.
-
-    Returns the *effective* model to pass to ``--model``, which is None
-    when INV-0 fires (CLAUDE.md pinned a global model) and otherwise
-    equals ``configured_model``. Emits stderr breadcrumb on the rare
-    INV-0 path so operators see the cost implication.
-    """
-    if configured_model is None:
-        return None
-    claude_md = Path.home() / ".claude" / "CLAUDE.md"
-    if not claude_md.exists():
-        return configured_model
-    try:
-        text = claude_md.read_text(encoding="utf-8")
-    except OSError:
-        return configured_model
-    match = INV_0_PINNED_MODEL_RE.search(text)
-    if match is None:
-        return configured_model
-    pinned = match.group(1)
-    sys.stderr.write(
-        f"[sbtdd inv-0] CLAUDE.md pins {pinned} globally; ignoring "
-        f"plugin.local.md {skill_field_name}={configured_model} to "
-        f"respect global authority. Cost implication may differ from "
-        f"configured baseline.\n"
-    )
-    return None
-```
-
-- [ ] **Step 8: Wire `model` kwarg into `invoke_skill`**
-
-Update `invoke_skill` signature to accept `model: str | None = None`, applying the INV-0 check before `_build_skill_cmd`:
-
-```python
-def invoke_skill(
-    skill: str,
-    args: list[str] | None = None,
-    timeout: int = 600,
-    cwd: str | None = None,
-    *,
-    model: str | None = None,
-    skill_field_name: str = "implementer_model",
-) -> SkillResult:
-    """Invoke a superpowers skill via ``claude -p`` subprocess.
-    ...
-    """
-    effective_model = _apply_inv0_model_check(model, skill_field_name)
-    cmd = _build_skill_cmd(skill, args, model=effective_model)
-    # ... rest of existing implementation
-```
-
-- [ ] **Step 9: Mirror in spec_review_dispatch.py + magi_dispatch.py**
-
-`spec_review_dispatch.dispatch_spec_reviewer` -- add `model: str | None = None` kwarg, apply same INV-0 check (with `skill_field_name="spec_reviewer_model"`), pass to underlying invoke_skill / claude argv build.
-
-`magi_dispatch.dispatch_magi` -- add `model: str | None = None` kwarg with `skill_field_name="magi_dispatch_model"`, mirror logic in `_build_magi_cmd`.
-
-- [ ] **Step 10: make verify**
-
-```bash
-make verify
-```
-
-- [ ] **Step 11: Commit**
-
-```bash
-git add skills/sbtdd/scripts/superpowers_dispatch.py skills/sbtdd/scripts/spec_review_dispatch.py skills/sbtdd/scripts/magi_dispatch.py tests/test_dispatch_model_arg.py
-git commit -m "feat: thread model kwarg through dispatch modules with INV-0 cascade"
-```
-
----
-
-## Task E4: --model-override CLI flag on auto
-
-**Files:**
-- Create: `tests/test_cli_model_override.py`
-- Modify: `skills/sbtdd/scripts/auto_cmd.py` (CLI parser only — disjoint from track D)
-
-- [ ] **Step 1: Failing tests E4.1, E4.2, E4.3, E4.5**
-
-```python
-# tests/test_cli_model_override.py (new file)
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-25
-"""Tests for v0.3.0 Feature E --model-override CLI flag on auto."""
-
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
-
-import auto_cmd
-from errors import ValidationError
-
-
-def test_model_override_valid_skill_accepts():
-    """E4.1: implementer:claude-haiku-4-5 parses to {implementer: ...}."""
-    result = auto_cmd._parse_model_overrides(["implementer:claude-haiku-4-5"])
-    assert result == {"implementer": "claude-haiku-4-5"}
-
-
-def test_model_override_invalid_skill_rejects():
-    """E4.2: foo:claude-haiku-4-5 raises ValidationError exit 1."""
-    with pytest.raises(ValidationError) as ei:
-        auto_cmd._parse_model_overrides(["foo:claude-haiku-4-5"])
-    assert "invalid --model-override skill name 'foo'" in str(ei.value)
-    assert "implementer" in str(ei.value)
-    assert "spec_reviewer" in str(ei.value)
-
-
-def test_model_override_multi_flag_accumulates():
-    """E4.3: multiple --model-override flags merge into one dict."""
-    result = auto_cmd._parse_model_overrides([
-        "implementer:claude-haiku-4-5",
-        "spec_reviewer:claude-sonnet-4-6",
-    ])
-    assert result == {
-        "implementer": "claude-haiku-4-5",
-        "spec_reviewer": "claude-sonnet-4-6",
-    }
-
-
-def test_model_override_missing_separator_rejects():
-    """E4.5: implementerhaiku4-5 (no colon) raises ValidationError."""
-    with pytest.raises(ValidationError) as ei:
-        auto_cmd._parse_model_overrides(["implementerhaiku4-5"])
-    assert "expects '<skill>:<model>'" in str(ei.value)
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-```bash
-python -m pytest tests/test_cli_model_override.py -v
-```
-
-- [ ] **Step 3: Implement `_parse_model_overrides` in auto_cmd.py**
-
-```python
-_VALID_MODEL_OVERRIDE_SKILLS: frozenset[str] = frozenset(
-    {"implementer", "spec_reviewer", "code_review", "magi_dispatch"}
-)
-
-
-def _parse_model_overrides(raw_values: list[str]) -> dict[str, str]:
-    """Parse repeated --model-override <skill>:<model> CLI tokens.
-
-    Returns a dict mapping skill name (one of the four canonical names)
-    to model ID. Raises ValidationError on missing separator or unknown
-    skill name; the dispatcher converts ValidationError to exit code 1.
-    """
-    out: dict[str, str] = {}
-    for raw in raw_values:
-        if ":" not in raw:
-            raise ValidationError(
-                f"--model-override expects '<skill>:<model>'; got {raw!r}"
-            )
-        skill, _, model = raw.partition(":")
-        if skill not in _VALID_MODEL_OVERRIDE_SKILLS:
-            raise ValidationError(
-                f"invalid --model-override skill name {skill!r}. Valid: "
-                f"{', '.join(sorted(_VALID_MODEL_OVERRIDE_SKILLS))}"
-            )
-        out[skill] = model
-    return out
-```
-
-- [ ] **Step 4: Wire into `auto_cmd` argparse**
-
-Locate the auto_cmd argparse setup (`build_parser` or equivalent). Add:
-
-```python
-parser.add_argument(
-    "--model-override",
-    action="append",
-    default=[],
-    metavar="<skill>:<model>",
-    help=(
-        "Override the per-skill model for this run only. Repeatable. "
-        "Valid skill names: implementer, spec_reviewer, code_review, "
-        "magi_dispatch. Cascade: CLAUDE.md > CLI override > "
-        "plugin.local.md > None (inherit session)."
-    ),
-)
-```
-
-Then in the auto_cmd run function, immediately after parsing args:
-
-```python
-cli_overrides = _parse_model_overrides(args.model_override or [])
-```
-
-Threading the resulting dict through to the dispatch sites is left to track-E coordination — for v0.3.0 ship, populating the dict and passing it to a new helper `_resolve_model(skill, config, cli_overrides)` is sufficient. The helper picks CLI > config > None and is consumed at every dispatch site.
-
-```python
-def _resolve_model(
-    skill: str,
-    config: PluginConfig,
-    cli_overrides: dict[str, str],
-) -> str | None:
-    """Resolve the effective configured model for a skill at dispatch time.
-
-    Cascade: CLI override > plugin.local.md field > None. INV-0 (CLAUDE.md)
-    is enforced downstream by the dispatch module's _apply_inv0_model_check.
-    """
-    if skill in cli_overrides:
-        return cli_overrides[skill]
-    field_map = {
-        "implementer": config.implementer_model,
-        "spec_reviewer": config.spec_reviewer_model,
-        "code_review": config.code_review_model,
-        "magi_dispatch": config.magi_dispatch_model,
-    }
-    return field_map.get(skill)
-```
-
-Apply at each dispatch site in `auto_cmd` (implementer subagent dispatch, spec_review dispatch, magi dispatch — already extended in E3 to accept the kwarg).
-
-- [ ] **Step 5: make verify**
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add skills/sbtdd/scripts/auto_cmd.py tests/test_cli_model_override.py
-git commit -m "feat: --model-override CLI flag on auto with cascade resolver"
-```
-
----
-
-## Task E5: dependency_check.check_model_ids
-
-**Files:**
-- Create: `tests/test_dependency_check_models.py`
-- Modify: `skills/sbtdd/scripts/dependency_check.py`
-
-- [ ] **Step 1: Failing tests**
-
-```python
-# tests/test_dependency_check_models.py (new file)
-#!/usr/bin/env python3
-# Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-25
-"""Tests for v0.3.0 Feature E dependency_check.check_model_ids."""
-
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
-
-import dependency_check
-from config import PluginConfig
-from errors import ValidationError
-
-
-def _cfg_with(implementer: str | None = None) -> PluginConfig:
-    return PluginConfig(
-        stack="python", author="t", error_type=None,
-        verification_commands=("pytest",),
-        plan_path="planning/claude-plan-tdd.md",
-        plan_org_path="planning/claude-plan-tdd-org.md",
-        spec_base_path="sbtdd/spec-behavior-base.md",
-        spec_path="sbtdd/spec-behavior.md",
-        state_file_path=".claude/session-state.json",
-        magi_threshold="GO_WITH_CAVEATS",
-        magi_max_iterations=3, auto_magi_max_iterations=5,
-        auto_verification_retries=2, auto_max_spec_review_seconds=3600,
-        tdd_guard_enabled=True, worktree_policy="optional",
-        implementer_model=implementer,
-    )
-
-
-def test_check_model_ids_warns_on_unknown_at_init():
-    """E5.1: unknown model in PluginConfig returns DependencyCheck warning."""
-    cfg = _cfg_with(implementer="claude-sonnet-9-9")
-    result = dependency_check.check_model_ids(cfg)
-    assert result.ok is True  # warning, not failure
-    assert "claude-sonnet-9-9" in result.message
-    assert "implementer_model" in result.message
-    assert "verify spelling" in result.message.lower()
-
-
-def test_check_model_ids_passes_on_known():
-    """E5.1 inverse: known model returns ok DependencyCheck."""
-    cfg = _cfg_with(implementer="claude-sonnet-4-6")
-    result = dependency_check.check_model_ids(cfg)
-    assert result.ok is True
-
-
-def test_check_model_ids_passes_on_all_none():
-    """E5.1 inverse: default-none config returns ok (no fields to check)."""
-    cfg = _cfg_with(implementer=None)
-    result = dependency_check.check_model_ids(cfg)
-    assert result.ok is True
-```
-
-- [ ] **Step 2: Run, verify FAIL** (`check_model_ids` not defined).
-
-- [ ] **Step 3: Implement `check_model_ids`**
-
-In `dependency_check.py`, add:
-
-```python
-from models import ALLOWED_CLAUDE_MODEL_IDS
-
-
-def check_model_ids(config: PluginConfig) -> DependencyCheck:
-    """Validate non-null model fields against ALLOWED_CLAUDE_MODEL_IDS.
-
-    v0.3.0 returns a non-fatal DependencyCheck with ``ok=True`` and a
-    warning message when fields contain unknown IDs (so init does not
-    abort -- field may legitimately be a freshly-released model the
-    plugin's tuple does not yet recognize). Runtime dispatch is the
-    hard-fail path: ``claude --model <unknown>`` errors and the
-    surrounding subprocess wrapper raises ValidationError.
-    """
-    field_pairs: list[tuple[str, str | None]] = [
-        ("implementer_model", config.implementer_model),
-        ("spec_reviewer_model", config.spec_reviewer_model),
-        ("code_review_model", config.code_review_model),
-        ("magi_dispatch_model", config.magi_dispatch_model),
-    ]
-    unknown: list[str] = []
-    for field, value in field_pairs:
-        if value is not None and value not in ALLOWED_CLAUDE_MODEL_IDS:
-            unknown.append(f"{field}={value}")
-    if not unknown:
-        return DependencyCheck(name="model_ids", ok=True, message="all model IDs recognized")
-    msg = (
-        f"[sbtdd init] unknown model IDs in plugin.local.md: "
-        f"{'; '.join(unknown)}. Will hard-fail at runtime if Anthropic "
-        f"does not recognize this ID. Verify spelling against the family "
-        f"snapshot in models.ALLOWED_CLAUDE_MODEL_IDS."
-    )
-    return DependencyCheck(name="model_ids", ok=True, message=msg)
-```
-
-(Adapt to the actual `DependencyCheck` dataclass shape used by the existing code.)
-
-- [ ] **Step 4: Wire into existing dependency-check aggregator**
-
-Locate the function that runs all checks for `init` (the v0.2 enumerator that returns the consolidated report). Append `checks.append(check_model_ids(config))` after the existing checks.
-
-- [ ] **Step 5: make verify + commit**
-
-```bash
-make verify
-git add skills/sbtdd/scripts/dependency_check.py tests/test_dependency_check_models.py
-git commit -m "feat: dependency_check.check_model_ids validates model field IDs"
-```
-
----
-
-## Task E7: Template ships Sonnet+Haiku baseline
-
-**Files:**
-- Modify: `templates/plugin.local.md.template`
-- Modify: `tests/test_init_cmd.py` (existing — extend)
-
-- [ ] **Step 1: Failing test E7.1**
-
-In `tests/test_init_cmd.py`, add (after existing helper fixtures):
-
-```python
-def test_template_ships_sonnet_haiku_baseline_commented():
-    """E7.1: template contains commented Sonnet+Haiku baseline block."""
-    template = (
-        Path(__file__).parent.parent / "templates" / "plugin.local.md.template"
-    ).read_text(encoding="utf-8")
-    assert "# Recommended cost-optimized baseline" in template
-    assert "# implementer_model: claude-sonnet-4-6" in template
-    assert "# spec_reviewer_model: claude-haiku-4-5" in template
-    assert "# code_review_model: claude-sonnet-4-6" in template
-    assert "# magi_dispatch_model: null" in template
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-```bash
-python -m pytest tests/test_init_cmd.py::test_template_ships_sonnet_haiku_baseline_commented -v
-```
-
-- [ ] **Step 3: Append commented baseline to template**
-
-In `templates/plugin.local.md.template`, append (inside the YAML frontmatter, after `worktree_policy:` line):
-
-```yaml
-# Recommended cost-optimized baseline (uncomment to opt in; v0.3.0+).
-# Default null preserves session-model inheritance (v0.2.x behavior).
-# Cost ratio: Opus 4.7 ~= 5x Sonnet 4.6 ~= 15-20x Haiku 4.5.
-# implementer_model: claude-sonnet-4-6
-# spec_reviewer_model: claude-haiku-4-5
-# code_review_model: claude-sonnet-4-6
-# magi_dispatch_model: null   # outer dispatcher; sub-agents pick own
-```
-
-- [ ] **Step 4: Run, verify PASS**
-
-- [ ] **Step 5: Add E7.2 test (template renders preserving comments)**
-
-```python
-def test_init_python_stack_preserves_template_baseline_comments(tmp_path, monkeypatch):
-    """E7.2: init --stack python output preserves the 4 commented model lines."""
-    # ... existing init invocation pattern ...
-    # After running init, read the generated plugin.local.md and assert all 4
-    # commented lines present.
-    plugin_local = tmp_path / ".claude" / "plugin.local.md"
-    text = plugin_local.read_text(encoding="utf-8")
-    assert "# implementer_model: claude-sonnet-4-6" in text
-    assert "# spec_reviewer_model: claude-haiku-4-5" in text
-    assert "# code_review_model: claude-sonnet-4-6" in text
-    assert "# magi_dispatch_model: null" in text
-```
-
-(Adapt to the existing init test fixture pattern.)
-
-- [ ] **Step 6: Verify the existing template-expansion path preserves comments**
-
-`templates.py` substitution must NOT strip YAML comments. If the existing implementation already preserves them (likely — template is mostly verbatim), no code change needed; if it strips, fix the substitution to be line-preserving.
-
-- [ ] **Step 7: make verify + commit**
-
-```bash
-make verify
-git add templates/plugin.local.md.template tests/test_init_cmd.py
-git commit -m "feat: ship commented Sonnet+Haiku baseline in plugin.local.md template"
-```
-
----
-
-## Track E — done criteria
-
-- [ ] All 6 test files pass (test_models_constants, test_config_model_fields, test_dispatch_model_arg, test_cli_model_override, test_dependency_check_models, test_init_cmd extension).
-- [ ] 6 atomic commits landed: E6 → E1 → E3 → E4 → E5 → E7.
-- [ ] `make verify` clean.
-- [ ] Default null = byte-identical argv regression preserved (E3.1 pinned).
-- [ ] INV-0 cascade: CLAUDE.md scan + breadcrumb verified.
-- [ ] Subagent #2 reports DONE with commit SHA range to orchestrator.
+## Track J — done criteria
+
+- [ ] All 4 deliverables J5, J4, J6, J8 implemented per plan.
+- [ ] `tests/test_auto_progress.py` (extended) + `tests/test_skill_md.py` (extended) + `tests/test_pre_merge_streaming.py` (new) pass.
+- [ ] 789 baseline tests still pass.
+- [ ] `make verify` exit 0.
+- [ ] Did not touch any forbidden file.
+- [ ] Subagent #2 reports DONE with commit SHA range.
 
 ---
 
@@ -1486,7 +1248,7 @@ git commit -m "feat: ship commented Sonnet+Haiku baseline in plugin.local.md tem
 
 After both subagents report DONE:
 
-## Task F1: Pre-loop hygiene
+## Task FR-1: Pre-loop hygiene
 
 - [ ] **Step 1: Verify working tree clean**
 
@@ -1494,293 +1256,214 @@ After both subagents report DONE:
 cd D:/jbolivarg/PythonProjects/SBTDD
 git status
 ```
-Expected: `working tree clean`. If not, identify untracked / unstaged changes and either commit or discard before proceeding.
+Expected: clean.
 
-- [ ] **Step 2: Run make verify (Loop 1 surrogate per spec sec.4.4)**
-
-```bash
-make verify
-```
-Expected: 4 checks PASS — pytest (785-805 tests), ruff check, ruff format --check, mypy --strict. If any check fails, identify which subagent's commits caused the regression and dispatch a fix subagent before proceeding.
-
-- [ ] **Step 3: Compute the diff range for MAGI input**
-
-```bash
-git log --oneline cfb39ee..HEAD
-git diff cfb39ee..HEAD --stat
-```
-Expected: ~10 commits (4 from track D + 6 from track E), ~10 files changed.
-
-## Task F2: MAGI ↔ /receiving-code-review loop (cap 5 iter)
-
-For each iteration `iter ∈ {1..5}`:
-
-- [ ] **Step 1: Invoke MAGI on the diff**
-
-Invoke `/magi:magi` with prompt: `revisa el diff v0.2.2..HEAD del plugin sbtdd-workflow contra @sbtdd/spec-behavior.md y @planning/claude-plan-tdd-org.md. Foco: regression risk, INV-0/INV-22/INV-29 compliance, atomic-write correctness, default-null backward compat.`
-
-- [ ] **Step 2: Parse verdict + findings**
-
-Read MAGI's verdict JSON. Extract:
-- `verdict` ∈ {STRONG_NO_GO, HOLD, HOLD_TIE, GO_WITH_CAVEATS, GO, STRONG_GO}.
-- `degraded: bool`.
-- Findings list with severity {CRITICAL, WARNING, INFO}.
-- Conditions for Approval list.
-
-- [ ] **Step 3: Evaluate exit criterion**
-
-Exit IF and ONLY IF (all true):
-- `verdict ≥ GO_WITH_CAVEATS` (in VERDICT_RANK ordering).
-- `degraded == False` (per INV-28).
-- 0 findings with severity CRITICAL.
-- 0 findings with severity WARNING.
-- 0 Conditions for Approval pending.
-
-Otherwise: continue loop (step 4).
-
-- [ ] **Step 4: Route findings via /receiving-code-review (INV-29 gate)**
-
-For EACH finding (CRITICAL + WARNING) and EACH Condition for Approval:
-- Invoke `/receiving-code-review` with the finding text + diff + project context.
-- It returns ACCEPT or REJECT with rationale.
-- ACCEPT → proceed to mini-cycle TDD fix (step 5) for that finding.
-- REJECT → log the rejection rationale to `.claude/magi-rejections-iterN.md` and feed it as context into the NEXT MAGI invocation (sterile-loop prevention per scenario R1.6).
-
-- [ ] **Step 5: Mini-cycle TDD per accepted finding**
-
-Dispatch a subagent (#3-iter1, #3-iter2, ...) per accepted finding. Each subagent:
-- **Red**: write a regression test reproducing the finding. Commit `test: regression for [finding summary]`.
-- **Green**: implement the fix. Commit `fix: [finding summary]`.
-- **Refactor**: pulir if needed. Commit `refactor: [finding summary]` (skip if no cleanup).
-- Each commit verified by `make verify`.
-
-- [ ] **Step 6: Verify post-fix**
+- [ ] **Step 2: Run make verify (Loop 1 surrogate)**
 
 ```bash
 make verify
 ```
-Expected: PASS. If FAIL, the mini-cycle subagent did not converge — inspect its commits, re-dispatch or escalate.
+Expected: 4 checks PASS (789 + ~30-40 new = 819-829 tests, ruff/format/mypy clean).
 
-- [ ] **Step 7: Increment iter counter; loop to step 1**
+- [ ] **Step 3: Compute diff range**
 
-If `iter == 5` and exit criterion still not met: trigger escalation_prompt (Task F3 below).
-
-## Task F3: Escalation on cap exhaustion (only if F2 cap hit)
-
-- [ ] **Step 1: Invoke escalation_prompt**
-
-Manually run:
 ```bash
-python skills/sbtdd/scripts/escalation_prompt.py --context pre-merge --iter 5 --plan planning/claude-plan-tdd-org.md
+git log --oneline b48f9ff..HEAD
+git diff b48f9ff..HEAD --stat
 ```
-(Or call the function from a Python REPL with an `EscalationContext` constructed from the iter-5 MAGI verdict.)
 
-- [ ] **Step 2: Choose option a/b/c/d**
+## Task FR-2: MAGI ↔ /receiving-code-review loop (cap 5 iter)
 
-Per Feature A v0.2.0 contract:
-- (a) override INV-0 with `--reason "<text>"` mandatory → audit artifact written, ship proceeds.
-- (b) retry +1 iter (extends cap to 6).
-- (c) replan: revisit spec or task decomposition (worst case; would mean v0.3.0 scope was wrong).
-- (d) abort (default headless).
+Same as v0.3.0 final review pattern. **Special v0.4.0 note**: F46 auto-recovery is now in production code. If iter 1 hits the synthesizer-crash mode, the orchestrator's invocation of MAGI via the SBTDD plugin's wrapper will auto-recover (escenario R2.1). If invoking via direct `python run_magi.py` outside the SBTDD wrapper, recovery does NOT fire (escenario R2.2 — manual playbook).
 
-- [ ] **Step 3: Apply chosen action**
+- [ ] **Step 1: Iter N — invoke MAGI on the diff range**
 
-- (a): write `.claude/magi-escalations/<timestamp>-v030.json` with reason + verdict + findings, then ship.
-- (b): re-enter F2 loop with `iter=6`.
-- (c): hard-stop, return to brainstorming.
-- (d): exit 8 (MAGI_GATE_BLOCKED), v0.3.0 not shipped this session.
+Use `python "C:/Users/jbolivarg/.claude/plugins/cache/bolivartech-plugins/magi/2.2.2/skills/magi/scripts/run_magi.py" code-review .claude/magi-input-v040-iterN.md --model opus --timeout 1800 --output-dir .claude/magi-runs/v040-iterN`. Build input file referencing spec + plan + diff + iter context.
 
-## Task F4: Ship (only after F2 exit OR F3 option a)
+If synthesizer crashes: invoke `magi_dispatch._manual_synthesis_recovery(.claude/magi-runs/v040-iterN)` from a Python REPL or via a small `scripts/recover-magi.py` one-liner. F46 must be already committed by Subagent #1.
 
-- [ ] **Step 1: Bump version 0.2.2 → 0.3.0**
+- [ ] **Step 2: Parse verdict + findings, evaluate exit criterion**
 
-In `.claude-plugin/plugin.json`:
+Exit when verdict ≥ GO_WITH_CAVEATS full + 0 CRITICAL + 0 WARNING + 0 Conditions.
+
+- [ ] **Step 3: If NOT exit, dispatch iter-N+1 mini-cycle subagent**
+
+Subagent runs `/receiving-code-review` per finding (INV-29), mini-cycle TDD per accepted, re-run MAGI iter N+1.
+
+- [ ] **Step 4: Cap 5 iter, escalation_prompt on exhaustion**
+
+## Task FR-3: Ship (after FR-2 exit)
+
+- [ ] **Step 1: Bump version 0.3.0 → 0.4.0**
+
+Modify `.claude-plugin/plugin.json`:
 ```json
-  "version": "0.3.0",
+  "version": "0.4.0",
 ```
 
-In `.claude-plugin/marketplace.json` (TWO occurrences — top-level and inside the plugins array):
+Modify `.claude-plugin/marketplace.json` (TWO occurrences):
 ```json
-  "version": "0.3.0",
+  "version": "0.4.0",
 ```
 
-- [ ] **Step 2: Write CHANGELOG.md `[0.3.0]` entry**
+- [ ] **Step 2: Update tripwire test**
 
-Insert above `[0.2.2]`:
+In `tests/test_plugin_manifest.py`, rename + update:
+
+```python
+def test_plugin_version_is_current_v0_4_patch() -> None:
+    """Plugin must ship 0.4.x patch on the v0.4 series until v0.5 / v1.0 bump."""
+    d = _load_plugin()
+    assert re.match(r"^0\.4\.\d+$", d["version"]), (
+        f"version must be on the v0.4.x patch series until v0.5 / v1.0 bump, got {d['version']}"
+    )
+```
+
+- [ ] **Step 3: Write CHANGELOG `[0.4.0]` entry**
+
+Insert above `[0.3.0]`:
 
 ```markdown
-## [0.3.0] - 2026-04-25
+## [0.4.0] - 2026-04-25
 
 ### Added
 
-- Feature D — Auto progress streaming. `auto_cmd._stream_subprocess`
-  reads subprocess pipes line-by-line via thread-pair pump and
-  rewrites to orchestrator stderr with `[sbtdd task-N phase] `
-  prefix. Subprocess argv prefixed with `python -u` to disable
-  buffering at the dispatcher level. State-machine breadcrumbs
-  emitted at every phase / sub-phase / task transition. New
-  `progress` field in `auto-run.json` reflects current `{phase,
-  task_index, task_total, sub_phase}` and is rewritten atomically
-  via tmp + os.replace (mirrors state_file.save and
-  magi-escalation-pending.md atomic-write patterns). 7 new tests
-  across `tests/test_auto_streaming.py` + `tests/test_auto_progress.py`.
+- Feature F (MAGI dispatch hardening). Four primitives:
+  `magi_dispatch._discover_verdict_marker(output_dir)` enumerates
+  `MAGI_VERDICT_MARKER.json` files via `Path.rglob` and picks the
+  most recent by mtime, replacing the fragile path-based discovery
+  that broke on internal MAGI layout changes (observed in v0.2/v0.3
+  cycles). `MAGIVerdict.retried_agents: tuple[str, ...]` propagates
+  the new MAGI 2.2.1+ telemetry field with default `()` for MAGI
+  2.1.x backward compat. `magi_dispatch._tolerant_agent_parse(...)`
+  extracts the first balanced `{...}` JSON object from agent
+  `result` fields when wrapped in narrative preamble (validated
+  empirically against v0.3.0 iter 2 melchior + balthasar raw outputs
+  preserved at `.claude/magi-runs/v030-iter2/`); falls back to
+  strict JSON parse for backward compat (caspar v0.3.0 iter 2 case).
+  `magi_dispatch._manual_synthesis_recovery(run_dir)` rescues a
+  verdict from per-agent `.raw.json` files when `run_magi.py`
+  synthesizer aborts with `RuntimeError: Only N agent(s) succeeded`;
+  fires automatically inside `invoke_magi` when the crash signature
+  matches and >= 1 agent succeeded; emits `manual-synthesis.json`
+  with `recovered: true` + `recovery_reason: "synthesizer-failure"`
+  and a stderr breadcrumb `[sbtdd magi] synthesizer failed; manual
+  synthesis recovery applied`. Suppress via `allow_recovery=False`
+  parameter on `invoke_magi` (or any equivalent CLI flag downstream
+  callers expose) for strict mode.
 
-- Feature E — Per-skill model selection flag. `PluginConfig` gains
-  four optional fields (`implementer_model`, `spec_reviewer_model`,
-  `code_review_model`, `magi_dispatch_model`), all defaulting null
-  (= inherit session model, byte-identical to v0.2.x argv). When
-  non-null, dispatch modules append `--model <id>` to the argv. CLI
-  flag `--model-override <skill>:<model>` on `/sbtdd auto` provides
-  per-run overrides; cascade is CLAUDE.md > CLI > plugin.local.md
-  > None. INV-0 enforced via regex scan of `~/.claude/CLAUDE.md`;
-  pinned model globally always wins, with stderr breadcrumb.
-  `dependency_check.check_model_ids` validates against
-  `models.ALLOWED_CLAUDE_MODEL_IDS` (Opus 4.7, Sonnet 4.6, Haiku
-  4.5 family). `templates/plugin.local.md.template` ships commented
-  Sonnet+Haiku baseline as recommended cost-optimized opt-in.
+- J subset (v0.3.0 streaming follow-through). Four items:
+  `_update_progress` wraps OSError around the atomic write so a
+  full disk or transient permission error degrades observability
+  but never kills the auto run. `_write_auto_run_audit` does
+  read-modify-write so the existing `progress` field survives audit
+  snapshot writes (was: transiently dropped until the next
+  `_update_progress`). `pre_merge_cmd` Loop 1 + Loop 2 + mini-cycle
+  TDD dispatch sites thread `stream_prefix` so MAGI verdict
+  generation, code-review iterations, and mini-cycle implementer
+  dispatches all stream their subprocess output to the operator's
+  stderr in real time during multi-minute runs. SKILL.md `### v0.3
+  flags` section now correctly states `--model-override` invalid
+  skill name exits `1` (USER_ERROR) instead of `2`
+  (PRECONDITION_FAILED) — matches `auto_cmd._parse_model_overrides`
+  raising `ValidationError`.
+
+### Changed
+
+- `MAGIVerdict` dataclass gains `retried_agents` field with default
+  `()`. Existing constructors that omit the field still work
+  (default-arg compat).
 
 ### Process notes
 
-- Loop 1 (`/requesting-code-review`) skipped for v0.3.0 ship in
-  favor of `make verify` surrogate -- pytest + ruff check + ruff
-  format + mypy --strict served as the mechanical-findings detector
-  in this lightweight cycle. INV-9 honored via interpretive
-  shortcut (clean linting = clean Loop 1). Final review loop ran
-  MAGI -> /receiving-code-review until verdict GO_WITH_CAVEATS
-  full with zero CRITICAL + zero WARNING + zero Conditions
-  pending, capped at 5 iterations per user directive 2026-04-25.
+- Loop 1 surrogate via `make verify` clean. Final review loop ran
+  MAGI -> /receiving-code-review per the user-directed
+  GO_WITH_CAVEATS-clean exit criterion with cap 5 iterations.
+  v0.4.0's recursive payoff: F itself rescued the cycle's own
+  iter-2 (or later) synthesizer crash via the freshly-shipped
+  `_manual_synthesis_recovery`, providing live empirical validation
+  of Feature F during its own ship.
 
-### Deferred (rolled to v0.4.0 / v1.0.0)
+### Deferred (rolled to v1.0.0)
 
-- D5 `/sbtdd status --watch` subcommand (deferred to v0.4.0).
-- E2 `schema_version: 2` field in `plugin.local.md` (deferred to v1.0.0).
-- Features F (MAGI marker discovery + `retried_agents`), G (MAGI
-  cross-check via /requesting-code-review), H (Group B spec-drift
-  re-eval + INV-31 default-on opt-in re-eval) (all v1.0.0).
+- G (MAGI -> /requesting-code-review cross-check meta-reviewer).
+- H (Group B spec-drift options re-eval + INV-31 default-on opt-in
+  re-eval based on accumulated v0.2/v0.2.1/v0.2.2/v0.3/v0.4 field
+  data).
+- I (`schema_version: 2` field in `plugin.local.md` + migration tool
+  skeleton).
+- J1 (`/sbtdd status --watch` companion subcommand).
+- J2 (INFO #10 `ResolvedModels` dataclass, one preflight CLAUDE.md
+  scan instead of per-dispatch).
+- J3 (INFO #11 streaming pump per-stream timeout for subprocesses
+  that write without newlines).
+- J7 (caspar #1 two-pump stdout/stderr origin ambiguity in streamed
+  output).
 ```
 
-- [ ] **Step 3: Update README.md**
-
-Add new section after `### New in v0.2`:
-
-```markdown
-### Cost optimization (v0.3.0+)
-
-`plugin.local.md` accepts four optional model fields letting you
-downgrade per-skill subprocess models without changing your session
-default. Recommended baseline (commented in the template; uncomment
-to opt in):
-
-| Field | Recommended | Why |
-|-------|-------------|-----|
-| `implementer_model` | `claude-sonnet-4-6` | TDD code-gen + multi-file refactors. Haiku breaks invariants. |
-| `spec_reviewer_model` | `claude-haiku-4-5` | Pattern-match task; cheapest tier where capability suffices. |
-| `code_review_model` | `claude-sonnet-4-6` | Bug/security/style detection needs depth. |
-| `magi_dispatch_model` | `null` (inherit) | Outer dispatcher; sub-agents pick their own model. |
-
-Per-run override: `/sbtdd auto --model-override implementer:claude-haiku-4-5`.
-
-INV-0 cascade: `~/.claude/CLAUDE.md` pinned model always wins. Stderr
-breadcrumb fires when override is suppressed.
-
-Cost projection: 36-task `auto` run on default-Opus session vs
-Sonnet+Haiku mix = ~70-80% reduction in total bill, preserving Opus
-only in MAGI Loop 2 iterations.
-```
-
-- [ ] **Step 4: Update SKILL.md**
-
-After `### v0.2 flags` section, add `### v0.3 flags`:
-
-```markdown
-### v0.3 flags
-
-- `--model-override <skill>:<model>` (on `auto`) -- per-run model override
-  for one of the four canonical skills (`implementer`, `spec_reviewer`,
-  `code_review`, `magi_dispatch`). Repeatable. Cascade: CLAUDE.md >
-  CLI override > plugin.local.md > None (inherit session). INV-0
-  pinned model in `~/.claude/CLAUDE.md` always wins; stderr breadcrumb
-  fires when the override is suppressed.
-- Four optional fields in `plugin.local.md` (`implementer_model`,
-  `spec_reviewer_model`, `code_review_model`, `magi_dispatch_model`)
-  with default `null` (= inherit session). Recommended baseline
-  shipped commented in the template for cost optimization.
-```
-
-- [ ] **Step 5: Run final make verify**
+- [ ] **Step 4: Final make verify**
 
 ```bash
 make verify
 ```
 
-- [ ] **Step 6: Stage docs + commit**
+- [ ] **Step 5: Stage docs + commit**
 
 ```bash
-git add README.md skills/sbtdd/SKILL.md CHANGELOG.md
-git commit -m "docs: v0.3.0 changelog + cost-optimization README + SKILL flags"
+git add CHANGELOG.md tests/test_plugin_manifest.py
+git commit -m "docs: v0.4.0 changelog + tripwire test bump to v0.4.x"
 ```
 
-- [ ] **Step 7: Bump version commit**
+- [ ] **Step 6: Bump commit**
 
 ```bash
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
-git commit -m "chore: bump to 0.3.0"
+git commit -m "chore: bump to 0.4.0"
 ```
 
-- [ ] **Step 8: Tag**
+- [ ] **Step 7: Tag**
 
 ```bash
-git tag v0.3.0
-git log --oneline -15
+git tag v0.4.0
+git log --oneline -20
 ```
-Expected: clean linear history with the 10 feature commits + docs commit + chore bump + tag.
 
-- [ ] **Step 9: Push (REQUIRES EXPLICIT USER AUTHORIZATION)**
+- [ ] **Step 8: Push (REQUIRES EXPLICIT USER AUTHORIZATION)**
 
-DO NOT auto-execute. Surface to user: "v0.3.0 ready to push. Authorize `git push origin main && git push origin v0.3.0`?"
+DO NOT auto-execute. Surface to user: "v0.4.0 ready to push. Authorize `git push origin main && git push origin v0.4.0`?"
 
-- [ ] **Step 10: Memory update**
+- [ ] **Step 9: Memory update**
 
-Write `C:/Users/jbolivarg/.claude/projects/D--jbolivarg-PythonProjects-SBTDD/memory/project_v030_shipped.md` covering: 10 deliverables landed, lightweight pattern wall time, MAGI loop iter count, any INV-0 override, ship commit + tag SHAs.
-
-Update `MEMORY.md` index with one-line v0.3.0 hook entry.
+Write `C:/Users/jbolivarg/.claude/projects/D--jbolivarg-PythonProjects-SBTDD/memory/project_v040_shipped.md`. Update `MEMORY.md` index with one-line v0.4.0 hook entry.
 
 ---
 
 ## Self-review
 
-After writing the plan above, the following spec coverage map verifies every spec.S.12 / sec.6 acceptance criterion has at least one task:
-
 | Spec criterion | Task | Coverage |
 |----------------|------|----------|
-| D1 | Task D1 | Steps 1-9 (3 streaming tests + impl) |
-| D2 | Task D2 | Steps 1-5 (argv test + impl) |
-| D3 | Task D3 | Steps 1-8 (2 breadcrumb tests + impl + wiring) |
-| D4 | Task D4 | Steps 1-10 (3 progress tests + impl + wiring) |
-| E1 | Task E1 | Steps 1-8 (3 config tests + dataclass extension) |
-| E3 | Task E3 | Steps 1-11 (4 dispatch tests + 3 modules wired + INV-0) |
-| E4 | Task E4 | Steps 1-6 (4 CLI tests + parser + cascade resolver) |
-| E5 | Task E5 | Steps 1-5 (3 dependency_check tests + impl) |
-| E6 | Task E6 | Steps 1-5 (2 immutability/contents tests + constants) |
-| E7 | Task E7 | Steps 1-7 (2 template tests + edit) |
-| R1.1 | Task F2 step 3 | Exit criterion check |
-| R1.2 | Task F2 step 4-5 | INV-29 routing + mini-cycle |
-| R1.3 | Task F2 step 4-5 | Same path for WARNING/Conditions |
-| R1.4 | Task F2 step 3 (degraded sub-condition) | INV-28 honored |
-| R1.5 | Task F3 | Escalation prompt invocation |
-| R1.6 | Task F2 step 4 | Rejected findings logged + fed back |
-| R1.7 | Task F1 step 2 + Task F2 step 1 | make verify Loop 1 surrogate |
-| Version bump | Task F4 step 1 | plugin.json + marketplace.json sync |
-| CHANGELOG | Task F4 step 2 | [0.3.0] section template |
-| README + SKILL | Task F4 steps 3-4 | Cost optimization + v0.3 flags |
-| Tag + push | Task F4 steps 8-9 | Manual user-authorized push |
-| Memory | Task F4 step 10 | project_v030_shipped.md |
+| F43 marker discovery | Task F-1 | Steps 1-8 (3 tests + impl) |
+| F44 retried_agents | Task F-2 | Steps 1-7 (3 tests + dataclass field + factory) |
+| F45 tolerant agent parse | Task F-3 | Steps 1-8 (4 tests + balanced-brace extractor + agent validation) |
+| F46 manual synthesis recovery | Task F-4 | Steps 1-9 (5 tests + `_manual_synthesis_recovery` + `invoke_magi` integration + `allow_recovery` flag) |
+| J4 OSError handling | Task J-2 | Steps 1-6 (2 tests + try/except wrapping) |
+| J5 SKILL.md docs hotfix | Task J-1 | Steps 1-5 (1 test + 1-line edit) |
+| J6 audit progress preservation | Task J-3 | Steps 1-6 (2 tests + read-modify-write) |
+| J8 pre-merge stream_prefix | Task J-4 | Steps 1-6 (3 tests + dispatch-site threading) |
+| R1.1-R1.7 final review | Task FR-2 | Same as v0.3.0 spec |
+| R2.1 dogfood rescue | Task FR-2 step 1 | F46 auto-recovery fires when synthesizer crashes |
+| R2.2 pre-F-commit manual | Task FR-2 step 1 | Manual playbook documented |
+| Version bump | Task FR-3 step 1 | plugin.json + marketplace.json |
+| CHANGELOG | Task FR-3 step 3 | [0.4.0] section template |
+| Tripwire bump | Task FR-3 step 2 | 0.3.x → 0.4.x |
+| Tag + push | Task FR-3 steps 7-8 | Manual user-authorized push |
+| Memory | Task FR-3 step 9 | project_v040_shipped.md |
 
-**Placeholder scan**: zero `TODO`, `TBD`, `implement later`, `add appropriate error handling`, `similar to Task N` matches.
+**Placeholder scan**: zero `TBD`, `implement later`, `add appropriate error handling` matches in actionable steps. The two tasks J-4 step 2 and step 5 reference adapting tests to the actual `pre_merge_cmd` API after reading the file — this is intentional because the dispatch-site signatures depend on what already exists (subagent must read first); the steps include explicit code skeletons + the invariant the test must establish.
 
-**Type consistency**: function names verified across tasks — `_stream_subprocess` (D1), `_build_run_sbtdd_argv` (D2), `_emit_phase_breadcrumb` (D3), `_update_progress` (D4), `PluginConfig` field names match across E1/E3/E4/E5, `_apply_inv0_model_check` consistent across superpowers/spec_review/magi dispatch, `_parse_model_overrides` + `_resolve_model` + `_VALID_MODEL_OVERRIDE_SKILLS` consistent within track E.
+**Type consistency**: function names verified across tasks — `_discover_verdict_marker`, `_tolerant_agent_parse`, `_manual_synthesis_recovery`, `MAGIVerdict.retried_agents`, `MAGIVerdict.from_marker`, `_VERDICT_WEIGHT`, `_VALID_AGENT_NAMES`, `_extract_first_balanced_json`, `_AUTO_RUN_PATH`, `_write_auto_run_audit`, `_update_progress`. Consistent within track F and within track J.
 
-**Scope check**: plan focused on D + E for v0.3.0. F+G+H + D5/E2 explicitly deferred and not referenced in tasks.
+**Scope check**: plan focused on F + J subset for v0.4.0. G/H/I/D5/J2/J3/J7 explicitly deferred and not referenced in tasks beyond the CHANGELOG Deferred section.
 
 ---
 
@@ -1790,10 +1473,10 @@ Plan complete and saved to `planning/claude-plan-tdd-org.md`.
 
 Two execution options:
 
-**1. Subagent-Driven (recommended)** — orchestrator dispatches subagent #1 + subagent #2 in parallel for tracks D+E, then drives the final review loop sequentially. Two-stage review between tasks. Fresh subagent per finding mini-cycle.
+**1. Subagent-Driven (recommended)** — orchestrator dispatches subagent #1 + subagent #2 in **true parallel** via single message with two `Agent` tool calls (surfaces 100% disjoint, no auto_cmd.py merge zone like v0.3.0). Then drives final review loop sequentially.
 
-**2. Inline Execution** — execute tasks D1-D4, E6-E7 inline in this session via executing-plans skill. Slower (~6-8h vs 4-5h parallel) but every step auditable in conversation. Loses parallelism advantage of lightweight pattern.
+**2. Inline Execution** — execute tasks F-1..F-4 + J-1..J-4 inline via executing-plans skill. Slower (~5-7h vs 3-4h parallel); loses parallelism advantage.
 
-Recommended: **option 1**. Tracks D and E are file-disjoint by design and the lightweight pattern v0.2.1 precedent validated parallel-subagent dispatch for similar scope.
+Recommended: **option 1**. Tracks F and J are file-disjoint by design and the lightweight pattern v0.3.0 precedent worked despite sequential constraint.
 
 Which approach?
