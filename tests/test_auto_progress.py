@@ -223,5 +223,3 @@ def test_update_progress_retry_exhaustion_preserves_original(tmp_path, monkeypat
     data = json.loads(auto_run.read_text())
     assert data["progress"]["phase"] == 1
     assert data["progress"]["task_index"] == 0
-
-

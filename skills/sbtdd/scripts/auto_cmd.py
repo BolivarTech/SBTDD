@@ -292,57 +292,82 @@ def _update_progress(
             omitted when ``None``.
 
     Raises:
-        OSError: ``os.replace`` failed; tmp file is cleaned up before
-            re-raising so nothing leaks.
+        Nothing. v0.4.0 J4: any :class:`OSError` raised by the read,
+        the tmp write, or the final :func:`os.replace` is caught,
+        the tmp file is cleaned up if present, and a stderr breadcrumb
+        starting ``[sbtdd] warning: progress write failed`` is emitted.
+        The auto run continues with degraded observability rather than
+        terminating mid-cycle on a transient filesystem error (disk
+        full, locked file, antivirus interference, etc.). The original
+        ``auto-run.json`` is preserved unchanged on failure.
     """
-    if auto_run_path.exists():
-        try:
-            existing: dict[str, object] = json.loads(auto_run_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            existing = {}
-    else:
-        existing = {}
-        auto_run_path.parent.mkdir(parents=True, exist_ok=True)
-    # MAGI iter 1 finding #4 fix: always emit the four keys
-    # ``{phase, task_index, task_total, sub_phase}`` to satisfy
-    # spec sec.2 D4.2 "shape exacto" literally. ``None`` values become
-    # JSON ``null`` rather than absent keys so future
-    # ``/sbtdd status --watch`` consumers can rely on the shape and
-    # treat ``null`` as the explicit "unknown" sentinel.
-    progress: dict[str, object | None] = {
-        "phase": phase,
-        "task_index": task_index,
-        "task_total": task_total,
-        "sub_phase": sub_phase,
-    }
-    existing["progress"] = progress
-    tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-    # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
-    # can transiently fail with PermissionError when another process /
-    # thread has the destination file open without FILE_SHARE_DELETE
-    # (concurrent reader pattern from D4.1). Retry a small number of
-    # times with a short sleep so the writer recovers from the race
-    # window without breaking the atomicity contract; the reader still
-    # never observes torn JSON because we never write into the target
-    # path directly.
-    last_err: OSError | None = None
-    for _ in range(20):
-        try:
-            os.replace(tmp, auto_run_path)
-            return
-        except PermissionError as exc:
-            last_err = exc
-            time.sleep(0.005)
-        except OSError as exc:
-            last_err = exc
-            break
+    tmp: Path | None = None
     try:
-        tmp.unlink()
-    except FileNotFoundError:
-        pass
-    assert last_err is not None
-    raise last_err
+        if auto_run_path.exists():
+            try:
+                existing: dict[str, object] = json.loads(auto_run_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                existing = {}
+        else:
+            existing = {}
+            auto_run_path.parent.mkdir(parents=True, exist_ok=True)
+        # MAGI iter 1 finding #4 fix: always emit the four keys
+        # ``{phase, task_index, task_total, sub_phase}`` to satisfy
+        # spec sec.2 D4.2 "shape exacto" literally. ``None`` values become
+        # JSON ``null`` rather than absent keys so future
+        # ``/sbtdd status --watch`` consumers can rely on the shape and
+        # treat ``null`` as the explicit "unknown" sentinel.
+        progress: dict[str, object | None] = {
+            "phase": phase,
+            "task_index": task_index,
+            "task_total": task_total,
+            "sub_phase": sub_phase,
+        }
+        existing["progress"] = progress
+        tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
+        # can transiently fail with PermissionError when another process /
+        # thread has the destination file open without FILE_SHARE_DELETE
+        # (concurrent reader pattern from D4.1). Retry a small number of
+        # times with a short sleep so the writer recovers from the race
+        # window without breaking the atomicity contract; the reader still
+        # never observes torn JSON because we never write into the target
+        # path directly.
+        last_err: OSError | None = None
+        for _ in range(20):
+            try:
+                os.replace(tmp, auto_run_path)
+                return
+            except PermissionError as exc:
+                last_err = exc
+                time.sleep(0.005)
+            except OSError as exc:
+                last_err = exc
+                break
+        assert last_err is not None
+        raise last_err
+    except OSError as exc:
+        # v0.4.0 J4: never kill the auto run on a progress write failure.
+        # Auto continues with degraded observability; subsequent successful
+        # ``_update_progress`` calls will resync the snapshot and the audit
+        # writer (read-modify-write per J6) preserves whatever progress
+        # field was already on disk before this attempt.
+        sys.stderr.write(
+            f"[sbtdd] warning: progress write failed: {type(exc).__name__}"
+            f"({getattr(exc, 'errno', '')}, {exc!s}). "
+            f"Auto run continues (observability degraded).\n"
+        )
+        sys.stderr.flush()
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # Best-effort cleanup; do not mask the primary failure.
+                pass
 
 
 def _build_run_sbtdd_argv(
