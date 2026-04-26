@@ -4,10 +4,12 @@
 # Date: 2026-04-25
 """Tests for v0.3.0 Feature D auto-run.json progress field.
 
-v0.4.0 J4 extensions:
+v0.4.0 J4 + J6 extensions:
 
 - ``test_update_progress_swallows_oserror_and_continues`` (J4.1).
 - ``test_update_progress_retry_exhaustion_preserves_original`` (J4.2).
+- ``test_write_auto_run_audit_preserves_progress_field`` (J6.1).
+- ``test_write_auto_run_audit_when_progress_absent`` (J6.2).
 """
 
 from __future__ import annotations
@@ -223,3 +225,83 @@ def test_update_progress_retry_exhaustion_preserves_original(tmp_path, monkeypat
     data = json.loads(auto_run.read_text())
     assert data["progress"]["phase"] == 1
     assert data["progress"]["task_index"] == 0
+
+
+def _make_audit() -> auto_cmd.AutoRunAudit:
+    """Build a minimal valid :class:`AutoRunAudit` for J6 tests."""
+    return auto_cmd.AutoRunAudit(
+        schema_version=auto_cmd._AUTO_RUN_SCHEMA_VERSION,
+        auto_started_at="2026-04-25T10:00:00Z",
+        auto_finished_at=None,
+        status="success",
+        verdict=None,
+        degraded=None,
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=0,
+        error=None,
+    )
+
+
+def test_write_auto_run_audit_preserves_progress_field(tmp_path):
+    """J6.1: AutoRunAudit serialisation preserves existing progress key.
+
+    Before v0.4.0 the audit writer overwrote ``auto-run.json`` with the
+    serialised :class:`AutoRunAudit` only, transiently dropping the
+    ``progress`` field until the next ``_update_progress`` call. v0.4.0
+    J6 changes the helper to read-modify-write so the live progress
+    snapshot survives audit refreshes; downstream readers (notably the
+    eventual ``/sbtdd status --watch`` companion) never observe a
+    half-second window where progress disappears between phase
+    boundaries.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    pre_state = {
+        "schema_version": auto_cmd._AUTO_RUN_SCHEMA_VERSION,
+        "auto_started_at": "2026-04-25T09:00:00Z",
+        "auto_finished_at": None,
+        "status": "success",
+        "verdict": None,
+        "degraded": None,
+        "accepted_conditions": 0,
+        "rejected_conditions": 0,
+        "tasks_completed": 0,
+        "error": None,
+        "progress": {
+            "phase": 2,
+            "task_index": 14,
+            "task_total": 36,
+            "sub_phase": "green",
+        },
+    }
+    auto_run.write_text(json.dumps(pre_state))
+    auto_cmd._write_auto_run_audit(auto_run, _make_audit())
+    data = json.loads(auto_run.read_text())
+    # Progress field preserved across audit write.
+    assert data["progress"] == {
+        "phase": 2,
+        "task_index": 14,
+        "task_total": 36,
+        "sub_phase": "green",
+    }
+    # Audit fields also persisted.
+    assert data["auto_started_at"] == "2026-04-25T10:00:00Z"
+    assert data["status"] == "success"
+
+
+def test_write_auto_run_audit_when_progress_absent(tmp_path):
+    """J6.2: audit writes correctly when no prior progress field exists.
+
+    Early in an auto run (before the first phase fires) ``auto-run.json``
+    has no ``progress`` key. The audit writer must not synthesise one;
+    the absent state stays absent so the D4.3 absent-tolerant downstream
+    contract is preserved.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_cmd._write_auto_run_audit(auto_run, _make_audit())
+    data = json.loads(auto_run.read_text())
+    # Absent stays absent (D4.3 absent-tolerant downstream).
+    assert "progress" not in data
+    # Audit body is present.
+    assert data["auto_started_at"] == "2026-04-25T10:00:00Z"
+    assert data["status"] == "success"
