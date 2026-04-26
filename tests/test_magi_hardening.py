@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-04-25
+"""Tests for v0.4.0 Feature F MAGI dispatch hardening (F43, F44, F45)."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "skills" / "sbtdd" / "scripts"))
+
+import magi_dispatch  # noqa: E402
+from errors import ValidationError  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# F43 -- _discover_verdict_marker
+# ---------------------------------------------------------------------------
+
+
+def test_discover_verdict_marker_picks_newest_by_mtime(tmp_path: Path) -> None:
+    """F43.1: enumerator returns marker with max mtime."""
+    sub_old = tmp_path / "old"
+    sub_new = tmp_path / "new"
+    sub_old.mkdir()
+    sub_new.mkdir()
+    (sub_old / "MAGI_VERDICT_MARKER.json").write_text(
+        json.dumps({"verdict": "GO"}), encoding="utf-8"
+    )
+    time.sleep(0.05)
+    (sub_new / "MAGI_VERDICT_MARKER.json").write_text(
+        json.dumps({"verdict": "GO_WITH_CAVEATS"}), encoding="utf-8"
+    )
+    # Force mtime ordering across coarse-granularity Windows clocks.
+    old_marker = sub_old / "MAGI_VERDICT_MARKER.json"
+    new_marker = sub_new / "MAGI_VERDICT_MARKER.json"
+    os.utime(old_marker, (old_marker.stat().st_atime, old_marker.stat().st_mtime - 10))
+    found = magi_dispatch._discover_verdict_marker(tmp_path)
+    assert found.parent.name == "new"
