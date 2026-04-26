@@ -129,3 +129,101 @@ def test_retried_agents_consumable_by_audit_writer() -> None:
     )
     serialized = json.dumps(list(verdict.retried_agents))
     assert json.loads(serialized) == ["balthasar", "caspar"]
+
+
+# ---------------------------------------------------------------------------
+# F45 -- _tolerant_agent_parse
+# ---------------------------------------------------------------------------
+
+
+def test_tolerant_agent_parse_extracts_from_preamble(tmp_path: Path) -> None:
+    """F45.1: extract JSON object from agent result wrapped in narrative."""
+    raw = tmp_path / "melchior.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": (
+                    "Based on my review of the iter-2 fixes, the streaming wiring is "
+                    "correctly threaded.\n\n"
+                    '{"agent": "melchior", "verdict": "GO", "confidence": 0.88, '
+                    '"summary": "Iter 2 closes findings.", "reasoning": "...", '
+                    '"findings": [], "recommendation": "Ship v0.3.0."}'
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "melchior"
+    assert parsed["verdict"] == "GO"
+    assert parsed["confidence"] == 0.88
+
+
+def test_tolerant_agent_parse_pure_json(tmp_path: Path) -> None:
+    """F45.2: pure JSON result parses identically to strict parser."""
+    raw = tmp_path / "caspar.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": json.dumps(
+                    {
+                        "agent": "caspar",
+                        "verdict": "approve",
+                        "confidence": 0.85,
+                        "summary": "Ship.",
+                        "reasoning": "...",
+                        "findings": [],
+                        "recommendation": "Ship.",
+                    }
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "caspar"
+    assert parsed["verdict"] == "approve"
+
+
+def test_tolerant_agent_parse_no_recoverable_json(tmp_path: Path) -> None:
+    """F45.3: result with only narrative raises ValidationError with preview."""
+    raw = tmp_path / "broken.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": "I encountered an error and could not produce a verdict for this run.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError) as ei:
+        magi_dispatch._tolerant_agent_parse(raw)
+    assert "No JSON object recoverable" in str(ei.value)
+    assert "encountered an error" in str(ei.value)
+
+
+def test_tolerant_agent_parse_skips_code_examples(tmp_path: Path) -> None:
+    """F45.4: parser skips embedded code-example dicts, finds verdict."""
+    raw = tmp_path / "balthasar.raw.json"
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "result": (
+                    'Here is an example structure: {"key": "val"}.\n'
+                    'And another: {"name": "thing"}.\n\n'
+                    '{"agent": "balthasar", "verdict": "approve", '
+                    '"confidence": 0.88, "summary": "OK.", '
+                    '"reasoning": "Reasonable trade-offs.", '
+                    '"findings": [], "recommendation": "Ship."}'
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = magi_dispatch._tolerant_agent_parse(raw)
+    assert parsed["agent"] == "balthasar"
+    assert parsed["verdict"] == "approve"
