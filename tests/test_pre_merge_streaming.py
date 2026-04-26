@@ -39,7 +39,7 @@ def _make_magi_verdict(
     verdict: str = "GO",
     degraded: bool = False,
     conditions: tuple[str, ...] = (),
-    findings: tuple[object, ...] = (),
+    findings: tuple[dict[str, object], ...] = (),
 ) -> magi_dispatch.MAGIVerdict:
     """Build a minimal :class:`MAGIVerdict` for monkeypatched dispatch."""
     return magi_dispatch.MAGIVerdict(
