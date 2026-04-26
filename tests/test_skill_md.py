@@ -318,7 +318,9 @@ def test_v03_flags_section_documents_exit_1_for_invalid_model_override() -> None
     next_h2 = rest.find("\n## ")
     next_h3 = rest.find("\n### ")
     candidates = [c for c in (next_h2, next_h3) if c >= 0]
-    section_end = (section_start + len("### v0.3 flags") + min(candidates)) if candidates else len(skill)
+    section_end = (
+        (section_start + len("### v0.3 flags") + min(candidates)) if candidates else len(skill)
+    )
     section = skill[section_start:section_end]
     # Must say exit 1 (USER_ERROR), not exit 2 (PRECONDITION_FAILED)
     assert "exit `1` (USER_ERROR)" in section or "exit 1 (USER_ERROR)" in section, (
