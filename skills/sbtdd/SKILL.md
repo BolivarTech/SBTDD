@@ -75,7 +75,8 @@ subcommand routes through `run_sbtdd.py` (see `## Execution pipeline` below).
   `models.ALLOWED_CLAUDE_MODEL_IDS` (the 4.x family snapshot:
   `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`,
   `claude-haiku-4-5-20251001`). Unknown skill names or model IDs
-  exit `2` (PRECONDITION_FAILED) before any subprocess work.
+  exit `1` (USER_ERROR) before any subprocess work, since
+  `_parse_model_overrides` raises `ValidationError`.
 
 Four optional fields land in `.claude/plugin.local.md` to set
 per-skill models persistently (default `null` = inherit session,
