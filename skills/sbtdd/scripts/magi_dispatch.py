@@ -445,6 +445,41 @@ def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
     return verdict_meets_threshold(verdict.verdict, threshold)
 
 
+_MARKER_FILENAME = "MAGI_VERDICT_MARKER.json"
+
+
+def _discover_verdict_marker(output_dir: Path | str) -> Path:
+    """Discover the most recent MAGI verdict marker in an output directory.
+
+    v0.4.0 Feature F (F43): replaces fragile path-based discovery
+    (``output_dir / "magi-report.json"``) with marker enumeration via
+    :meth:`pathlib.Path.rglob`. Picks the marker with max ``mtime`` so
+    re-runs in the same directory return the latest result. Defensive
+    against MAGI layout changes (e.g. moving markers into per-run
+    sub-directories).
+
+    Args:
+        output_dir: Directory to scan recursively for
+            ``MAGI_VERDICT_MARKER.json`` files.
+
+    Returns:
+        Path to the most recent marker file, ranked by modification time.
+
+    Raises:
+        ValidationError: If no markers are present, with detail listing the
+            files actually present in ``output_dir`` (top-level only) for
+            debugability. The listing intentionally omits sub-directories
+            because a missing marker is itself the diagnostic; deeper layout
+            inspection is the operator's job once the error fires.
+    """
+    base = Path(output_dir)
+    candidates = sorted(base.rglob(_MARKER_FILENAME), key=lambda p: p.stat().st_mtime)
+    if not candidates:
+        present = sorted(p.name for p in base.iterdir()) if base.exists() else []
+        raise ValidationError(f"No {_MARKER_FILENAME} found in {base}. Files present: {present}")
+    return candidates[-1]
+
+
 def write_verdict_artifact(
     verdict: MAGIVerdict,
     target: Path,

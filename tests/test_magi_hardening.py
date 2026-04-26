@@ -40,7 +40,24 @@ def test_discover_verdict_marker_picks_newest_by_mtime(tmp_path: Path) -> None:
     )
     # Force mtime ordering across coarse-granularity Windows clocks.
     old_marker = sub_old / "MAGI_VERDICT_MARKER.json"
-    new_marker = sub_new / "MAGI_VERDICT_MARKER.json"
     os.utime(old_marker, (old_marker.stat().st_atime, old_marker.stat().st_mtime - 10))
     found = magi_dispatch._discover_verdict_marker(tmp_path)
     assert found.parent.name == "new"
+
+
+def test_discover_verdict_marker_raises_when_empty(tmp_path: Path) -> None:
+    """F43.2: ValidationError when no markers found, lists present files."""
+    (tmp_path / "stray.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValidationError) as ei:
+        magi_dispatch._discover_verdict_marker(tmp_path)
+    assert "MAGI_VERDICT_MARKER.json" in str(ei.value)
+    assert "stray.json" in str(ei.value)
+
+
+def test_discover_verdict_marker_finds_in_subdir(tmp_path: Path) -> None:
+    """F43.3: rglob finds markers in nested subdirs (layout-change defensive)."""
+    sub = tmp_path / "run-XYZ"
+    sub.mkdir()
+    (sub / "MAGI_VERDICT_MARKER.json").write_text(json.dumps({"verdict": "GO"}), encoding="utf-8")
+    found = magi_dispatch._discover_verdict_marker(tmp_path)
+    assert found.parent.name == "run-XYZ"
