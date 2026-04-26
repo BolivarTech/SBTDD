@@ -501,6 +501,140 @@ def verdict_passes_gate(verdict: MAGIVerdict, threshold: str) -> bool:
 
 _MARKER_FILENAME = "MAGI_VERDICT_MARKER.json"
 
+#: Canonical names of the three MAGI agents. Used by
+#: :func:`_tolerant_agent_parse` to discriminate verdict objects from
+#: incidental ``{...}`` snippets (e.g. embedded code examples) inside
+#: an agent's narrative ``result`` field.
+_VALID_AGENT_NAMES: frozenset[str] = frozenset({"melchior", "balthasar", "caspar"})
+
+
+def _extract_first_balanced_json(text: str) -> str | None:
+    """Return the first balanced ``{...}`` JSON-looking substring, or ``None``.
+
+    Walks the text once tracking brace depth, ignoring braces inside
+    JSON string literals (with ``\\`` escape-handling). Returns the full
+    substring from the first ``{`` to its matching ``}``. Pure stdlib;
+    no regex backtracking.
+
+    The caller is responsible for actually JSON-parsing the returned
+    substring -- this helper only locates a syntactic candidate.
+
+    Args:
+        text: Source text to scan.
+
+    Returns:
+        Substring covering the first balanced ``{...}`` block, or
+        ``None`` when no balanced block is found.
+    """
+    depth = 0
+    start = -1
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                return text[start : i + 1]
+    return None
+
+
+def _tolerant_agent_parse(raw_json_path: Path | str) -> dict[str, Any]:
+    """Parse an agent's ``*.raw.json`` file with preamble tolerance.
+
+    v0.4.0 Feature F (F45): MAGI v2.2.2 agents sometimes wrap their
+    verdict JSON in a narrative preamble inside the ``result`` field
+    (e.g. ``"Based on my review...\\n\\n{json}"``). The strict parser
+    in ``run_magi.py:synthesize.py`` rejects these payloads outright.
+
+    This helper:
+
+    1. Loads the outer ``*.raw.json`` envelope and extracts the
+       ``result`` string.
+    2. Tries a strict ``json.loads(result)`` first -- if ``result``
+       is pure JSON the function returns immediately, preserving
+       byte-identical behavior with the v0.3.x strict parser
+       (caspar v0.3.0 iter 2 case).
+    3. Otherwise walks ``result`` extracting successive balanced
+       ``{...}`` substrings via :func:`_extract_first_balanced_json`,
+       JSON-parsing each, and returning the first one that parses
+       cleanly **and** carries an ``agent`` field naming one of
+       :data:`_VALID_AGENT_NAMES`. This skips embedded code-example
+       dicts (``{"key": "val"}``) that lack an agent identity.
+
+    Args:
+        raw_json_path: Path to the agent's ``*.raw.json`` file written
+            by the MAGI orchestrator.
+
+    Returns:
+        Parsed agent verdict dict (the inner JSON object, not the outer
+        envelope).
+
+    Raises:
+        ValidationError: If the outer envelope lacks a ``result``
+            string, or no balanced JSON object inside ``result``
+            parses to a dict whose ``agent`` field is one of
+            :data:`_VALID_AGENT_NAMES`. The message includes a 200-char
+            preview of ``result`` for debugability.
+    """
+    raw_data = json.loads(Path(raw_json_path).read_text(encoding="utf-8"))
+    result = raw_data.get("result")
+    if not isinstance(result, str):
+        raise ValidationError(
+            f"No 'result' string in {raw_json_path} (got {type(result).__name__})"
+        )
+    # Fast path: pure-JSON result preserves strict-parser semantics.
+    try:
+        candidate = json.loads(result)
+        if isinstance(candidate, dict) and candidate.get("agent") in _VALID_AGENT_NAMES:
+            return candidate
+    except json.JSONDecodeError:
+        pass
+    # Preamble-tolerant path: extract balanced ``{...}`` substrings,
+    # discard non-verdict candidates, return the first verdict-shaped
+    # one. ``cursor`` walks forward through ``result`` so each iteration
+    # makes strict progress.
+    cursor = 0
+    while cursor < len(result):
+        substring = _extract_first_balanced_json(result[cursor:])
+        if substring is None:
+            preview = result[:200].replace("\n", " ")
+            raise ValidationError(
+                f"No JSON object recoverable from {raw_json_path}: result preview: {preview!r}"
+            )
+        # Locate the substring within the remaining slice and advance the
+        # cursor past it regardless of parse outcome -- guarantees the
+        # loop terminates even when the same substring would otherwise
+        # be re-extracted.
+        local_idx = result[cursor:].find(substring)
+        next_cursor = cursor + local_idx + len(substring)
+        try:
+            candidate = json.loads(substring)
+        except json.JSONDecodeError:
+            cursor = next_cursor
+            continue
+        if isinstance(candidate, dict) and candidate.get("agent") in _VALID_AGENT_NAMES:
+            return candidate
+        cursor = next_cursor
+    preview = result[:200].replace("\n", " ")
+    raise ValidationError(
+        f"No JSON object recoverable from {raw_json_path}: result preview: {preview!r}"
+    )
+
 
 def _discover_verdict_marker(output_dir: Path | str) -> Path:
     """Discover the most recent MAGI verdict marker in an output directory.
