@@ -103,13 +103,67 @@ def _resolve_timestamp(timestamp: str | None) -> str:
 
 @dataclass(frozen=True)
 class MAGIVerdict:
-    """Parsed result of a /magi:magi invocation (sec.S.5.6)."""
+    """Parsed result of a /magi:magi invocation (sec.S.5.6).
+
+    v0.4.0 Feature F (F44) extends the dataclass with ``retried_agents``,
+    a tuple of agent names that the MAGI 2.2.1+ orchestrator had to retry
+    (transient infra failure, timeout, etc.). Defaults to ``()`` so MAGI
+    2.1.x markers and tests written against the v0.3.x shape continue to
+    construct verdicts unchanged.
+    """
 
     verdict: str  # key of VERDICT_RANK
     degraded: bool
     conditions: tuple[str, ...]
     findings: tuple[dict[str, Any], ...]
     raw_output: str
+    # v0.4.0 Feature F (F44): MAGI 2.2.1+ retried_agents telemetry.
+    # Parser tolerates absence; defaults to empty tuple for backward
+    # compat with MAGI 2.1.x markers.
+    retried_agents: tuple[str, ...] = ()
+
+    @classmethod
+    def from_marker(cls, marker_path: Path | str) -> MAGIVerdict:
+        """Parse a MAGI verdict marker JSON file into a MAGIVerdict.
+
+        v0.4.0 Feature F (F44): consumes the
+        ``MAGI_VERDICT_MARKER.json`` files emitted by MAGI 2.2.1+ (and
+        legacy MAGI 2.1.x markers when present). The marker carries the
+        same logical fields as ``magi-report.json`` -- verdict label,
+        degraded flag, conditions, findings -- plus the optional
+        ``retried_agents`` telemetry list.
+
+        The implementation delegates to :func:`parse_magi_report` to
+        preserve every sec.S.10 invariant around verdict-label
+        validation, then re-constructs the dataclass with
+        ``retried_agents`` populated. This keeps the strict label
+        validation in a single helper and makes future MAGI report
+        layout drift cheap to mirror.
+
+        Args:
+            marker_path: Filesystem path to the marker JSON file.
+
+        Returns:
+            :class:`MAGIVerdict` with ``retried_agents`` set to a tuple
+            (possibly empty) of strings.
+
+        Raises:
+            ValidationError: Forwarded from :func:`parse_magi_report`
+                when the marker JSON is malformed or carries an unknown
+                verdict label.
+        """
+        data = json.loads(Path(marker_path).read_text(encoding="utf-8"))
+        retried_raw = data.get("retried_agents") or ()
+        retried = tuple(str(a) for a in retried_raw)
+        verdict = parse_magi_report(data)
+        return cls(
+            verdict=verdict.verdict,
+            degraded=verdict.degraded,
+            conditions=verdict.conditions,
+            findings=verdict.findings,
+            raw_output=verdict.raw_output,
+            retried_agents=retried,
+        )
 
 
 def _normalise_verdict_label(raw: str) -> str:
