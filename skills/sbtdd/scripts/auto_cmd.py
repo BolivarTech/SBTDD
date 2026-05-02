@@ -559,6 +559,18 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
             except (TypeError, ValueError):
                 existing_z_int = 0
             data["heartbeat_zombie_thread_count"] = max(existing_z_int, zombie_count)
+        # Loop 2 I3: surface the swallowed-observability counter so
+        # operators can see whether de-duped breadcrumbs masked recurrent
+        # silent failures during the run.
+        if _observability_swallowed_count > 0:
+            existing_obs = data.get("heartbeat_observability_swallowed", 0)
+            try:
+                existing_obs_int = int(existing_obs)
+            except (TypeError, ValueError):
+                existing_obs_int = 0
+            data["heartbeat_observability_swallowed"] = max(
+                existing_obs_int, _observability_swallowed_count
+            )
         # Atomic rename (preserve existing _update_progress mechanism).
         tmp_path = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
         try:
