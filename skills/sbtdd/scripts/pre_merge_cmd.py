@@ -91,22 +91,28 @@ def _wrap_with_heartbeat_if_auto(
         import auto_cmd as _auto
 
         current = get_current_progress()
-        if current.phase != 0:
-            # auto-mode active; wrap with heartbeat emitter.
-            _auto._set_progress(
-                iter_num=iter_num or current.iter_num,
-                phase=phase,
-                task_index=current.task_index,
-                task_total=current.task_total,
-                dispatch_label=dispatch_label,
-            )
-            result: _T = _auto._dispatch_with_heartbeat(invoke=invoke)
-            return result
-    except Exception:  # noqa: BLE001
-        # Defensive: any failure to import / introspect collapses to
-        # the direct call -- the heartbeat is observability, NEVER a
-        # blocker for the actual dispatch (INV-32 spirit).
-        pass
+        is_auto_mode = current.phase != 0
+    except (AttributeError, ImportError, RuntimeError, LookupError):
+        # Per Loop 2 iter 4 W4 fix (caspar): narrow except to introspection
+        # failures only. AttributeError covers None / duck-typing misses,
+        # ImportError covers missing optional deps, RuntimeError covers
+        # heartbeat-state breakage, LookupError covers ContextVar.get()
+        # without a default. ValueError (the fail-loud signal from
+        # ``_dispatch_with_heartbeat`` when ``dispatch_label`` is None)
+        # MUST propagate so the operator catches the misuse rather than
+        # silently degrading to a direct call.
+        is_auto_mode = False
+    if is_auto_mode:
+        # auto-mode active; wrap with heartbeat emitter.
+        _auto._set_progress(
+            iter_num=iter_num or current.iter_num,
+            phase=phase,
+            task_index=current.task_index,
+            task_total=current.task_total,
+            dispatch_label=dispatch_label,
+        )
+        result: _T = _auto._dispatch_with_heartbeat(invoke=invoke)
+        return result
     return invoke()
 
 

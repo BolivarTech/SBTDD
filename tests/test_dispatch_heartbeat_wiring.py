@@ -315,3 +315,60 @@ def test_site10_dispatch_completion_clears_label_via_set_progress_none(monkeypat
     # contract: dispatch_label=None -> started_at=None).
     assert get_current_progress().started_at is None
     reset_current_progress()
+
+
+# v1.0.0 S1-16 W4: narrow except in _wrap_with_heartbeat_if_auto.
+def test_w4_wrap_propagates_valueerror_from_dispatch_with_heartbeat(monkeypatch):
+    """W4 (caspar iter 4): ValueError from _dispatch_with_heartbeat MUST propagate.
+
+    Pre-fix: bare-except swallowed ValueError, neutralizing the fail-loud
+    contract. Post-fix: only AttributeError/ImportError/RuntimeError/
+    LookupError are swallowed (introspection failures); ValueError
+    propagates so callers catch the misuse.
+    """
+    import pytest
+    from heartbeat import set_current_progress, reset_current_progress
+    from models import ProgressContext
+
+    reset_current_progress()
+    set_current_progress(ProgressContext(phase=2, dispatch_label="test"))
+    try:
+        # Replace the real dispatch helper with one that raises ValueError.
+        def fail_loud(**_kw):
+            raise ValueError("missing dispatch_label")
+
+        monkeypatch.setattr(auto_cmd, "_dispatch_with_heartbeat", fail_loud)
+        with pytest.raises(ValueError, match="missing dispatch_label"):
+            pre_merge_cmd._wrap_with_heartbeat_if_auto(
+                invoke=lambda: None,
+                iter_num=1,
+                phase=2,
+                dispatch_label="test",
+            )
+    finally:
+        reset_current_progress()
+
+
+def test_w4_wrap_swallows_attributeerror_and_falls_back(monkeypatch):
+    """W4: AttributeError on heartbeat introspection collapses to direct call."""
+    from heartbeat import reset_current_progress
+
+    reset_current_progress()
+
+    # Force AttributeError when reading current.phase by replacing
+    # get_current_progress to raise.
+    import heartbeat
+
+    def boom() -> None:
+        raise AttributeError("simulated introspection break")
+
+    monkeypatch.setattr(heartbeat, "get_current_progress", boom)
+    called: list[bool] = []
+    pre_merge_cmd._wrap_with_heartbeat_if_auto(
+        invoke=lambda: called.append(True),
+        iter_num=1,
+        phase=2,
+        dispatch_label="test",
+    )
+    assert called == [True]  # direct call fired despite introspection failure
+    reset_current_progress()
