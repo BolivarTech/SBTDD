@@ -2260,6 +2260,24 @@ class _ShadowCfg:
         self.__dict__.update(overrides)
 
 
+def _phase4_pre_merge_audit_dir(root: Path) -> Path:
+    """Return ``.claude/magi-cross-check/`` audit directory under ``root``.
+
+    Per spec sec.2.1 Feature G + plan task S1-6: auto-mode pre-merge
+    passes this directory to ``pre_merge_cmd._loop2_with_cross_check`` so
+    cross-check audit artifacts land under a stable, gitignored location
+    (``.claude/`` is already in ``.gitignore`` per CLAUDE.local.md §1).
+
+    Args:
+        root: Project root directory.
+
+    Returns:
+        ``root / ".claude" / "magi-cross-check"``. Caller (or
+        ``_loop2_cross_check``) creates the directory on first write.
+    """
+    return root / ".claude" / "magi-cross-check"
+
+
 def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     """Run Phase 3 -- pre-merge Loop 1 + Loop 2 with elevated MAGI budget.
 

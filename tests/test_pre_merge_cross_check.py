@@ -479,6 +479,17 @@ def test_g4_breadcrumb_emitted_when_cross_check_disabled(monkeypatch, capsys, tm
     _reset_cross_check_breadcrumb_for_tests()
 
 
+def test_s1_6_auto_phase4_passes_audit_dir_to_cross_check(tmp_path, monkeypatch):
+    """S1-6: auto_cmd phase 4 passes .claude/magi-cross-check/ as audit_dir."""
+    from auto_cmd import _phase4_pre_merge_audit_dir
+
+    root = tmp_path
+    (root / ".claude").mkdir()
+
+    audit_dir = _phase4_pre_merge_audit_dir(root)
+    assert audit_dir == root / ".claude" / "magi-cross-check"
+
+
 def test_w4_normalize_strips_cross_check_annotation_fields():
     """W4 (caspar iter 4): annotation fields stripped before carry-forward."""
     from pre_merge_cmd import _normalize_findings_for_carry_forward
