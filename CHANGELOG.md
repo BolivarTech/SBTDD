@@ -24,16 +24,21 @@ every post-v0.1 release.
   piping, `--interval N` override (validated >= 0.1s). 5x retry with
   exponential backoff on JSON parse contention; slow-poll fallback after 3
   consecutive parse failures (idle auto-runs do NOT trigger slow-poll).
-- **Per-stream timeout (J3)** -- `subprocess_utils.run_streamed_with_timeout`
-  kills subprocess if all open streams silent for
+- **Per-stream timeout helper (J3, opt-in)** --
+  `subprocess_utils.run_streamed_with_timeout` ships as an opt-in helper
+  with binary-mode pipes + `os.read` + incremental UTF-8 decoder (POSIX)
+  and `threading.Thread` + `queue.Queue` reader fallback (Windows). Kills
+  subprocess if all open streams silent for
   `auto_per_stream_timeout_seconds` (default 900s).
   `auto_no_timeout_dispatch_labels` allowlist exempts MAGI dispatches by
-  default (`["magi-*"]`). Bare `*` rejected at config load.
-- **Origin disambiguation (J7)** -- pump prefixes `[stdout]` / `[stderr]`
-  when both streams emit chunks within a temporal window (W3 default 100ms,
-  raised from iter-1 50ms baseline for OS scheduling jitter tolerance).
-  Forward-only semantics (no retroactive prefix). Gated behind
-  `auto_origin_disambiguation` (default ON).
+  default (`["magi-*"]`). Bare `*` rejected at config load. Production
+  wiring of existing `run_with_timeout` callers is **deferred to v0.5.1**.
+- **Origin disambiguation helper (J7, opt-in)** -- same helper provides
+  100ms temporal-window prefix logic (W3 default 100ms, raised from
+  iter-1 50ms baseline for OS scheduling jitter tolerance) gated behind
+  `auto_origin_disambiguation` (default `True`). Forward-only semantics
+  (no retroactive prefix). Tests cover O1-O4 scenarios; production wiring
+  of existing `run_with_timeout` callers is **deferred to v0.5.1**.
 - **C1 + C2 streaming pump fold-ins** (Checkpoint 2 iter 4): binary-mode
   pipes + `os.read` + incremental UTF-8 decoder (POSIX) and
   `threading.Thread` + `queue.Queue` reader fallback (Windows). Multi-byte
@@ -86,6 +91,15 @@ every post-v0.1 release.
 - W7 (Checkpoint 2 iter 4 balthasar): threading correctness in heartbeat
   + Windows reader fallback is treated as accepted-risk per the
   single-thread `auto_cmd` invariant + lock-protected singleton.
+
+### Deferred (rolled to v0.5.1)
+
+- J3 + J7 production wiring: route the 33 existing `run_with_timeout`
+  callers in `auto_cmd.py` / `pre_merge_cmd.py` through
+  `subprocess_utils.run_streamed_with_timeout`. The helper itself
+  ships in v0.5.0 as opt-in; tests cover the helper's behavior, but no
+  v0.5.0 production caller invokes it. Deferral chosen to keep the
+  pre-merge surface change minimal during v0.5.0 finalisation.
 
 ### Deferred (rolled to v1.0.0)
 
