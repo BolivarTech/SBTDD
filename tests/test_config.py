@@ -350,3 +350,60 @@ worktree_policy: optional
     from errors import ValidationError
     with pytest.raises(ValidationError, match="INV-34 clause 4"):
         load_plugin_local(config_path)
+
+
+def test_allowlist_bare_wildcard_rejected(tmp_path):
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+"""
+    from config import load_plugin_local
+    from errors import ValidationError
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["*"]\n---\n')
+    with pytest.raises(ValidationError, match=r"bare '\*' rejected"):
+        load_plugin_local(config_path)
+
+
+def test_allowlist_empty_string_rejected(tmp_path):
+    """Empty string in allowlist would also defeat timeout — rejected."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+"""
+    from config import load_plugin_local
+    from errors import ValidationError
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["", "magi-*"]\n---\n')
+    with pytest.raises(ValidationError, match=r"bare '\*' rejected"):
+        load_plugin_local(config_path)

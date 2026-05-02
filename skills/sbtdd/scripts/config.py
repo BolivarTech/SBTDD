@@ -223,6 +223,17 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
             f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
             f"(caspar opus runs observed empirically up to 10min); got {timeout}"
         )
+    # W11 (sec.11.1): bare '*' or empty string would defeat the timeout
+    # entirely (every label matches). Reject explicitly so misconfiguration
+    # is loud at config load rather than silently suppressing all timeouts.
+    labels = data["auto_no_timeout_dispatch_labels"]
+    if isinstance(labels, (list, tuple)):
+        for label in labels:
+            if label == "*" or label == "":
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: bare '*' rejected "
+                    f"(would defeat timeout); use specific glob like 'magi-*'"
+                )
     try:
         return PluginConfig(**data)
     except TypeError as exc:
