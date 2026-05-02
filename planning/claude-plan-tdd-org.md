@@ -873,6 +873,24 @@ def _dispatch_requesting_code_review(*, diff: str, prompt: str, **kwargs: Any) -
     `_build_cross_check_prompt` contract.
 
     Tests monkeypatch this function (see test_pre_merge_cross_check).
+
+    Per melchior Loop 2 iter 3 WARNING fix: distinguish JSON-parse-failure
+    from full-dispatch-failure for audit visibility. Two distinct failure
+    modes surface separately:
+
+    - dispatch itself fails (subprocess error / timeout) -> caller in
+      `_loop2_cross_check` catches the exception and writes
+      ``cross_check_failed: true`` to the audit artifact with reason.
+    - dispatch succeeds but output is malformed JSON -> we return an
+      empty-decisions dict with the diagnostic flag
+      ``_dispatch_failure: "json_parse_error"`` and ``_failure_reason``
+      explaining the parse error. Audit writer surfaces this as a
+      separate field (NOT under ``cross_check_failed``) so post-mortem
+      can tell the two failure modes apart.
+
+    Either failure mode degrades to "no findings filtered" (original MAGI
+    findings flow through to INV-29 routing unchanged), but operators
+    have the audit signal to investigate.
     """
     raw_output = superpowers_dispatch.invoke_requesting_code_review(
         prompt=prompt, **kwargs,
@@ -880,11 +898,53 @@ def _dispatch_requesting_code_review(*, diff: str, prompt: str, **kwargs: Any) -
     output_text = raw_output.get("output", "{}")
     try:
         return json.loads(output_text)
-    except json.JSONDecodeError:
-        # Defensive: if review output isn't structured JSON, return empty decisions
-        # (G5 graceful failure path will then return original findings unchanged).
-        return {"decisions": []}
+    except json.JSONDecodeError as exc:
+        # Per W (melchior iter 3): make the JSON-parse-failure mode visible
+        # to operators rather than silently swallowing it. Stderr breadcrumb
+        # + audit-only diagnostic flag (separate from cross_check_failed
+        # which is reserved for full-dispatch-failure).
+        sys.stderr.write(
+            f"[sbtdd magi-cross-check] /requesting-code-review returned "
+            f"malformed JSON (meta-review skipped, findings unchanged): "
+            f"{exc}\n"
+        )
+        sys.stderr.flush()
+        return {
+            "decisions": [],
+            "_dispatch_failure": "json_parse_error",
+            "_failure_reason": str(exc),
+        }
 ```
+
+**Audit writer integration note (melchior W iter 3):** the
+``_loop2_cross_check`` audit serializer (added in S1-3 Step 3) MUST
+inspect the dispatch result for ``_dispatch_failure`` BEFORE invoking
+``_write_cross_check_audit`` and surface it as a top-level
+``dispatch_failure`` field in the audit JSON. The existing
+``cross_check_failed`` field remains reserved for full-dispatch-failure
+(subprocess error / unhandled exception), keeping the two modes
+distinct. Add the following block to ``_loop2_cross_check`` immediately
+after the ``review_output = _dispatch_requesting_code_review(...)``
+call:
+
+```python
+        # Per melchior W iter 3: surface JSON-parse-failure as a distinct
+        # audit field, separate from cross_check_failed (full-dispatch-fail).
+        if review_output.get("_dispatch_failure") == "json_parse_error":
+            _write_cross_check_audit(
+                audit_dir, iteration, original_findings, [],
+                cross_check_failed=False,
+                failure_reason=None,
+                json_parse_failure=review_output.get("_failure_reason"),
+            )
+            return findings  # original findings unchanged
+```
+
+And extend ``_write_cross_check_audit`` with an optional
+``json_parse_failure: str | None = None`` parameter that, when set,
+adds a top-level ``"dispatch_failure": {"kind": "json_parse_error",
+"reason": <str>}`` block to the audit JSON. ``cross_check_failed``
+stays unchanged for the full-failure path.
 
 - [ ] **Step 4: Run + verify pass**
 
