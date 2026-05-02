@@ -681,3 +681,184 @@ def test_set_progress_first_dispatch_from_none_label_refreshes_started_at():
     assert ctx.dispatch_label == "red"
     assert ctx.started_at is not None
     reset_current_progress()
+
+
+def test_update_progress_routes_through_with_file_lock(tmp_path, monkeypatch):
+    """C4 extension Red: ``_update_progress`` MUST call ``_with_file_lock``.
+
+    Pre-fix: only ``_drain_heartbeat_queue_and_persist`` wrapped its
+    read-modify-write in ``_with_file_lock``. ``_update_progress`` did its
+    full RMW without the cross-process advisory lock. CHANGELOG `[0.5.0]`
+    claimed C4 fully shipped; this test pins the contract that the
+    progress writer ALSO routes through ``_with_file_lock`` so the C4
+    claim holds for both writers of ``auto-run.json``.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    call_count = {"n": 0}
+    real_lock = auto_cmd._with_file_lock
+
+    def spy_lock(path, fn):  # type: ignore[no-untyped-def]
+        call_count["n"] += 1
+        return real_lock(path, fn)
+
+    monkeypatch.setattr(auto_cmd, "_with_file_lock", spy_lock)
+    auto_cmd._update_progress(
+        auto_run,
+        phase=2,
+        task_index=1,
+        task_total=10,
+        sub_phase="red",
+    )
+    # _update_progress MUST have invoked _with_file_lock at least once
+    # for its RMW. Pre-fix this assertion fails (call_count == 0).
+    assert call_count["n"] >= 1, (
+        "_update_progress did not route through _with_file_lock; "
+        "C4 claim in CHANGELOG is incomplete"
+    )
+
+
+def test_write_auto_run_audit_routes_through_with_file_lock(tmp_path, monkeypatch):
+    """C4 extension Red: ``_write_auto_run_audit`` MUST call ``_with_file_lock``.
+
+    Counterpart to ``test_update_progress_routes_through_with_file_lock``
+    for the audit writer.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    call_count = {"n": 0}
+    real_lock = auto_cmd._with_file_lock
+
+    def spy_lock(path, fn):  # type: ignore[no-untyped-def]
+        call_count["n"] += 1
+        return real_lock(path, fn)
+
+    monkeypatch.setattr(auto_cmd, "_with_file_lock", spy_lock)
+    audit = auto_cmd.AutoRunAudit(
+        schema_version=auto_cmd._AUTO_RUN_SCHEMA_VERSION,
+        auto_started_at="2026-05-02T00:00:00Z",
+        auto_finished_at=None,
+        status="success",
+        verdict=None,
+        degraded=None,
+        accepted_conditions=0,
+        rejected_conditions=0,
+        tasks_completed=0,
+        error=None,
+    )
+    auto_cmd._write_auto_run_audit(auto_run, audit)
+    assert call_count["n"] >= 1, (
+        "_write_auto_run_audit did not route through _with_file_lock; "
+        "C4 claim in CHANGELOG is incomplete"
+    )
+
+
+def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
+    """C4 extension: ``_update_progress`` writes serialize through ``_with_file_lock``.
+
+    Pre-fix: ``_with_file_lock`` only wrapped ``_drain_heartbeat_queue_and_persist``.
+    ``_update_progress`` performed read-modify-write WITHOUT the lock, so a
+    concurrent reader / second writer could interleave the read with another
+    writer's ``os.replace`` and produce a torn JSON document or lost update.
+
+    Post-fix: ``_update_progress`` wraps the full read-write-os.replace cycle
+    in ``_with_file_lock``. This test spawns N=10 background threads each
+    calling ``_update_progress`` with a distinct ``sub_phase`` label and
+    asserts the final on-disk JSON parses cleanly (no torn document).
+    True cross-process serialisation is hard to test from a single test
+    process; this test uses threads as the closest available proxy and
+    relies on the lock-acquisition path being executed even though the
+    advisory POSIX/Windows lock is per-process.
+    """
+    import sys
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    errors: list[BaseException] = []
+
+    def writer(label: str) -> None:
+        try:
+            auto_cmd._update_progress(
+                auto_run,
+                phase=2,
+                task_index=1,
+                task_total=10,
+                sub_phase=label,
+            )
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [
+        threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+
+    # Errors raised in writer threads must surface (not silently lost).
+    # _assert_main_thread tripping is acceptable on non-main threads when
+    # _serialize_progress fires; that is the W8 single-writer guard and
+    # is wrapped in try/except in _update_progress itself, so writers
+    # should NOT raise. _update_progress's own write path is what we
+    # exercise.
+    if errors:
+        # Re-raise the first error so the test failure is informative.
+        raise errors[0]
+
+    # Final on-disk JSON must parse cleanly (no torn write).
+    data = json.loads(auto_run.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    assert "progress" in data
+    # Some writer's label survived (last-writer-wins is acceptable; what's
+    # NOT acceptable is a torn JSON or a missing progress key).
+    assert data["progress"]["sub_phase"].startswith("label-")
+    _ = sys  # silence unused-import lint
+
+
+def test_concurrent_write_audit_writers_serialize_via_file_lock(tmp_path):
+    """C4 extension: ``_write_auto_run_audit`` writes serialize through ``_with_file_lock``.
+
+    Same rationale as ``test_concurrent_update_progress_writers_serialize_via_file_lock``
+    but for ``_write_auto_run_audit``. Both helpers must hold the lock so
+    concurrent writers do not corrupt ``auto-run.json``.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    errors: list[BaseException] = []
+
+    def writer(idx: int) -> None:
+        try:
+            audit = auto_cmd.AutoRunAudit(
+                schema_version=auto_cmd._AUTO_RUN_SCHEMA_VERSION,
+                auto_started_at="2026-05-02T00:00:00Z",
+                auto_finished_at=None,
+                status="success",
+                verdict=None,
+                degraded=None,
+                accepted_conditions=0,
+                rejected_conditions=0,
+                tasks_completed=idx,
+                error=None,
+            )
+            auto_cmd._write_auto_run_audit(auto_run, audit)
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+
+    if errors:
+        raise errors[0]
+
+    # Final on-disk JSON must parse cleanly.
+    data = json.loads(auto_run.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    assert "tasks_completed" in data
+    assert isinstance(data["tasks_completed"], int)
