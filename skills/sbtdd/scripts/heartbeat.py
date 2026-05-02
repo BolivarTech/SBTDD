@@ -119,14 +119,28 @@ class HeartbeatEmitter:
                 break
 
     def _emit_tick(self) -> None:
-        """Format + write a single tick to stderr (best-effort)."""
+        """Format + write a single tick to stderr (best-effort).
+
+        On stderr write failure (``OSError``, e.g. broken pipe):
+        - First failure: emit one warning breadcrumb (best-effort).
+        - Subsequent failures: silent.
+        """
         ctx = get_current_progress()
         line = self._format_tick(ctx)
         try:
             sys.stderr.write(line + "\n")
             sys.stderr.flush()
-        except OSError:
+        except OSError as exc:
             self._failed_writes += 1
+            if self._failed_writes == 1:
+                try:
+                    sys.stderr.write(
+                        f"[sbtdd auto] heartbeat write failed "
+                        f"(will continue silently): {exc}\n"
+                    )
+                    sys.stderr.flush()
+                except OSError:
+                    pass
 
     @staticmethod
     def _format_elapsed(seconds: float) -> str:

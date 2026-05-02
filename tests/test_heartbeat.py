@@ -144,3 +144,25 @@ def test_format_tick_no_started_at_omits_elapsed():
     assert line.startswith("[sbtdd auto] tick:")
     assert "phase 0" in line
     assert "elapsed" not in line
+
+
+def test_heartbeat_first_failure_emits_breadcrumb_then_silent(monkeypatch):
+    write_calls = {"count": 0}
+    real_write = sys.stderr.write
+
+    def failing_write(s):
+        write_calls["count"] += 1
+        if write_calls["count"] == 1 or write_calls["count"] >= 3:
+            raise OSError("broken pipe")
+        return real_write(s)
+
+    monkeypatch.setattr(sys.stderr, "write", failing_write)
+    emitter = HeartbeatEmitter(label="x", interval_seconds=0.05)
+    with emitter:
+        time.sleep(0.18)
+    assert emitter._failed_writes >= 1
+
+
+def test_heartbeat_failed_writes_counter_starts_zero():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    assert emitter._failed_writes == 0
