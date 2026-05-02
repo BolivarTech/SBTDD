@@ -205,7 +205,31 @@ auto_no_timeout_dispatch_labels: ["magi-*", "long-build-*"]
     assert cfg.auto_no_timeout_dispatch_labels == ("magi-*", "long-build-*")
 
 
-def test_inv34_clause_1_ratio_violation(tmp_path):
+def test_inv34_clause_1_subsumed_under_clauses_2_4(tmp_path):
+    """Loop 2 WARNING #1/#7: clause 1 is mathematically subsumed.
+
+    Pre-fix this test exercised a fixture (timeout=50, interval=15) that was
+    intended to violate clause 1 in isolation. After the spec PINNED order
+    fix (clauses checked 4 -> 2 -> 3 -> 1), the same fixture fires clause 4
+    first because 50 < 600. Clause 1 cannot be violated alone when clauses
+    2 + 4 are satisfied: ``5 * interval <= 5 * 60 = 300 <= 600 <= timeout``,
+    so any timeout that satisfies clause 4 (>= 600) and any interval that
+    satisfies clause 2 (<= 60) automatically satisfies clause 1.
+
+    This test documents that subsumption explicitly via two checks:
+
+    1. The original ``timeout=50, interval=15`` fixture now reports clause 4
+       (the structurally-first failing predicate under the spec PINNED order),
+       confirming clause 1 cannot fire alone.
+    2. A boundary fixture (``timeout=600, interval=60``) satisfies clauses
+       2-4 simultaneously and consequently clause 1 is also satisfied; the
+       config loads cleanly. Removing clause 1 from the implementation
+       would NOT cause this fixture to fail -- but the implementation
+       retains clause 1 as defense-in-depth against future weakening of
+       clauses 2 or 4.
+
+    See ``docs/v0.5.0-config-matrix.md`` `W1` section for the worked example.
+    """
     base = """---
 stack: python
 author: Julian Bolivar
@@ -230,8 +254,20 @@ worktree_policy: optional
     from config import load_plugin_local
     from errors import ValidationError
 
-    with pytest.raises(ValidationError, match="INV-34 clause 1"):
+    # Spec PINNED order is 4 -> 2 -> 3 -> 1; the original clause-1-only
+    # fixture now reports clause 4 (fires first because 50 < 600).
+    with pytest.raises(ValidationError, match="INV-34 clause 4"):
         load_plugin_local(config_path)
+
+    # Boundary fixture: satisfies clauses 2 (60 <= 60), 3 (60 >= 5),
+    # 4 (600 >= 600), and consequently 1 (600 == 5 * 60). Loads cleanly.
+    config_path2 = tmp_path / "p1_boundary.md"
+    config_path2.write_text(
+        base + "auto_per_stream_timeout_seconds: 600\nauto_heartbeat_interval_seconds: 60\n---\n"
+    )
+    cfg = load_plugin_local(config_path2)
+    assert cfg.auto_per_stream_timeout_seconds == 600
+    assert cfg.auto_heartbeat_interval_seconds == 60
 
 
 def test_inv34_clause_2_ceiling_violation(tmp_path):
