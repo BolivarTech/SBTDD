@@ -769,6 +769,35 @@ Cap=3 per CHANGELOG `[0.5.0]` process commitment. Scope-trim is
 default response if doesn't converge in 3 iters; INV-0 override only
 with documented rationale.
 
+#### 7.1.1 Pre-dispatch escape-valve commitment (caspar Loop 2 iter 3 W)
+
+If MAGI Loop 2 (post-impl pre-merge gate) doesn't converge in 3 iters
+on the v1.0.0 cycle, the orchestrator MUST choose ONE of the following
+options. The choice is COMMITTED PRE-DISPATCH (i.e., before the
+parallel subagent dispatch starts) so the decision doesn't get made
+under end-of-cycle fatigue at iter N:
+
+- **(A) Scope-trim Pillar 2 to v1.0.1**: defer Feature I
+  schema_version + Group B options 2+5 to v1.0.1. Ship v1.0.0 with
+  Pillar 1 (Feature G cross-check + J2 ResolvedModels) + v0.5.1
+  fold-in (J3+J7 wiring) only. Honors CHANGELOG `[0.5.0]` process
+  commitment that scope-trim is the default response when MAGI
+  doesn't converge.
+- **(B) INV-0 override**: accept verdict `GO_WITH_CAVEATS` with
+  documented rationale (cite which conditions are deferred to v1.x
+  backlog, why architecture is sound despite caveats). Requires a
+  precedent of multi-iter spec/plan + Loop 2 acceptance and a
+  consistent 2-APPROVE-1-CONDITIONAL signal pattern.
+
+**Default for v1.0.0 = (A)** per CHANGELOG `[0.5.0]` Process
+commitment. The orchestrator records the pre-dispatch choice in the
+v1.0.0 cycle handoff (memory + CHANGELOG draft); changing it
+mid-cycle requires explicit per-instance user authorization (the
+manual-synthesis acceptance precedent applies). The v0.4.0 + v0.5.0
+INV-0 override authorizations were per-iter, not blanket; the
+pre-dispatch commitment is intended to make scope-trim the path of
+least resistance when iter 3 ends without convergence.
+
 ### 7.2 Loop 1 (`/requesting-code-review`)
 
 Cap=10. Clean-to-go criterion (zero CRITICAL + zero high-impact WARNING).

@@ -44,6 +44,25 @@ If NF-A is blown by > 10% (>165s) at integration, the orchestrator
 must scope-trim or apply the `@pytest.mark.slow` marker to the
 heaviest tests before merge — do not bump NF-A again silently.
 
+### Pre-dispatch escape-valve commitment (caspar Loop 2 iter 3 W)
+
+Per spec sec.7.1.1, the orchestrator records the pre-dispatch escape
+valve choice for the v1.0.0 cycle BEFORE dispatching parallel
+subagents (this avoids fatigue-driven decisions at iter 3 of Loop 2).
+Two options:
+
+- **(A) Scope-trim Pillar 2 to v1.0.1** if MAGI Loop 2 doesn't
+  converge in 3 iters: defer Feature I + Group B options 2+5 to
+  v1.0.1; ship v1.0.0 with Pillar 1 + v0.5.1 fold-in only. **DEFAULT.**
+- **(B) INV-0 override**: accept `GO_WITH_CAVEATS` with documented
+  rationale; requires precedent + consistent verdict pattern.
+
+Subagents do not make this choice; they implement the full bundle as
+planned. The orchestrator references the committed choice when Loop
+2 iter 3 verdict comes in. The choice is recorded in the v1.0.0
+cycle CHANGELOG draft + memory handoff. **Default for v1.0.0 = (A)**
+per CHANGELOG `[0.5.0]` Process commitment.
+
 ### ResolvedModels schema (spec sec.5.1)
 
 ```python
