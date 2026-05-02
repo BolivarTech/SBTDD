@@ -40,6 +40,24 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Read-only status report of active SBTDD session.",
     )
     p.add_argument("--project-root", type=Path, default=Path.cwd())
+    # v0.5.0: --watch companion mode + interval/json flags (sec.2.2 W1-W6).
+    p.add_argument(
+        "--watch",
+        action="store_true",
+        help="Live poll of .claude/auto-run.json (W1-W6).",
+    )
+    p.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Poll interval in seconds (>= 0.1). Only meaningful with --watch.",
+    )
+    p.add_argument(
+        "--json",
+        dest="json_mode",
+        action="store_true",
+        help="Emit JSON per progress change (only with --watch).",
+    )
     return p
 
 
@@ -80,6 +98,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
+    # v0.5.0: --watch dispatches to the live-poll loop and bypasses the
+    # one-shot report. The watch loop targets .claude/auto-run.json
+    # rather than session-state.json (auto runs vs interactive runs).
+    # Look up watch_main on the live module so monkeypatched stubs
+    # (in run_sbtdd test harness) take effect.
+    if getattr(ns, "watch", False):
+        import status_cmd as _self
+
+        return _self.watch_main(
+            root / ".claude" / "auto-run.json",
+            interval=ns.interval,
+            json_mode=ns.json_mode,
+        )
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
         sys.stdout.write(
