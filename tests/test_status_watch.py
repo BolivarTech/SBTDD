@@ -108,3 +108,35 @@ def test_w4_three_consecutive_parse_failures_triggers_slow_poll():
     assert state.current_interval == 2.0
     state.record_parse_success()
     assert state.current_interval == 1.0
+
+
+def test_w2_json_mode_emits_progress(tmp_path, capsys):
+    """W2: JSON mode emits one timestamped JSON line per progress change."""
+    from status_cmd import _watch_render_one
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"progress": {"phase": 2}}), encoding="utf-8"
+    )
+    _watch_render_one(auto_run_path, json_mode=True, last_progress=None)
+    captured = capsys.readouterr()
+    line = json.loads(captured.out.strip())
+    assert "timestamp" in line
+    assert line["progress"]["phase"] == 2
+
+
+def test_w5_ctrl_c_returns_130(tmp_path, monkeypatch):
+    """W5: KeyboardInterrupt mid-watch returns exit 130 (SIGINT convention)."""
+    from status_cmd import watch_main
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text(
+        json.dumps({"progress": {"phase": 1}}), encoding="utf-8"
+    )
+
+    def raise_kbi(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("status_cmd._watch_render_one", raise_kbi)
+    rc = watch_main(auto_run_path, interval=1.0, json_mode=False)
+    assert rc == 130
