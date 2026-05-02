@@ -58,3 +58,24 @@ def test_migrate_to_does_not_mutate_input_dict():
     # The caller's original dict must not have schema_version implanted
     # (defensive contract: callers may rely on input immutability).
     assert v1_data == snapshot_before
+
+
+def test_i2_migrate_to_no_op_returns_distinct_object(tmp_path):
+    """I2 (v1.0.0 O-2 Loop 1 review): no-op path returns a distinct dict object.
+
+    When ``target_version == current``, the migration loop never iterates;
+    callers must not be able to mutate the returned dict and silently mutate
+    the caller's input via the same reference.
+    """
+    from migrate_plugin_local import migrate_to
+
+    v2_data = {"stack": "python", "schema_version": 2}
+    result = migrate_to(target_version=2, data=v2_data)
+    # Logical equality preserved.
+    assert result == v2_data
+    # Defensive contract: distinct object so caller mutation of result
+    # does not leak into the caller's input dict.
+    assert result is not v2_data
+    # Verify isolation by mutating the returned dict.
+    result["stack"] = "rust"
+    assert v2_data["stack"] == "python"
