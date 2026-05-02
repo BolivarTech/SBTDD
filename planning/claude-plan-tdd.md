@@ -3824,7 +3824,7 @@ git commit -m "feat: spec_snapshot compare + persist + load helpers (H2-2/H2-4)"
 - Modify: `skills/sbtdd/scripts/superpowers_dispatch.py`
 - Modify: `tests/test_superpowers_dispatch.py`
 
-- [ ] **Step 1: Write failing test for prompt extension**
+- [x] **Step 1: Write failing test for prompt extension**
 
 Append to `tests/test_superpowers_dispatch.py`:
 
@@ -3846,9 +3846,9 @@ def test_h5_1_invoke_writing_plans_prompt_includes_scenario_stub_directive(monke
     assert "pytest.skip" in captured["prompt"]
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Add scenario-stub directive to invoke_writing_plans prompt**
+- [x] **Step 3: Add scenario-stub directive to invoke_writing_plans prompt**
 
 In `superpowers_dispatch.py`:
 
@@ -3880,7 +3880,7 @@ def invoke_writing_plans(*, spec_path: str, **kwargs: Any) -> dict[str, Any]:
     return _invoke_skill(prompt=extended_prompt, skill="writing-plans", **kwargs)
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_superpowers_dispatch.py -k "writing_plans" -v
