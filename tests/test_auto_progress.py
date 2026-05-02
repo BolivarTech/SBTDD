@@ -1021,6 +1021,88 @@ def test_concurrent_writers_with_threading_rlock_serialize(tmp_path):
     assert data["progress"]["sub_phase"].startswith("label-")
 
 
+def test_drain_decode_error_breadcrumb_is_dedup(tmp_path, capsys):
+    """Loop 2 W14: drain decode-error stderr breadcrumb is de-duped.
+
+    Pre-fix: every JSON decode failure in ``_drain_heartbeat_queue_and_persist``
+    emitted ``[sbtdd] warning: failed to read auto-run.json...`` to stderr.
+    A persistently corrupt file (e.g. truncated to zero bytes mid-read)
+    would spam stderr on every drain. Post-fix: emit the breadcrumb only
+    on the first decode failure; subsequent failures are silent until
+    the test-only reset.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    # Write a CORRUPT (non-JSON) payload so the drain's read trips the
+    # JSONDecodeError branch.
+    auto_run_path.write_text("not json{{{", encoding="utf-8")
+    # Reset the dedup flag so test order doesn't matter.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+
+    # Drain leftover items.
+    while not auto_cmd._heartbeat_failures_q.empty():
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+
+    # Two drains with corrupt file -> only one breadcrumb.
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 5))
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 6))
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+    captured = capsys.readouterr()
+    breadcrumbs = [
+        line
+        for line in captured.err.splitlines()
+        if "failed to read auto-run.json for heartbeat" in line
+    ]
+    assert len(breadcrumbs) == 1, (
+        f"expected exactly 1 dedup'd breadcrumb across 2 drains with "
+        f"corrupt file, got {len(breadcrumbs)}: {breadcrumbs}"
+    )
+
+
+def test_update_progress_asserts_main_thread_at_entry(tmp_path):
+    """Loop 2 W13: ``_update_progress`` enforces single-writer at entry.
+
+    Pre-fix: ``_assert_main_thread`` was only invoked inside
+    ``_serialize_progress`` (which runs after the read step has already
+    happened). A misbehaved caller invoking ``_update_progress`` from a
+    non-main thread would do the read + lock acquisition before the
+    assert tripped -- wasting work and creating a window where the
+    intra-process lock was held by the wrong thread.
+
+    Post-fix: ``_update_progress`` calls ``_assert_main_thread`` at
+    entry, so the single-writer rule (sec.3) trips immediately on
+    misuse rather than after partial work.
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    captured: list[BaseException] = []
+
+    def call_from_worker() -> None:
+        try:
+            auto_cmd._update_progress(
+                auto_run,
+                phase=2,
+                task_index=1,
+                task_total=10,
+                sub_phase="green",
+            )
+        except BaseException as e:  # noqa: BLE001
+            captured.append(e)
+
+    t = threading.Thread(target=call_from_worker)
+    t.start()
+    t.join(timeout=3.0)
+    assert captured, "expected RuntimeError from non-main thread call"
+    assert isinstance(captured[0], RuntimeError), (
+        f"expected RuntimeError (single-writer guard), got {type(captured[0]).__name__}"
+    )
+    assert "main thread" in str(captured[0]).lower() or "single-writer" in str(captured[0]).lower()
+
+
 def test_drain_separates_failed_writes_from_zombie_via_tagged_tuple(tmp_path):
     """Loop 2 W2+W7: tagged-tuple queue protocol.
 

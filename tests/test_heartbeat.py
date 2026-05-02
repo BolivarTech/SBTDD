@@ -331,3 +331,55 @@ def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
         ), f"expected ('zombie', >=1) tuple in queue, got {drained}"
     finally:
         HE._zombie_thread_count = original
+
+
+def test_zombie_fatal_breadcrumb_is_dedup(capsys):
+    """Loop 2 W11: zombie FATAL breadcrumb on threshold breach is de-duped.
+
+    Pre-fix: every ``__exit__`` invocation that found
+    ``_zombie_thread_count >= _max_zombie_threads`` emitted the FATAL
+    breadcrumb. Repeated zombie events past the threshold spammed
+    fd=2. Post-fix: emit the FATAL breadcrumb only on the first
+    threshold breach in the process lifetime; subsequent breaches are
+    silent until a test-only reset.
+    """
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        HE._zombie_thread_count = HE._max_zombie_threads - 1
+        from heartbeat import _reset_zombie_breadcrumb_emitted_for_tests
+
+        _reset_zombie_breadcrumb_emitted_for_tests()
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        # First exit: breadcrumb emitted.
+        e1 = HeartbeatEmitter(label="z1", interval_seconds=10.0)
+        e1._stop_event = __import__("threading").Event()
+        e1._thread = FakeBlockedThread()  # type: ignore[assignment]
+        e1.__exit__(None, None, None)
+
+        # Second exit: ALSO past threshold. Pre-fix would emit again.
+        e2 = HeartbeatEmitter(label="z2", interval_seconds=10.0)
+        e2._stop_event = __import__("threading").Event()
+        e2._thread = FakeBlockedThread()  # type: ignore[assignment]
+        e2.__exit__(None, None, None)
+
+        captured = capsys.readouterr()
+        fatal_lines = [
+            line
+            for line in captured.err.splitlines()
+            if "FATAL: heartbeat zombie threshold reached" in line
+        ]
+        assert len(fatal_lines) == 1, (
+            f"expected exactly 1 dedup'd FATAL breadcrumb across 2 threshold "
+            f"breaches, got {len(fatal_lines)}: {fatal_lines}"
+        )
+    finally:
+        HE._zombie_thread_count = original
