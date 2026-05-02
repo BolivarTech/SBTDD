@@ -164,13 +164,28 @@ def _set_progress(
 # Module-level queue: heartbeat thread -> main thread (sec.3 single-writer rule).
 # ``maxsize=0`` (UNBOUNDED) is a hard contract per Checkpoint 2 iter 3 melchior
 # CRITICAL #3: a bounded queue + ``queue.Full`` silently loses heartbeat audit
-# data. Memory cost is negligible (single int per push, bounded by failed-write
+# data. Memory cost is negligible (single tuple per push, bounded by failed-write
 # count + N=10 batching).
-_heartbeat_failures_q: "queue.Queue[int]" = queue.Queue(maxsize=0)
+#
+# Loop 2 W2+W7 fix: tagged-tuple protocol replaces ``+1000`` sentinel offset.
+# Items are ``("failed_writes", n)`` or ``("zombie", n)`` tuples. The drain
+# dispatches by tag rather than by numeric range, eliminating two issues:
+#
+# - W2: ``+1000`` collides with legitimate ``failed_writes`` >= 1000 from
+#   long-lived emitters (rare but pathological), causing mis-classification.
+# - W7: multiplexing two semantically distinct counters via numeric offset
+#   is hard to read and maintain; tag dispatch is explicit.
+#
+# Backward compat: plain ``int`` items (legacy producers, third-party tests)
+# are still accepted and treated as ``("failed_writes", n)`` -- same as the
+# original drain behaviour for values < 1000.
+_HeartbeatQueueItem = "tuple[str, int] | int"
+_heartbeat_failures_q: "queue.Queue[tuple[str, int] | int]" = queue.Queue(maxsize=0)
 
 
-# C3 sentinel offset (mirrors HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET).
-# Values >= this offset signal "zombie alert" rather than failed-write count.
+# Legacy ``+1000`` sentinel offset, retained for backward compat in the drain
+# helper: producers emitting plain int >= 1000 are interpreted as zombie
+# alerts (pre-W2/W7 protocol). New producers emit ``("zombie", n)`` tuples.
 _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET: int = 1000
 
 
@@ -430,16 +445,17 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
     readers (e.g. ``status --watch``) rely on atomic-rename semantics
     rather than the lock.
 
-    Queue values >= ``_HEARTBEAT_ZOMBIE_SENTINEL_OFFSET`` are interpreted
-    as zombie sentinels (per C3 fold-in) and persisted in a distinct
-    ``heartbeat_zombie_thread_count`` field; plain values are accumulated
-    into ``heartbeat_failed_writes_total`` via ``max()``.
+    Loop 2 W2+W7 fix: items are ``("failed_writes", n)`` or
+    ``("zombie", n)`` tuples; drain dispatches by tag. Backward compat:
+    plain ``int`` items are interpreted as ``("zombie", n - 1000)`` if
+    ``n >= 1000`` else ``("failed_writes", n)`` -- preserving the
+    pre-fix ``+1000`` sentinel scheme for any leftover producers.
 
     Args:
         auto_run_path: Path to ``.claude/auto-run.json``.
     """
     _assert_main_thread()
-    drained: list[int] = []
+    drained: list[tuple[str, int] | int] = []
     while True:
         try:
             drained.append(_heartbeat_failures_q.get_nowait())
@@ -448,8 +464,23 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
     if not drained:
         return
 
-    plain_counters = [v for v in drained if v < _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET]
-    zombie_signals = [v for v in drained if v >= _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET]
+    failed_writes_values: list[int] = []
+    zombie_values: list[int] = []
+    for item in drained:
+        if isinstance(item, tuple) and len(item) == 2:
+            tag, count = item
+            if tag == "failed_writes":
+                failed_writes_values.append(int(count))
+            elif tag == "zombie":
+                zombie_values.append(int(count))
+            # Unknown tags silently dropped (defensive vs. future
+            # producer bugs; not failing-loud avoids killing the drain).
+        elif isinstance(item, int):
+            # Backward compat with pre-W2/W7 plain-int protocol.
+            if item >= _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET:
+                zombie_values.append(item - _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET)
+            else:
+                failed_writes_values.append(item)
 
     def _do_persist() -> None:
         try:
@@ -464,15 +495,15 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
             return
         if not isinstance(data, dict):
             return
-        if plain_counters:
+        if failed_writes_values:
             existing = data.get("heartbeat_failed_writes_total", 0)
             try:
                 existing_int = int(existing)
             except (TypeError, ValueError):
                 existing_int = 0
-            data["heartbeat_failed_writes_total"] = max(existing_int, *plain_counters)
-        if zombie_signals:
-            zombie_count = max(zombie_signals) - _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET
+            data["heartbeat_failed_writes_total"] = max(existing_int, *failed_writes_values)
+        if zombie_values:
+            zombie_count = max(zombie_values)
             existing_z = data.get("heartbeat_zombie_thread_count", 0)
             try:
                 existing_z_int = int(existing_z)

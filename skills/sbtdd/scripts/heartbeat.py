@@ -82,17 +82,20 @@ class HeartbeatEmitter:
     # after a best-effort fd=2 breadcrumb -- process exit becomes the bound.
     _max_zombie_threads: int = 5
 
-    # C3 sentinel offset persisted via the failures queue: any queued value
-    # >= ``_ZOMBIE_SENTINEL_OFFSET`` indicates "zombie alert" rather than a
-    # plain failed-write counter. Single channel to main thread per
-    # single-writer rule sec.3.
+    # C3 sentinel offset persisted via the failures queue: any queued plain
+    # ``int`` value >= ``_ZOMBIE_SENTINEL_OFFSET`` indicates "zombie alert"
+    # rather than a plain failed-write counter (legacy plain-int protocol).
+    # Loop 2 W2+W7 fix: producer emits tagged tuples ``("failed_writes", n)``
+    # / ``("zombie", n)``. The drain accepts BOTH protocols (tagged tuples +
+    # plain ints) for backward compat with any third-party producer that
+    # still emits plain ints.
     _ZOMBIE_SENTINEL_OFFSET: int = 1000
 
     def __init__(
         self,
         label: str,
         interval_seconds: float = 15.0,
-        failures_queue: "queue.Queue[int] | None" = None,
+        failures_queue: "queue.Queue[tuple[str, int] | int] | None" = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError(f"interval_seconds must be > 0, got {interval_seconds!r}")
@@ -162,9 +165,9 @@ class HeartbeatEmitter:
                 if HeartbeatEmitter._zombie_thread_count >= HeartbeatEmitter._max_zombie_threads:
                     if self._failures_queue is not None:
                         try:
+                            # Loop 2 W2+W7: tagged tuple replaces +1000 sentinel.
                             self._failures_queue.put_nowait(
-                                HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET
-                                + HeartbeatEmitter._zombie_thread_count
+                                ("zombie", HeartbeatEmitter._zombie_thread_count)
                             )
                         except queue.Full:
                             pass
@@ -183,19 +186,18 @@ class HeartbeatEmitter:
                         pass
         # Persist a zombie-alert sentinel to the failures queue even before
         # the hard threshold so main-thread monitoring (drain helper) sees
-        # the state. Offset keeps it distinguishable from plain counters.
+        # the state. Loop 2 W2+W7: tagged tuple replaces +1000 sentinel.
         if zombie_alert and self._failures_queue is not None:
             try:
-                self._failures_queue.put_nowait(
-                    HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET + HeartbeatEmitter._zombie_thread_count
-                )
+                self._failures_queue.put_nowait(("zombie", HeartbeatEmitter._zombie_thread_count))
             except queue.Full:
                 pass
         # Final flush of failed-writes counter (single-writer rule preserved
-        # -- main thread sees the put via queue API).
+        # -- main thread sees the put via queue API). Tagged tuple per
+        # Loop 2 W2+W7.
         if self._failures_queue is not None and self._failed_writes > 0:
             try:
-                self._failures_queue.put_nowait(self._failed_writes)
+                self._failures_queue.put_nowait(("failed_writes", self._failed_writes))
             except queue.Full:
                 pass
             try:
@@ -243,7 +245,8 @@ class HeartbeatEmitter:
             # persistence to main thread per sec.3 single-writer rule).
             if self._failures_queue is not None and self._failed_writes % 10 == 0:
                 try:
-                    self._failures_queue.put_nowait(self._failed_writes)
+                    # Loop 2 W2+W7: tagged tuple replaces plain int.
+                    self._failures_queue.put_nowait(("failed_writes", self._failed_writes))
                 except queue.Full:
                     pass
             if self._failed_writes == 1:

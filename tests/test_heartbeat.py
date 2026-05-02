@@ -169,13 +169,14 @@ def test_heartbeat_failed_writes_counter_starts_zero():
 
 
 def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
+    """Loop 2 W2+W7 update: producer emits ``("failed_writes", n)`` tuples."""
     import queue as _q
 
     def always_fail(s):
         raise OSError("broken pipe")
 
     monkeypatch.setattr(sys.stderr, "write", always_fail)
-    q: "_q.Queue[int]" = _q.Queue()
+    q: "_q.Queue[tuple[str, int] | int]" = _q.Queue()
     emitter = HeartbeatEmitter(
         label="x",
         interval_seconds=0.01,
@@ -186,23 +187,27 @@ def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
         while emitter._failed_writes < 10 and time.monotonic() < deadline:
             time.sleep(0.01)
     assert emitter._failed_writes >= 10
-    drained: list[int] = []
+    drained: list[tuple[str, int] | int] = []
     while not q.empty():
         drained.append(q.get_nowait())
-    assert any(c >= 10 for c in drained), f"expected counter >= 10 in queue, got {drained}"
+    # Look for ("failed_writes", n) tuples with n >= 10.
+    assert any(
+        isinstance(item, tuple) and item[0] == "failed_writes" and item[1] >= 10 for item in drained
+    ), f"expected ('failed_writes', >=10) tuple in queue, got {drained}"
 
 
 def test_heartbeat_exit_pushes_final_counter_to_queue():
+    """Loop 2 W2+W7 update: final flush emits ``("failed_writes", 7)``."""
     import queue as _q
 
-    q: "_q.Queue[int]" = _q.Queue()
+    q: "_q.Queue[tuple[str, int] | int]" = _q.Queue()
     emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=q)
     with emitter:
         emitter._failed_writes = 7
-    drained: list[int] = []
+    drained: list[tuple[str, int] | int] = []
     while not q.empty():
         drained.append(q.get_nowait())
-    assert drained[-1] == 7
+    assert drained[-1] == ("failed_writes", 7)
 
 
 def test_heartbeat_no_queue_means_no_persistence():
@@ -296,7 +301,7 @@ def test_zombie_thread_threshold_does_not_swallow_pending_exception(monkeypatch)
 
 
 def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
-    """C3 fold-in: zombie counter persisted via failures queue with +1000 sentinel."""
+    """Loop 2 W2+W7: zombie counter persisted as ``("zombie", n)`` tuple."""
     import queue as _q
 
     from heartbeat import HeartbeatEmitter as HE
@@ -304,7 +309,7 @@ def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
     original = HE._zombie_thread_count
     try:
         HE._zombie_thread_count = 0
-        q: "_q.Queue[int]" = _q.Queue()
+        q: "_q.Queue[tuple[str, int] | int]" = _q.Queue()
         emitter = HeartbeatEmitter(label="z", interval_seconds=10.0, failures_queue=q)
 
         class FakeBlockedThread:
@@ -317,13 +322,12 @@ def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
         emitter._stop_event = __import__("threading").Event()
         emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
         emitter.__exit__(None, None, None)
-        # Drain queue and look for sentinel.
-        drained: list[int] = []
+        # Drain queue and look for ("zombie", n) tuple.
+        drained: list[tuple[str, int] | int] = []
         while not q.empty():
             drained.append(q.get_nowait())
-        # Sentinel: any value >= 1000 indicates zombie alert.
-        assert any(v >= 1000 for v in drained), (
-            f"expected zombie sentinel (>=1000) in queue, got {drained}"
-        )
+        assert any(
+            isinstance(item, tuple) and item[0] == "zombie" and item[1] >= 1 for item in drained
+        ), f"expected ('zombie', >=1) tuple in queue, got {drained}"
     finally:
         HE._zombie_thread_count = original
