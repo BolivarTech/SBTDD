@@ -3896,7 +3896,7 @@ git commit -m "feat: writing-plans prompt extension auto-generates scenario stub
 - Modify: `skills/sbtdd/scripts/config.py`
 - Modify: `tests/test_config.py`
 
-- [ ] **Step 1: Write failing test asserting unit suffix in INV-34 messages**
+- [x] **Step 1: Write failing test asserting unit suffix in INV-34 messages**
 
 Append to `tests/test_config.py`:
 
@@ -3935,9 +3935,9 @@ auto_heartbeat_interval_seconds: 15
     assert "got 50s" in msg or "got 50 s" in msg.lower()
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Update INV-34 ValidationError messages**
+- [x] **Step 3: Update INV-34 ValidationError messages**
 
 In `config.py`, replace each `got {timeout}` / `got {interval}` with `got {timeout}s` / `got {interval}s`:
 
@@ -3950,7 +3950,7 @@ if timeout < 600:
 # ... and similar for clauses 1, 2, 3 ...
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_config.py -k "inv34" -v
