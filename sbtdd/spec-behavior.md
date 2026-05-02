@@ -166,6 +166,21 @@ guarantees:
 > unchanged (no annotations attached), audit artifact NOT written (or
 > written with `cross_check_skipped: true` flag). Behavior
 > backwards-compatible with v0.5.0 (no cross-check existed).
+>
+> **Operator-visibility breadcrumb (caspar Checkpoint 2 iter 5 W
+> melchior #3 — addresses "dogfood payoff contingent on operator
+> opt-in with no automated guard"):** when cross-check is OFF (default
+> shipping posture per balthasar iter 2 recursive-dogfood concern),
+> `_loop2_with_cross_check` MUST emit a one-time stderr breadcrumb at
+> Loop 2 entry: `[sbtdd magi-cross-check] cross-check is OFF
+> (magi_cross_check: false in plugin.local.md). To enable
+> meta-reviewer for this gate, set magi_cross_check: true and re-run.`
+> The breadcrumb fires once per Loop 2 invocation (not once per iter)
+> so log noise is bounded. Rationale: the v1.0.0 cycle ships with
+> default-OFF; without the breadcrumb, operators forget to flip the
+> flag in own ship cycle and the recursive-payoff signal goes
+> uncollected. The breadcrumb makes opt-in friction zero — operator
+> sees the prompt at the moment of decision.
 
 **Escenario G5: cross-check failure does not block Loop 2**
 
@@ -420,6 +435,20 @@ does not exist (pre-v1.0.0 plan-approval flows).
 > **When** `spec_snapshot.emit_snapshot(path)` ejecuta.
 > **Then** returns `{scenario_name: hash(Given+When+Then)}` dict per
 > scenario. Hash deterministic per scenario content (whitespace-normalized).
+>
+> **Implementation note (caspar Checkpoint 2 iter 5 W melchior #1):**
+> the parser MUST handle multiple scenario header formats observed in
+> production spec-behavior.md: `**Escenario N: ...**` (markdown-bold,
+> v1.0.0 style), `### Escenario N: ...` (h3 subsection), and
+> `## Escenario N: ...` (h2 toplevel). The regex `_SCENARIO_RE` SHOULD
+> accept all three header levels (`r"^(?:#{2,3}\s+|\*\*)Escenario\s+"`)
+> rather than hardcoding `**`. Subagent #2 task S2-3 MUST include a
+> golden-corpus parametrized test exercising each format against a
+> fixture derived from the actual `sbtdd/spec-behavior.md` plus
+> synthetic samples per format. Failing to handle subsection headers
+> would produce silent zero-match in production specs that drift to
+> `### Escenario` style — and the H2-3 drift gate would degrade to
+> always-pass for affected scenarios.
 
 **Escenario H2-2: compare detects modified Given/When/Then**
 
@@ -460,6 +489,20 @@ does not exist (pre-v1.0.0 plan-approval flows).
 > snapshot file is detected at pre-merge entry (H2-5). The watermark is
 > the canonical record that a snapshot was emitted; the file itself is
 > verified-against, not trusted-on-presence-alone.
+>
+> **Implementation note (caspar Checkpoint 2 iter 5 W melchior #2):**
+> `persist_snapshot(path, snapshot)` MUST use atomic
+> write-temp-then-replace for crash-safety. The temp filename pattern
+> MUST use `Path.with_name(path.name + ".tmp.{pid}.{tid}")` (or
+> equivalent string append), NOT `Path.with_suffix(".tmp.{pid}.{tid}")`.
+> `Path.with_suffix` REPLACES the existing extension, so
+> `planning/spec-snapshot.json.with_suffix(".tmp.123.456")` yields
+> `planning/spec-snapshot.tmp.123.456` (loses `.json`), breaking
+> downstream tooling that filters by `*.json` and producing test
+> failures on Windows where the temp file lingers across runs.
+> Cross-reference: same pattern as Windows tmp PID flake fix (W8/F13)
+> in `auto_cmd.py` writers — use `path.parent / (path.name + suffix)`
+> consistently across all atomic-write call sites in v1.0.0.
 
 **Escenario H2-5: missing snapshot file with state-file watermark = drift detected**
 
@@ -896,6 +939,41 @@ become the new normal.
   systematically ignored — neither is acceptable without
   explicit re-ratification).
 
+#### 7.1.3 Locked guardrails for v1.x (caspar Checkpoint 2 iter 5)
+
+Iter 5 acceptance (3-0 GO_WITH_CAVEATS, all CONDITIONAL) records
+three binding commitments to prevent the 2-override-streak from
+becoming institutional norm. These are HARD rules, not aspirational
+defaults:
+
+- **(G1) v1.1.0 cap=3 is HARD with NO INV-0 path**: regardless of
+  pattern (4-iter signal, multi-pillar bundle, recursive dogfood,
+  etc.), v1.1.0 Checkpoint 2 caps at 3 iters. Iter 4 = mandatory
+  scope-trim. The v0.5.0 + v1.0.0 INV-0 override precedent is
+  CLOSED — v1.1.0 does not inherit it. Recorded in CHANGELOG
+  `[1.0.0]` Process notes as binding commitment.
+- **(G2) Loop 2 iter 3 verdict triggers explicit decision point**:
+  if v1.0.0 Loop 2 (post-impl) reaches iter 3 without convergence,
+  the orchestrator MUST either (a) invoke option-A scope-trim
+  immediately (defer Pillar 2 to v1.0.1, ship Pillar 1 + fold-in)
+  OR (b) require user authorization message containing the EXACT
+  phrase "overriding scope-trim default per CHANGELOG [0.5.0]
+  knowing this is the 3rd consecutive override". The friction is
+  intentional — silent override is the path being closed.
+- **(G3) Loop 2 iter 1 cross-check audit manual diff vs G6 schema**:
+  before Loop 2 iter 2 runs, the operator manually diffs the iter 1
+  cross-check audit JSON file
+  (`.claude/magi-cross-check/iter1-*.json`) against the G6 schema
+  fields (sec.2.1 escenario G6) and records explicit sign-off in the
+  cycle's memory handoff or CHANGELOG draft. Catches annotation
+  field drift / schema regression early before recursive blast
+  radius compounds.
+
+These three are not "recommendations" — they are pre-commitments
+recorded in spec sec.7.1.3 + CHANGELOG `[1.0.0]` Process notes. Future
+v1.x ratification of cap=3 (or its replacement) is the only mechanism
+to relax G1.
+
 ### 7.2 Loop 1 (`/requesting-code-review`)
 
 Cap=10. Clean-to-go criterion (zero CRITICAL + zero high-impact WARNING).
@@ -1069,6 +1147,63 @@ valve still applies: after `magi_max_iterations`, escalate.
   Loop 2): if Subagent #1 stalls on Feature G implementation, dogfood
   signal lost. Mitigation: G ranks first in Subagent #1 ordering;
   fallback to manual cross-check if helper not yet wired.
+- **R10** (caspar Checkpoint 2 iter 5 W "Plan-approval handler
+  interception"). Plan-approval handler (S1-27
+  `_mark_plan_approved_with_snapshot`) MUST be the SOLE writer of
+  `state.plan_approved_at` AND `state.spec_snapshot_emitted_at`.
+  Mitigation: any code path that mutates `plan_approved_at` (currently
+  `auto_cmd._phase1_preflight` + `spec_cmd._finalize_plan_approval`)
+  MUST route through the new handler instead of writing the field
+  directly. Subagent #1 task S1-27 includes a grep audit step asserting
+  zero direct writes to `plan_approved_at` outside the handler. If any
+  bypass exists, watermark + snapshot drift apart silently — H2-5 gate
+  degrades to false-negative.
+- **R11** (caspar Checkpoint 2 iter 5 W "AST sweep aliases"). S1-28
+  AST-walk sweep (Subagent #1 task) catches direct
+  `run_with_timeout(...)` and `run_streamed_with_timeout(...)` call
+  forms. Risk: callsites going through aliases or wrappers introduced
+  AFTER S1-15 (e.g., `dispatch = run_streamed_with_timeout` then
+  `dispatch(...)`) escape the sweep. Mitigation: S1-28 sweep MUST
+  include a textual grep fallback for tokens `run_with_timeout` and
+  `run_streamed_with_timeout` across `auto_cmd.py` + `pre_merge_cmd.py`,
+  and assert zero new occurrences post-S1-15 that did not exist
+  pre-S1-1. Tightens net beyond AST attribute/name resolution. v1.x
+  evaluation: if alias patterns proliferate, promote sweep to module
+  import-graph analysis.
+
+### 9.1 S2-1 ResolvedModels deferred-import contract test
+
+(Melchior Checkpoint 2 iter 5 INFO "S2-1 lacks deferred-import contract
+test".) Subagent #2 task S2-1 (`models.ResolvedModels` dataclass
+addition) MUST include a unit test asserting that `models.py` itself
+does NOT import any Subagent #1-owned module at module-load time
+(i.e., no `from auto_cmd import ...` or `from pre_merge_cmd import
+...`). Test pattern:
+
+```python
+def test_models_module_has_no_subagent1_imports():
+    import ast, pathlib
+    src = pathlib.Path("scripts/models.py").read_text()
+    tree = ast.parse(src)
+    forbidden = {"auto_cmd", "pre_merge_cmd", "magi_dispatch",
+                 "status_cmd"}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for name in (node.names if isinstance(node, ast.Import)
+                         else [(node.module or "")]):
+                mod = name.name if hasattr(name, "name") else name
+                root = mod.split(".")[0]
+                assert root not in forbidden, (
+                    f"models.py imports {root}; deferred-import "
+                    f"contract violated — forbids Subagent #1 surface")
+```
+
+Rationale: `ResolvedModels` is consumed by `auto_cmd` (Subagent #1).
+Subagent #2 ships the dataclass; if `models.py` reaches into Subagent
+#1 surface at import time, the parallel-dispatch independence claim
+(spec sec.6.2) breaks — Subagent #2 can no longer be merged before
+Subagent #1 lands. The deferred-import contract is the technical
+guarantee that the two subagents are surface-disjoint.
 
 ---
 
