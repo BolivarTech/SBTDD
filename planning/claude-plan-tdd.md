@@ -3410,7 +3410,7 @@ git commit -m "feat: add PluginConfig.schema_version field + INV-36 (Feature I)"
 - Create: `skills/sbtdd/scripts/migrate_plugin_local.py`
 - Create: `tests/test_migrate_plugin_local.py`
 
-- [ ] **Step 1: Write failing tests for I3, I4**
+- [x] **Step 1: Write failing tests for I3, I4**
 
 Create `tests/test_migrate_plugin_local.py`:
 
@@ -3445,9 +3445,9 @@ def test_i4_migration_ladder_supports_future_bumps():
     assert callable(MIGRATIONS[1])
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Create migrate_plugin_local.py skeleton**
+- [x] **Step 3: Create migrate_plugin_local.py skeleton**
 
 Create `skills/sbtdd/scripts/migrate_plugin_local.py`:
 
@@ -3508,7 +3508,7 @@ def migrate_to(*, target_version: int, data: dict[str, Any]) -> dict[str, Any]:
     return data
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_migrate_plugin_local.py -v
