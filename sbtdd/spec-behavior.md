@@ -444,11 +444,18 @@ does not exist (pre-v1.0.0 plan-approval flows).
 
 **Escenario H5-2: missing stub at Checkpoint 2 = plan-quality failure**
 
-> **Given** plan generated WITHOUT a stub for one of the spec scenarios
-> (operator deleted or `/writing-plans` failed to generate).
-> **When** spec_lint or Checkpoint 2 evaluation runs.
-> **Then** flags as plan-quality failure: "Scenario N has no
-> corresponding stub test in plan; re-run /writing-plans or add manually".
+> **(Deferred to v1.0.1+ — see CHANGELOG; caspar Loop 2 iter 3 WARNING
+> fix.)** Originally specified as: Given plan generated WITHOUT a stub
+> for one of the spec scenarios (operator deleted or `/writing-plans`
+> failed to generate); When spec_lint or Checkpoint 2 evaluation runs;
+> Then flag as plan-quality failure: "Scenario N has no corresponding
+> stub test in plan; re-run /writing-plans or add manually". **v1.0.0
+> ships ONLY H5-1 (auto-generation in /writing-plans).** H5-2 is the
+> *enforcement* layer; deferring it lets v1.0.0 collect empirical data
+> on H5-1 stub-gen quality (false-positive scenarios, slug collisions,
+> formatting drift) before adding a hard gate. v1.0.1+ ships
+> `scripts/spec_lint.py` (or equivalent) that runs at Checkpoint 2 and
+> emits this finding when stubs are missing.
 
 ---
 
@@ -914,7 +921,10 @@ valve still applies: after `magi_max_iterations`, escalate.
 - **R4**. Group B option 5 auto-gen stubs may produce noisy unimplemented
   test bodies. Mitigation: stub bodies use `pytest.skip("Scenario stub:
   replace with real assertions")` so missing implementations don't
-  silently pass; H5-2 spec_lint check at Checkpoint 2.
+  silently pass. **v1.0.0 ships H5-1 only (auto-generation); H5-2
+  spec_lint enforcement at Checkpoint 2 is deferred to v1.0.1+** per
+  caspar Loop 2 iter 3 WARNING — collect empirical data on stub-gen
+  quality before introducing the hard gate.
 - **R5**. v0.5.1 fold-in J3+J7 wiring: 33 sites is mechanical but high
   volume = verification overhead. Mitigation: Subagent #1 batches by
   site cluster; integration test coverage spans all clusters.
@@ -961,7 +971,11 @@ v1.0.0 ship-ready cuando:
 - **F8**. Migration script skeleton at `scripts/migrate_plugin_local.py`.
   I3, I4 escenarios pass.
 - **F9**. Feature H option 2 spec-snapshot. H2-1 a H2-4 escenarios pass.
-- **F10**. Feature H option 5 auto-gen stubs. H5-1, H5-2 escenarios pass.
+- **F10**. Feature H option 5 auto-gen stubs. **H5-1 escenario passes
+  in v1.0.0 (auto-generation only). H5-2 spec_lint enforcement is
+  deferred to v1.0.1+** (caspar Loop 2 iter 3 WARNING fix; lets
+  v1.0.0 collect empirical data on stub-gen quality before adding
+  the hard gate). See CHANGELOG `[1.0.0]` Deferred section.
 
 ### 10.3 Functional v0.5.1 fold-in
 
