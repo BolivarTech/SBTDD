@@ -63,6 +63,55 @@ planned. The orchestrator references the committed choice when Loop
 cycle CHANGELOG draft + memory handoff. **Default for v1.0.0 = (A)**
 per CHANGELOG `[0.5.0]` Process commitment.
 
+### Pre-dispatch operational commitments (balthasar Loop 2 iter 4 W)
+
+The orchestrator commits to the following 3 operational guardrails
+BEFORE the parallel subagent dispatch starts. These are decisions
+made at low fatigue / high judgment, not at end-of-cycle exhaustion;
+they live in CHANGELOG `[1.0.0]` Process notes draft so the
+fallback paths are pre-authorized rather than improvised.
+
+**(1) Pillar 2 scope-trim default for Loop 2.**
+If Loop 2 (post-impl pre-merge gate) doesn't converge in 3 iters,
+scope-trim Pillar 2 (Feature I + Group B options 2+5) to v1.0.1; ship
+v1.0.0 with Pillar 1 + v0.5.1 fold-in only. CHANGELOG `[1.0.0]` draft
+includes this fallback path so it's path of least resistance, not
+made under fatigue. (Per CHANGELOG `[0.5.0]` process commitment;
+identical posture to the Checkpoint 2 commitment in
+`### Pre-dispatch escape-valve commitment` above.)
+
+**(2) Hard checkpoint S1-6 → S1-7 (Subagent #1 internal gate).**
+Subagent #1 MUST verify Feature G is fully green on the integration
+branch BEFORE starting S1-7 (F44.3). Verification checklist:
+`make verify` passes (pytest + ruff + mypy --strict, NF-A 150s budget
+respected) AND a manual spot-check of one cross-check audit artifact
+JSON schema (read one `.claude/magi-cross-check/iter*-*.json` file
+locally and verify the keys per the G6 schema in pre-flight section).
+If S1-1..S1-6 hits issues (test failure, mypy regression, audit
+artifact malformed), HALT and re-evaluate before the sequential
+cascade continues; do not start S1-7 with S1-1..S1-6 in a half-broken
+state. Rationale: the recursive dogfood payoff (sec.7.3 R-Dogfood)
+hinges on Feature G being trustworthy at Loop 2 iter 1 entry.
+
+**(3) Manual spot-check first 1-2 cross-check audit artifacts during
+Loop 2 dogfood.**
+After O-2 substep flips `magi_cross_check: true` (caspar W3 fix),
+the operator MUST manually inspect the first 1-2 audit artifacts
+written to `.claude/magi-cross-check/` to verify the annotation
+contracts hold:
+- `len(annotated_findings) == len(original_findings)` (no silent drops);
+- KEEP/DOWNGRADE/REJECT decisions match cross-check intent (read
+  rationales and confirm they're sensible);
+- `cross_check_recommended_severity` is `null` for KEEP/REJECT,
+  populated for DOWNGRADE (per G6 audit serialization contract);
+- `dispatch_failure` block (if present) distinguishes
+  `json_parse_error` from `cross_check_failed` correctly.
+
+If any contract violation observed, halt the v1.0.0 dogfood, fall
+back to scope-trim option (A) or document the violation as the lead
+finding for Loop 2 iter N's `/receiving-code-review` gate. Empirical
+sanity check before trusting the full annotation pipeline blindly.
+
 ### ResolvedModels schema (spec sec.5.1)
 
 ```python
