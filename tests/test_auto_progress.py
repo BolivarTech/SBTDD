@@ -442,6 +442,102 @@ def test_dispatch_with_heartbeat_fails_loud_when_no_dispatch_label():
         _dispatch_with_heartbeat(invoke=lambda: 0, heartbeat_interval=0.5)
 
 
+def test_update_progress_drains_heartbeat_queue_and_writes_max(tmp_path):
+    """sec.3 single-writer rule: main thread drains queue, persists max() to JSON."""
+    from auto_cmd import _drain_heartbeat_queue_and_persist, _heartbeat_failures_q
+
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+
+    _heartbeat_failures_q.put(5)
+    _heartbeat_failures_q.put(10)
+    _heartbeat_failures_q.put(15)
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8")
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["heartbeat_failed_writes_total"] == 15
+
+
+def test_drain_heartbeat_queue_persists_zombie_alert_sentinel(tmp_path):
+    """C3 fold-in: zombie sentinel (>= _ZOMBIE_SENTINEL_OFFSET=1000) persisted as separate field."""
+    from auto_cmd import _drain_heartbeat_queue_and_persist, _heartbeat_failures_q
+
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+
+    _heartbeat_failures_q.put(5)  # plain failed-writes counter
+    _heartbeat_failures_q.put(1003)  # zombie sentinel: 1000 + 3 zombies
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["heartbeat_failed_writes_total"] == 5
+    assert data["heartbeat_zombie_thread_count"] == 3
+
+
+def test_drain_heartbeat_queue_no_data_skips_write(tmp_path):
+    """No queued data => helper returns without touching the file."""
+    from auto_cmd import _drain_heartbeat_queue_and_persist, _heartbeat_failures_q
+
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"untouched": true}', encoding="utf-8")
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data == {"untouched": True}
+
+
+def test_concurrent_writers_serialize_via_file_lock(tmp_path):
+    """C4 fold-in: cross-process file lock around auto-run.json read-modify-write.
+
+    Best-effort smoke: invoke the helper twice in succession with the same
+    queue; the second call must observe the first call's persisted value
+    (no race-induced corruption).
+    """
+    from auto_cmd import _drain_heartbeat_queue_and_persist, _heartbeat_failures_q
+
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text("{}", encoding="utf-8")
+    _heartbeat_failures_q.put(20)
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    _heartbeat_failures_q.put(30)
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    # max() preserved across calls.
+    assert data["heartbeat_failed_writes_total"] == 30
+
+
+def test_drain_helper_rejects_non_main_thread():
+    """W8 fold-in: _assert_main_thread enforces single-writer rule mechanically."""
+    import threading as _t
+    import pytest as _pytest
+
+    from auto_cmd import _drain_heartbeat_queue_and_persist
+
+    captured: dict[str, BaseException | None] = {"err": None}
+
+    def background():
+        try:
+            _drain_heartbeat_queue_and_persist(Path("ignored.json"))
+        except BaseException as e:  # noqa: BLE001
+            captured["err"] = e
+
+    th = _t.Thread(target=background)
+    th.start()
+    th.join(timeout=2.0)
+    assert isinstance(captured["err"], RuntimeError)
+    assert "main thread" in str(captured["err"]).lower()
+    _ = _pytest  # keep import alive (avoid unused-import lint)
+
+
 def test_dispatch_with_heartbeat_derives_label_from_progress():
     from auto_cmd import _dispatch_with_heartbeat, _set_progress
     from heartbeat import reset_current_progress

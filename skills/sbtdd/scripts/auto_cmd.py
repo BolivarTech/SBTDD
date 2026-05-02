@@ -169,6 +169,188 @@ def _set_progress(
 _heartbeat_failures_q: "queue.Queue[int]" = queue.Queue(maxsize=0)
 
 
+# C3 sentinel offset (mirrors HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET).
+# Values >= this offset signal "zombie alert" rather than failed-write count.
+_HEARTBEAT_ZOMBIE_SENTINEL_OFFSET: int = 1000
+
+
+def _assert_main_thread() -> None:
+    """W8 fold-in: enforce the single-writer rule mechanically.
+
+    Spec sec.3 stipulates only the auto orchestrator main thread mutates
+    ``.claude/auto-run.json``; this helper raises ``RuntimeError`` when
+    invoked from any other thread.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError(
+            "auto-run.json writer called from non-main thread "
+            f"({threading.current_thread().name!r}); single-writer rule "
+            f"(sec.3) violated"
+        )
+
+
+def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
+    """C4 fold-in: cross-process advisory lock around ``fn``.
+
+    POSIX uses ``fcntl.flock(LOCK_EX)``; Windows uses
+    ``msvcrt.locking(LK_LOCK)``. Lock is held on a sibling sentinel file
+    (``<path>.lock``) so the lock survives ``os.replace`` of the target.
+    Best-effort: any OSError during lock acquisition logs a stderr
+    breadcrumb and proceeds without locking (cross-process contention is
+    rare; locking-related failures must not kill the auto run).
+
+    Args:
+        path: The target file whose mutation is serialized.
+        fn: Zero-argument callable that performs the mutation.
+    """
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    try:
+        lock_fd = open(lock_path, "a+b")
+    except OSError as exc:
+        sys.stderr.write(
+            f"[sbtdd] warning: could not open lock file {lock_path}: "
+            f"{exc!s}; proceeding without cross-process lock\n"
+        )
+        sys.stderr.flush()
+        fn()
+        return
+    try:
+        if sys.platform == "win32":
+            try:
+                import msvcrt
+
+                # 1 byte exclusive blocking lock.
+                msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+            except (OSError, ImportError) as exc:
+                sys.stderr.write(
+                    f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
+                    f"proceeding without lock\n"
+                )
+                sys.stderr.flush()
+                fn()
+                return
+        else:
+            try:
+                import fcntl
+
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            except (OSError, ImportError) as exc:
+                sys.stderr.write(
+                    f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
+                    f"proceeding without lock\n"
+                )
+                sys.stderr.flush()
+                fn()
+                return
+        try:
+            fn()
+        finally:
+            if sys.platform == "win32":
+                try:
+                    import msvcrt
+
+                    # Best-effort unlock; ignore errors (Windows raises if
+                    # the lock was already released by handle close).
+                    lock_fd.seek(0)
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            else:
+                try:
+                    import fcntl
+
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+    finally:
+        try:
+            lock_fd.close()
+        except OSError:
+            pass
+
+
+def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
+    """Drain :data:`_heartbeat_failures_q` and persist max() counter.
+
+    Implements the sec.3 single-writer rule: only the main thread reads
+    the queue and writes to ``auto-run.json``. The C4 fold-in adds a
+    cross-process advisory lock so concurrent writers (e.g. future
+    ``status --watch``) cannot corrupt the JSON.
+
+    Queue values >= ``_HEARTBEAT_ZOMBIE_SENTINEL_OFFSET`` are interpreted
+    as zombie sentinels (per C3 fold-in) and persisted in a distinct
+    ``heartbeat_zombie_thread_count`` field; plain values are accumulated
+    into ``heartbeat_failed_writes_total`` via ``max()``.
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+    """
+    _assert_main_thread()
+    drained: list[int] = []
+    while True:
+        try:
+            drained.append(_heartbeat_failures_q.get_nowait())
+        except queue.Empty:
+            break
+    if not drained:
+        return
+
+    plain_counters = [v for v in drained if v < _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET]
+    zombie_signals = [v for v in drained if v >= _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET]
+
+    def _do_persist() -> None:
+        try:
+            data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            # Silently skip: auto run continues with degraded observability.
+            sys.stderr.write(
+                f"[sbtdd] warning: failed to read auto-run.json for heartbeat "
+                f"drain: {type(exc).__name__}: {exc!s}\n"
+            )
+            sys.stderr.flush()
+            return
+        if not isinstance(data, dict):
+            return
+        if plain_counters:
+            existing = data.get("heartbeat_failed_writes_total", 0)
+            try:
+                existing_int = int(existing)
+            except (TypeError, ValueError):
+                existing_int = 0
+            data["heartbeat_failed_writes_total"] = max(existing_int, *plain_counters)
+        if zombie_signals:
+            zombie_count = max(zombie_signals) - _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET
+            existing_z = data.get("heartbeat_zombie_thread_count", 0)
+            try:
+                existing_z_int = int(existing_z)
+            except (TypeError, ValueError):
+                existing_z_int = 0
+            data["heartbeat_zombie_thread_count"] = max(
+                existing_z_int, zombie_count
+            )
+        # Atomic rename (preserve existing _update_progress mechanism).
+        tmp_path = auto_run_path.with_suffix(
+            auto_run_path.suffix + f".tmp.{os.getpid()}"
+        )
+        try:
+            tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp_path, auto_run_path)
+        except OSError as exc:
+            sys.stderr.write(
+                f"[sbtdd] warning: failed to persist heartbeat counters: "
+                f"{type(exc).__name__}: {exc!s}\n"
+            )
+            sys.stderr.flush()
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    _with_file_lock(auto_run_path, _do_persist)
+
+
 def _dispatch_with_heartbeat(
     *,
     invoke: Callable[..., Any],
@@ -455,6 +637,14 @@ def _update_progress(
         for _ in range(20):
             try:
                 os.replace(tmp, auto_run_path)
+                # v0.5.0 S1-11: piggyback heartbeat queue drain on each
+                # successful progress write (single-writer rule sec.3).
+                # Best-effort: drain failures should never interrupt the
+                # main auto run.
+                try:
+                    _drain_heartbeat_queue_and_persist(auto_run_path)
+                except Exception:  # noqa: BLE001
+                    pass
                 return
             except PermissionError as exc:
                 last_err = exc
