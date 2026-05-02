@@ -123,7 +123,7 @@ Shortcut: `make verify`. NF-A budget: <= 120s.
 
 ---
 
-## Subagent #1 — Dispatchers + observability completion (27 tasks)
+## Subagent #1 — Dispatchers + observability completion (28 tasks)
 
 ### Task S1-1: Feature G — `_loop2_cross_check` skeleton in pre_merge_cmd
 
@@ -2066,6 +2066,90 @@ pytest tests/test_auto_progress.py -k "plan_approval_emits" -v
 git add skills/sbtdd/scripts/auto_cmd.py tests/test_auto_progress.py
 git commit -m "feat: emit spec-snapshot on plan approval (CRITICAL #2)"
 ```
+
+---
+
+### Task S1-28: J3+J7 wiring sweep test (CRITICAL #5)
+
+**Files:**
+- Modify: `tests/test_dispatch_heartbeat_wiring.py` (extend with sweep
+  assertion)
+
+**Background (CRITICAL #5 fix):** spec sec.4.1 W1 promises ALL 33
+``run_with_timeout`` callers in ``auto_cmd.py`` + ``pre_merge_cmd.py``
+are routed through ``run_streamed_with_timeout``. Tasks S1-10..S1-15
+test ~6 representative sites, one per cluster, leaving the bulk of
+sites unverified. This task closes the coverage gap with a single
+AST-walk assertion that fails if any production site still calls the
+unwired ``run_with_timeout``.
+
+- [ ] **Step 1: Append sweep test to test_dispatch_heartbeat_wiring.py**
+
+```python
+def test_w1_sweep_no_remaining_run_with_timeout_in_production():
+    """W1 sweep (CRITICAL #5): ALL 33 callers must route through run_streamed_with_timeout.
+
+    AST-walks auto_cmd.py + pre_merge_cmd.py and asserts no remaining
+    `subprocess_utils.run_with_timeout(...)` callsites. Helper definition
+    itself in subprocess_utils.py is excluded (not in the scanned set).
+    Test files excluded by virtue of not being in the production path
+    list. Failure message lists file:line of unwired sites for triage.
+    """
+    import ast
+    from pathlib import Path
+
+    production_paths = [
+        Path("skills/sbtdd/scripts/auto_cmd.py"),
+        Path("skills/sbtdd/scripts/pre_merge_cmd.py"),
+    ]
+    unwired_sites: list[str] = []
+    for path in production_paths:
+        assert path.exists(), f"production file missing: {path}"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            # Match `subprocess_utils.run_with_timeout(...)` (Attribute access).
+            if isinstance(func, ast.Attribute) and func.attr == "run_with_timeout":
+                unwired_sites.append(f"{path}:{node.lineno}")
+            # Match bare `run_with_timeout(...)` (Name access — direct import).
+            elif isinstance(func, ast.Name) and func.id == "run_with_timeout":
+                unwired_sites.append(f"{path}:{node.lineno}")
+
+    assert unwired_sites == [], (
+        f"v1.0.0 W1 contract violation: production sites still call "
+        f"run_with_timeout (must use run_streamed_with_timeout):\n"
+        + "\n".join(f"  {s}" for s in unwired_sites)
+    )
+```
+
+- [ ] **Step 2: Run + verify pass**
+
+Pre-S1-10..S1-15: this test FAILS by listing all 33 unwired sites.
+Post-S1-10..S1-15: the test PASSES because every callsite has been
+migrated. The test acts as a coverage backstop for the per-cluster
+tests, catching any cluster missed by the manual partition in
+S1-10..S1-15.
+
+```bash
+pytest tests/test_dispatch_heartbeat_wiring.py::test_w1_sweep_no_remaining_run_with_timeout_in_production -v
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_dispatch_heartbeat_wiring.py
+git commit -m "test: sweep all 33 J3+J7 wiring sites (CRITICAL #5)"
+```
+
+**Ordering note:** S1-28 lands AFTER S1-15 (last per-cluster site
+migration); pre-S1-15 the sweep test is a deliberate failing tripwire
+ensuring complete coverage. Subagent #1 sequential ordering: S1-1..S1-9
+(Pillar 1 Feature G + F44.3 + J2) → S1-10..S1-15 (J3+J7 per-cluster
+migration) → S1-16..S1-19 (Caspar W4-W7) → S1-20 (Windows W8) →
+S1-21..S1-24 (5 INFOs) → S1-26..S1-27 (CRITICAL #2 spec-snapshot wiring)
+→ S1-28 (CRITICAL #5 sweep) → S1-25 (final make verify).
 
 ---
 
