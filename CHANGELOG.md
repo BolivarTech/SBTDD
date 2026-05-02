@@ -101,6 +101,23 @@ every post-v0.1 release.
   JSON document. Earlier docstrings called the lock "cross-process",
   which overclaimed: no external process today acquires this exact
   lock, and atomic rename is what actually protects readers.
+- **Scope-trim default for future MAGI Checkpoint 2 cycles (Loop 2
+  WARNING #5 fix):** the v0.5.0 cycle accepted MAGI Checkpoint 2 at
+  iter 4 via INV-0 override. That precedent is acceptable for v0.5.0
+  specifically because the bundle combined multiple disjoint surfaces
+  (heartbeat, status --watch, J3, J7) that exceeded the standard 3-iter
+  budget for spec clarification rather than for fundamental scope
+  problems. **For v0.6.0+ cycles, any plan needing >3 MAGI Checkpoint 2
+  iterations should be treated as a scope-trim signal rather than an
+  INV-0 override candidate.** The orchestrator should default to
+  splitting the bundle (deferring the lower-priority surface to the
+  next minor release) at iter 3 unless the user explicitly chooses to
+  override with documented rationale. This is process commitment, not
+  a hard rule (INV-0 remains available), but bundle width should be
+  the first hypothesis when MAGI Checkpoint 2 fails to converge in 3
+  iterations. Rationale: MAGI iter budget is calibrated for spec/plan
+  misalignment; recurring iter exhaustion signals scope is too wide
+  to evaluate coherently in a single review pass.
 
 ### Deferred (rolled to v0.5.1)
 
