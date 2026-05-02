@@ -418,6 +418,67 @@ def test_dispatch_returns_json_parse_error_marker_on_malformed_output(monkeypatc
     assert "malformed JSON" in captured.err
 
 
+def test_loop2_with_cross_check_invokes_cross_check_on_findings(tmp_path, monkeypatch):
+    """S1-5: _loop2_with_cross_check threads findings through _loop2_cross_check."""
+    from pre_merge_cmd import _loop2_with_cross_check
+
+    cross_check_calls = {"count": 0}
+
+    def fake_cross_check(*, findings, **_kw):
+        cross_check_calls["count"] += 1
+        # Annotate to simulate KEEP for the single finding.
+        return [{**f, "cross_check_decision": "KEEP"} for f in findings]
+
+    monkeypatch.setattr("pre_merge_cmd._loop2_cross_check", fake_cross_check)
+
+    config = MagicMock()
+    config.magi_cross_check = True
+
+    fake_findings = [{"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "z"}]
+    fake_verdict = "GO_WITH_CAVEATS"
+
+    def fake_invoke_magi(**_kw):
+        return (fake_verdict, fake_findings)
+
+    monkeypatch.setattr("pre_merge_cmd._invoke_magi_loop2", fake_invoke_magi)
+
+    result_verdict, result_findings = _loop2_with_cross_check(
+        diff="x",
+        iter_n=1,
+        config=config,
+        audit_dir=tmp_path,
+    )
+    assert cross_check_calls["count"] == 1
+    assert result_verdict == fake_verdict
+    assert len(result_findings) == 1
+    assert result_findings[0]["cross_check_decision"] == "KEEP"
+
+
+def test_g4_breadcrumb_emitted_when_cross_check_disabled(monkeypatch, capsys, tmp_path):
+    """G4 stderr breadcrumb (spec sec.2.1 impl note): one-time
+    breadcrumb when magi_cross_check=False so operators see cross-check OFF."""
+    from pre_merge_cmd import (
+        _emit_cross_check_disabled_breadcrumb_once,
+        _reset_cross_check_breadcrumb_for_tests,
+    )
+
+    _reset_cross_check_breadcrumb_for_tests()
+
+    config = MagicMock()
+    config.magi_cross_check = False
+
+    _emit_cross_check_disabled_breadcrumb_once(config)
+    captured = capsys.readouterr()
+    assert "cross-check is OFF" in captured.err
+
+    # Second call: deduped (no further output)
+    _emit_cross_check_disabled_breadcrumb_once(config)
+    captured2 = capsys.readouterr()
+    assert captured2.err == ""
+
+    _reset_cross_check_breadcrumb_for_tests()
+
+
 def test_w4_normalize_strips_cross_check_annotation_fields():
     """W4 (caspar iter 4): annotation fields stripped before carry-forward."""
     from pre_merge_cmd import _normalize_findings_for_carry_forward

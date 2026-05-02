@@ -1147,6 +1147,106 @@ def _loop2_cross_check(
     return annotated
 
 
+#: One-time dedup flag for the G4 cross-check-disabled stderr breadcrumb.
+#: Reset at process start; not per-Loop-2-invocation so a single auto run
+#: emits the breadcrumb at most once even across multiple pre-merge calls.
+_cross_check_disabled_breadcrumb_emitted: bool = False
+
+
+def _reset_cross_check_breadcrumb_for_tests() -> None:
+    """Test-only helper; resets the G4 dedup flag."""
+    global _cross_check_disabled_breadcrumb_emitted
+    _cross_check_disabled_breadcrumb_emitted = False
+
+
+def _emit_cross_check_disabled_breadcrumb_once(config: Any) -> None:
+    """Emit one-time stderr breadcrumb when cross-check is opted-out (G4 impl note).
+
+    Per spec sec.2.1 Feature G impl note: when ``config.magi_cross_check``
+    is False, emit a single stderr breadcrumb at Loop 2 entry so operators
+    see cross-check is OFF rather than silently inactive. Once per Loop 2
+    invocation, not per iter (dedup).
+
+    Args:
+        config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+    """
+    global _cross_check_disabled_breadcrumb_emitted
+    if config.magi_cross_check:
+        return
+    if _cross_check_disabled_breadcrumb_emitted:
+        return
+    _cross_check_disabled_breadcrumb_emitted = True
+    sys.stderr.write(
+        "[sbtdd magi-cross-check] cross-check is OFF (magi_cross_check: "
+        "false in plugin.local.md). To enable meta-reviewer for this "
+        "gate, set magi_cross_check: true and re-run.\n"
+    )
+    sys.stderr.flush()
+
+
+def _invoke_magi_loop2(**kwargs: Any) -> tuple[str, list[dict[str, Any]]]:
+    """Adapter shim around ``magi_dispatch.invoke_magi`` returning (verdict, findings).
+
+    Exists primarily so :func:`_loop2_with_cross_check` can be unit-tested
+    in isolation (tests monkeypatch this function). Production callers
+    that already use :func:`_loop2` continue to drive
+    ``magi_dispatch.invoke_magi`` directly with the full :class:`MAGIVerdict`
+    return type.
+
+    Args:
+        **kwargs: Forwarded verbatim to :func:`magi_dispatch.invoke_magi`.
+
+    Returns:
+        Tuple ``(verdict_string, findings_list)`` extracted from the
+        :class:`MAGIVerdict`.
+    """
+    verdict_obj = magi_dispatch.invoke_magi(**kwargs)
+    findings_list = [dict(f) for f in getattr(verdict_obj, "findings", ())]
+    return (verdict_obj.verdict, findings_list)
+
+
+def _loop2_with_cross_check(
+    *,
+    diff: str,
+    iter_n: int,
+    config: Any,
+    audit_dir: Path,
+    **magi_kwargs: Any,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Wrapper around MAGI Loop 2 dispatch + cross-check sub-phase.
+
+    Per spec sec.2.1 + INV-35: cross-check ANNOTATES findings BEFORE
+    INV-29 routes them to ``/receiving-code-review``. Verdict itself is
+    unchanged (cross-check only modifies the findings set, never the
+    verdict string).
+
+    Per CRITICAL #1+#4 redesign: annotation-only — the returned findings
+    list has the same length as MAGI's emitted findings; INV-29 is the
+    only stage that may filter.
+
+    Args:
+        diff: Cumulative diff under review.
+        iter_n: Current MAGI Loop 2 iteration number.
+        config: PluginConfig (or duck-typed) with ``magi_cross_check`` field.
+        audit_dir: Directory for cross-check audit artifacts.
+        **magi_kwargs: Forwarded to :func:`_invoke_magi_loop2`.
+
+    Returns:
+        Tuple ``(verdict_string, annotated_findings_list)``.
+    """
+    _emit_cross_check_disabled_breadcrumb_once(config)
+    verdict, findings = _invoke_magi_loop2(**magi_kwargs)
+    annotated = _loop2_cross_check(
+        diff=diff,
+        verdict=verdict,
+        findings=findings,
+        iter_n=iter_n,
+        config=config,
+        audit_dir=audit_dir,
+    )
+    return verdict, annotated
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for /sbtdd pre-merge (Loop 1 + Loop 2, sec.S.5.6)."""
     parser = _build_parser()
