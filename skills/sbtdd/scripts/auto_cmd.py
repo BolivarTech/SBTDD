@@ -665,6 +665,41 @@ def _update_progress(
         terminating mid-cycle on a transient filesystem error (disk
         full, locked file, antivirus interference, etc.). The original
         ``auto-run.json`` is preserved unchanged on failure.
+
+    Loop 1 fix (v0.5.0 CRITICAL #3): the full read-modify-write cycle
+    is now wrapped in :func:`_with_file_lock`. Pre-fix only
+    :func:`_drain_heartbeat_queue_and_persist` held the cross-process
+    advisory lock; this writer plus :func:`_write_auto_run_audit`
+    performed RMW unprotected, so the C4 contract was incomplete. The
+    fix routes both writers through the same lock helper so all three
+    writers serialise correctly.
+    """
+
+    def _do_write() -> None:
+        _do_update_progress(
+            auto_run_path,
+            phase=phase,
+            task_index=task_index,
+            task_total=task_total,
+            sub_phase=sub_phase,
+        )
+
+    _with_file_lock(auto_run_path, _do_write)
+
+
+def _do_update_progress(
+    auto_run_path: Path,
+    *,
+    phase: int,
+    task_index: int | None,
+    task_total: int | None,
+    sub_phase: str | None,
+) -> None:
+    """Inner RMW for ``_update_progress`` -- runs UNDER ``_with_file_lock``.
+
+    The original ``_update_progress`` body, factored out so the public
+    entry point can wrap the full RMW cycle in the cross-process advisory
+    lock without duplicating the read / merge / atomic-replace logic.
     """
     tmp: Path | None = None
     try:
@@ -2089,33 +2124,53 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
         )
     payload.validate_schema()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # v0.4.0 J6: preserve the ``progress`` field (and only that field)
-    # from any pre-existing on-disk payload so audit refreshes do not
-    # transiently drop the live progress snapshot. Failures to read or
-    # parse the prior payload are swallowed -- a corrupted or missing
-    # file means we have nothing to preserve, which is acceptable.
-    audit_dict: dict[str, object] = dict(payload.to_dict())
-    if path.exists():
+
+    # Loop 1 fix (v0.5.0 CRITICAL #3): wrap the full RMW cycle in
+    # ``_with_file_lock`` so this writer serialises with the other two
+    # ``auto-run.json`` writers (``_update_progress`` and
+    # ``_drain_heartbeat_queue_and_persist``). The C4 claim in CHANGELOG
+    # `[0.5.0]` previously held only for the drain helper; this fix
+    # extends it to all three writers.
+    propagated_error: list[BaseException] = []
+
+    def _do_write() -> None:
         try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(existing, dict) and "progress" in existing:
-                audit_dict["progress"] = existing["progress"]
-        except (OSError, json.JSONDecodeError):
-            pass
-    # Atomic write via tmp + os.replace (MAGI Loop 2 D iter 1 Caspar):
-    # mirrors state_file.save so a process killed mid-write never leaves
-    # a corrupted auto-run.json. If os.replace fails the tmp file is
-    # cleaned up before the error propagates so nothing leaks.
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
-    try:
-        os.replace(tmp, path)  # atomic on POSIX and Windows
-    except OSError:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+            # v0.4.0 J6: preserve the ``progress`` field (and only that field)
+            # from any pre-existing on-disk payload so audit refreshes do not
+            # transiently drop the live progress snapshot. Failures to read or
+            # parse the prior payload are swallowed -- a corrupted or missing
+            # file means we have nothing to preserve, which is acceptable.
+            audit_dict: dict[str, object] = dict(payload.to_dict())
+            if path.exists():
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(existing, dict) and "progress" in existing:
+                        audit_dict["progress"] = existing["progress"]
+                except (OSError, json.JSONDecodeError):
+                    pass
+            # Atomic write via tmp + os.replace (MAGI Loop 2 D iter 1 Caspar):
+            # mirrors state_file.save so a process killed mid-write never leaves
+            # a corrupted auto-run.json. If os.replace fails the tmp file is
+            # cleaned up before the error propagates so nothing leaks.
+            tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+            tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
+            try:
+                os.replace(tmp, path)  # atomic on POSIX and Windows
+            except OSError:
+                try:
+                    tmp.unlink()
+                except FileNotFoundError:
+                    pass
+                raise
+        except BaseException as exc:  # noqa: BLE001
+            # _with_file_lock signature swallows fn return; capture the
+            # exception so we can re-raise on the calling thread (preserves
+            # OSError semantics expected by callers).
+            propagated_error.append(exc)
+
+    _with_file_lock(path, _do_write)
+    if propagated_error:
+        raise propagated_error[0]
 
 
 def main(argv: list[str] | None = None) -> int:

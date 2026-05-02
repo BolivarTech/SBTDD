@@ -773,6 +773,7 @@ def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
     advisory POSIX/Windows lock is per-process.
     """
     import sys
+
     auto_run = tmp_path / "auto-run.json"
     auto_run.write_text("{}", encoding="utf-8")
 
@@ -790,9 +791,7 @@ def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
         except BaseException as e:  # noqa: BLE001
             errors.append(e)
 
-    threads = [
-        threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)
-    ]
+    threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
     for t in threads:
         t.start()
     for t in threads:
