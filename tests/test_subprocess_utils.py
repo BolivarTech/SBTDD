@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+
 
 def test_run_with_timeout_returns_completed_process():
     from subprocess_utils import run_with_timeout
@@ -91,3 +93,65 @@ def test_kill_tree_posix_sends_sigterm_then_sigkill(monkeypatch):
     monkeypatch.setattr("subprocess_utils.sys.platform", "linux")
     kill_tree(FakeProc())
     assert signals_sent == ["SIGTERM", "SIGKILL"]
+
+
+def test_streamed_with_timeout_returns_stdout_and_stderr_separately():
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys, time\n"
+        "for i in range(3):\n"
+        "    sys.stdout.write(f'out{i}\\n'); sys.stdout.flush()\n"
+        "    time.sleep(0.05)\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test",
+    )
+    assert result.returncode == 0
+    assert "out0" in result.stdout
+    assert "out2" in result.stdout
+
+
+def test_pump_handles_partial_utf8_split_at_chunk_boundary():
+    """C1 fold-in: incremental UTF-8 decoder handles multi-byte split.
+
+    Emits a byte stream containing 2-byte (e-acute) + 3-byte (currency
+    sign) + 4-byte (emoji) UTF-8 sequences interleaved with ASCII so
+    that any naive per-chunk decode would corrupt the output. The
+    incremental decoder must reassemble all sequences cleanly.
+    """
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys\n"
+        "data = ('hello cafe' + chr(0xE9) + ' euro' + chr(0x20AC) +\n"
+        "        ' emoji' + chr(0x1F600) + ' done').encode('utf-8')\n"
+        "sys.stdout.buffer.write(data)\n"
+        "sys.stdout.buffer.flush()\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test",
+    )
+    assert result.returncode == 0
+    assert chr(0xE9) in result.stdout
+    assert chr(0x20AC) in result.stdout
+    assert chr(0x1F600) in result.stdout
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="C2 Windows threaded-reader fallback is Windows-specific",
+)
+def test_streaming_pump_works_on_windows_subprocess():
+    """C2 fold-in: Windows threaded-reader fallback delivers chunks."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys, time\n"
+        "for i in range(5):\n"
+        "    sys.stdout.write(f'win{i}\\n'); sys.stdout.flush()\n"
+        "    time.sleep(0.02)\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=10.0, dispatch_label="test-win",
+    )
+    assert result.returncode == 0
+    assert "win0" in result.stdout
+    assert "win4" in result.stdout
