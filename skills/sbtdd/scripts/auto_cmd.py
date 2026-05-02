@@ -2625,6 +2625,15 @@ def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     # v0.5.0 S1-9 transition site #5: phase 3 entry (pre-merge).
     _set_progress(phase=3)
     root: Path = ns.project_root
+    # v1.0.0 C2 wiring (O-2 Loop 1 review CRITICAL #2): spec-snapshot drift
+    # gate at auto-phase-3 entry per spec sec.3.2 H2-3 + H2-5. Same gate as
+    # interactive pre-merge so both code paths fail closed identically when
+    # scenarios drift between plan-approval and merge.
+    pre_merge_cmd._check_spec_snapshot_drift(
+        spec_path=root / "sbtdd" / "spec-behavior.md",
+        snapshot_path=root / "planning" / "spec-snapshot.json",
+        state_file_path=root / ".claude" / "session-state.json",
+    )
     pre_merge_cmd._loop1(root)
     max_iter = (
         ns.magi_max_iterations

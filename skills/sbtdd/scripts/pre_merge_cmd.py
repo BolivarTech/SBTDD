@@ -1430,6 +1430,16 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = ns.project_root
     _preflight(root)
     cfg = load_plugin_local(root / ".claude" / "plugin.local.md")
+    # v1.0.0 C2 wiring (O-2 Loop 1 review CRITICAL #2): spec-snapshot drift
+    # gate at pre-merge entry per spec sec.3.2 H2-3 + H2-5. Raises
+    # MAGIGateError BEFORE Loop 1 / Loop 2 if scenarios drifted since plan
+    # approval, or if the snapshot file was deleted while the watermark in
+    # session-state.json says it WAS emitted (bypass-by-deletion guard).
+    _check_spec_snapshot_drift(
+        spec_path=root / "sbtdd" / "spec-behavior.md",
+        snapshot_path=root / "planning" / "spec-snapshot.json",
+        state_file_path=root / ".claude" / "session-state.json",
+    )
     _loop1(root)
     verdict = _loop2(root, cfg, ns.magi_threshold, ns)
     magi_dispatch.write_verdict_artifact(verdict, root / ".claude" / "magi-verdict.json")
