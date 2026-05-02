@@ -311,6 +311,48 @@ def test_o2_dual_stream_in_window_prefixes():
     assert "[stdout]" in combined or "[stderr]" in combined
 
 
+def test_o2_dual_stream_within_production_100ms_window_prefixes():
+    """O2 production-default boundary (Loop 2 WARNING #3 fix).
+
+    The original ``test_o2_dual_stream_in_window_prefixes`` uses a
+    permissive 500ms window to absorb CI scheduling jitter. That value
+    does not validate the production default 100ms window
+    (``DEFAULT_ORIGIN_WINDOW_SECONDS = 0.100``) — a regression that
+    halved the window to 50ms would still pass the 500ms test.
+
+    This test exercises the production 100ms window boundary
+    deterministically: subprocess writes stdout, sleeps 5ms (well within
+    100ms), writes stderr. Both chunks must be classified as dual-stream
+    and at least one of them prefixed. Larger sleeps would risk falling
+    outside the window on slow CI machines; 5ms is comfortably below
+    even pessimistic scheduler jitter.
+    """
+    from subprocess_utils import run_streamed_with_timeout
+
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys, time\n"
+            "sys.stdout.write('out1\\n'); sys.stdout.flush()\n"
+            "time.sleep(0.005)\n"
+            "sys.stderr.write('err1\\n'); sys.stderr.flush()\n"
+        ),
+    ]
+    result = run_streamed_with_timeout(
+        cmd,
+        origin_disambiguation=True,
+        dispatch_label="test",
+        origin_window_seconds=0.100,  # Production default
+    )
+    combined = result.stdout + result.stderr
+    assert "[stdout]" in combined or "[stderr]" in combined, (
+        "production 100ms window must classify writes 5ms apart as "
+        "dual-stream and prefix at least one chunk; got combined="
+        f"{combined!r}"
+    )
+
+
 def test_o3_alternating_distant_windows_no_prefix():
     """O3: streams emit > origin_window_seconds apart -> no prefix.
 
