@@ -791,18 +791,22 @@ def test_concurrent_update_progress_writers_serialize_via_file_lock(tmp_path):
         except BaseException as e:  # noqa: BLE001
             errors.append(e)
 
-    threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=10.0)
+    # Loop 2 W13: ``_update_progress`` enforces main-thread at entry; this
+    # concurrent test exercises the LOCK code path under thread contention,
+    # which by definition must run from worker threads. Bypass the W13
+    # assert for the duration of this test (production callers stay on
+    # the main thread; the assertion guards them).
+    original_assert = auto_cmd._assert_main_thread
+    auto_cmd._assert_main_thread = lambda: None
+    try:
+        threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10.0)
+    finally:
+        auto_cmd._assert_main_thread = original_assert
 
-    # Errors raised in writer threads must surface (not silently lost).
-    # _assert_main_thread tripping is acceptable on non-main threads when
-    # _serialize_progress fires; that is the W8 single-writer guard and
-    # is wrapped in try/except in _update_progress itself, so writers
-    # should NOT raise. _update_progress's own write path is what we
-    # exercise.
     if errors:
         # Re-raise the first error so the test failure is informative.
         raise errors[0]
@@ -1003,14 +1007,20 @@ def test_concurrent_writers_with_threading_rlock_serialize(tmp_path):
         except BaseException as e:  # noqa: BLE001
             errors.append(e)
 
-    threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(20)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=15.0)
-        assert not t.is_alive(), (
-            f"writer thread {t.name} hung past 15s -- bookkeeping leak suspected"
-        )
+    # Loop 2 W13: bypass main-thread guard for this concurrency-only test.
+    original_assert = auto_cmd._assert_main_thread
+    auto_cmd._assert_main_thread = lambda: None
+    try:
+        threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15.0)
+            assert not t.is_alive(), (
+                f"writer thread {t.name} hung past 15s -- bookkeeping leak suspected"
+            )
+    finally:
+        auto_cmd._assert_main_thread = original_assert
 
     if errors:
         raise errors[0]
