@@ -42,8 +42,10 @@ Resolved once at task-loop entry per auto run. INV-0 cascade applies: CLAUDE.md 
 ### PluginConfig new fields (spec sec.5.2)
 
 ```python
-# v1.0.0 Feature G
-magi_cross_check: bool = True
+# v1.0.0 Feature G — default OFF (opt-in) per balthasar Loop 2 iter 1
+# WARNING: recursive dogfood circular risk. Operator flips via
+# `magi_cross_check: true` in plugin.local.md.
+magi_cross_check: bool = False
 
 # v1.0.0 Feature I
 schema_version: int = 1  # default 1 = v0.5.0 backward compat
@@ -2253,8 +2255,8 @@ git commit -m "feat: add ResolvedModels frozen dataclass (J2 sec.5.1)"
 Append to `tests/test_config.py`:
 
 ```python
-def test_plugin_config_magi_cross_check_default_true(tmp_path):
-    """Feature G: magi_cross_check field defaults to True."""
+def test_plugin_config_magi_cross_check_default_false(tmp_path):
+    """Feature G: magi_cross_check field defaults to False (opt-in per balthasar WARNING)."""
     base = """---
 stack: python
 author: Julian Bolivar
@@ -2280,7 +2282,7 @@ auto_heartbeat_interval_seconds: 15
     from config import load_plugin_local
 
     cfg = load_plugin_local(config_path)
-    assert cfg.magi_cross_check is True
+    assert cfg.magi_cross_check is False
 
 
 def test_plugin_config_magi_cross_check_can_be_disabled(tmp_path):
@@ -2325,8 +2327,10 @@ In `skills/sbtdd/scripts/config.py`, modify `PluginConfig`:
 class PluginConfig:
     # ... existing fields ...
 
-    # v1.0.0 Feature G
-    magi_cross_check: bool = True
+    # v1.0.0 Feature G — default OFF (opt-in per balthasar Loop 2 iter 1
+    # WARNING: recursive dogfood circular risk). Operator opts in via
+    # `magi_cross_check: true` in plugin.local.md.
+    magi_cross_check: bool = False
 ```
 
 In `load_plugin_local`, add default:

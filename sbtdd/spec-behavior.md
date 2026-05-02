@@ -617,8 +617,14 @@ ambiguity flagged by MAGI Checkpoint 2 iter 1 CRITICAL #3.
 class PluginConfig:
     # ... existing fields including v0.5.0 observability ...
 
-    # v1.0.0 Feature G
-    magi_cross_check: bool = True
+    # v1.0.0 Feature G — default OFF (opt-in) per balthasar Loop 2 iter 1
+    # WARNING (recursive dogfood circular risk): the cross-check sub-phase
+    # invokes `/requesting-code-review` from inside the pre-merge gate
+    # that may itself be evaluating the cross-check implementation diff.
+    # Until field data confirms the meta-reviewer is robust, ship as
+    # opt-in. Operators flip via `magi_cross_check: true` in
+    # plugin.local.md.
+    magi_cross_check: bool = False
 
     # v1.0.0 Feature I
     schema_version: int = 1  # default 1 = v0.5.0 backward compat
@@ -713,19 +719,24 @@ Cap=10. Clean-to-go criterion (zero CRITICAL + zero high-impact WARNING).
 Cap=5 per `auto_magi_max_iterations`. NEW: cross-check (Feature G)
 **dogfooded during own ship cycle**:
 
-**Escenario R-Dogfood: Feature G activated mid-Loop-2**
+**Escenario R-Dogfood: Feature G activated mid-Loop-2 (opt-in)**
 
 > **Given** Subagent #1 ships Feature G during T1.1-T1.6 (early in
-> Subagent #1 sequential order). Subagent #2 ships
-> `magi_cross_check: True` default early too (T2.2). Both land on
-> branch BEFORE Loop 2 iter 1 starts.
-> **When** Loop 2 iter 1 fires.
+> Subagent #1 sequential order). Default config is
+> `magi_cross_check: False` per balthasar WARNING (recursive dogfood
+> circular risk).
+> **When** orchestrator opts in for the v1.0.0 Loop 2 dogfood by setting
+> `magi_cross_check: true` in the project's `plugin.local.md` BEFORE
+> Loop 2 iter 1 starts.
 > **Then** cross-check sub-phase runs as part of pre-merge gate. If
-> MAGI emits false-positive findings, cross-check filters them. If
-> cross-check itself fails (G5 escenario), gracefully degrades.
+> MAGI emits false-positive findings, cross-check ANNOTATES them
+> (CRITICAL #1+#4 redesign — never removes); operator at INV-29 sees
+> both the original finding and the annotation. If cross-check itself
+> fails (G5 escenario), gracefully degrades.
 > **Recursive payoff confirmed**: v1.0.0 Loop 2 is the FIRST gate to
 > exercise cross-check on its own diff. Output empirical signal:
-> cross-check audit artifacts written for each iter.
+> cross-check audit artifacts written for each iter under
+> `.claude/magi-cross-check/`.
 
 ### 7.4 Invariantes preserved
 
@@ -828,7 +839,9 @@ v1.0.0 ship-ready cuando:
 - **F2**. Audit artifact `.claude/magi-cross-check/iter{N}-{timestamp}.json`
   written per iter. Schema per G6.
 - **F3**. INV-35 documented + adopted in spec sec.7.4.
-- **F4**. Default `magi_cross_check: True`; opt-out via plugin.local.md.
+- **F4**. Default `magi_cross_check: False` (opt-in per balthasar Loop 2
+  iter 1 WARNING — recursive dogfood circular risk); operator opts in
+  via `magi_cross_check: true` in plugin.local.md.
 - **F5**. F44.3: `retried_agents` propagated to auto-run.json. F44.3-1
   + F44.3-2 escenarios pass.
 - **F6**. J2: ResolvedModels preflight reduces CLAUDE.md reads to 1 per
