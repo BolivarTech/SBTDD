@@ -325,10 +325,17 @@ once instead.
 > authority, cannot be silently overridden by project file). The
 > first regex match terminates the cascade, so global wins.
 > ResolvedModels.magi_dispatch == "claude-opus-4-7"; the project
-> pin `claude-haiku-4-5` is NEVER applied. stderr breadcrumb
-> documents the global-pin source. This is the regression guard
-> for caspar Loop 2 iter 3 CRITICAL #1 (cascade had been inverted
-> in iter 2).
+> pin `claude-haiku-4-5` is NEVER applied. **Two stderr breadcrumbs
+> fire** (melchior iter 4 W7 fix): (1) the regular INV-0 cascade
+> message documenting the global-pin source, AND (2) a shadow
+> message `[sbtdd] INV-0 cascade: global pin <X> OVERRIDES project
+> pin <Y>; project pin shadowed (per INV-0 maxima precedencia)` so
+> the operator understands why their project-level config is
+> silently overridden. Same-pin (global == project) case suppresses
+> the shadow message — there is no surprise to surface. This is
+> the regression guard for caspar Loop 2 iter 3 CRITICAL #1
+> (cascade had been inverted in iter 2) plus melchior iter 4 W7
+> shadow visibility.
 
 **Escenario J2-3: ResolvedModels immutable**
 

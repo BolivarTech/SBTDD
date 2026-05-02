@@ -1450,39 +1450,59 @@ def _resolve_all_models_once(config: Any) -> Any:
     # (`superpowers_dispatch._read_cascaded_claude_md` or similar), prefer
     # delegating to it ONLY if the helper honors the same global-first
     # order; a project-first helper would itself contradict INV-0.
-    claude_md_text = ""
-    pinned_source = None  # "global" | "project" for stderr breadcrumb
+    # Cascade reads BOTH files first (cheap I/O), then applies INV-0
+    # global-first selection. Reading both lets us detect the
+    # multi-pin shadow case (caspar Loop 2 iter 4 W6 / melchior iter 4
+    # W7): when global AND project pin DIFFERENT models, global wins
+    # per INV-0, but the operator should be told the project pin was
+    # SHADOWED so they understand why their project-level config is
+    # being silently overridden.
     global_claude_md = Path.home() / ".claude" / "CLAUDE.md"
     project_claude_md = Path.cwd() / "CLAUDE.md"
-    for candidate, label in (
-        (global_claude_md, "global"),
-        (project_claude_md, "project"),
-    ):
-        try:
-            text = candidate.read_text(encoding="utf-8")
-        except (FileNotFoundError, OSError):
-            continue
-        if models.INV_0_PINNED_MODEL_RE.search(text):
-            # Pin found — stop cascade. Global wins over project per INV-0.
-            claude_md_text = text
-            pinned_source = label
-            break
-        # No pin in this candidate: keep its text only if no later candidate
-        # exists; the loop body will overwrite if the next candidate has a
-        # pin. We retain the latest read text for the post-loop regex check
-        # so a non-pinning global file doesn't shadow a project pin.
-        claude_md_text = text
 
-    # Check for INV-0 pin (after cascade selection above).
-    pinned_model = None
-    match = models.INV_0_PINNED_MODEL_RE.search(claude_md_text)
-    if match:
-        pinned_model = match.group(1)
-        source_note = f" (source: {pinned_source})" if pinned_source else ""
+    def _read_pin(path: Path) -> str | None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            return None
+        m = models.INV_0_PINNED_MODEL_RE.search(text)
+        return m.group(1) if m else None
+
+    global_pin = _read_pin(global_claude_md)
+    project_pin = _read_pin(project_claude_md)
+
+    # Multi-pin shadow case (melchior iter 4 W): global pin overrides
+    # project pin, but project pin existed and was DIFFERENT. Emit
+    # diagnostic breadcrumb so operator understands why their project
+    # config is silently shadowed. Same-pin case is silent (no shadow,
+    # no surprise).
+    if global_pin and project_pin and global_pin != project_pin:
+        sys.stderr.write(
+            f"[sbtdd] INV-0 cascade: global pin {global_pin!r} OVERRIDES "
+            f"project pin {project_pin!r}; project pin shadowed (per "
+            f"INV-0 maxima precedencia). Resolve by removing one of the "
+            f"two pins or aligning them.\n"
+        )
+
+    # INV-0 global-first selection: global wins if pinned; otherwise
+    # project wins if pinned; otherwise fall through to plugin.local.md.
+    pinned_model: str | None
+    pinned_source: str | None
+    if global_pin:
+        pinned_model = global_pin
+        pinned_source = "global"
+    elif project_pin:
+        pinned_model = project_pin
+        pinned_source = "project"
+    else:
+        pinned_model = None
+        pinned_source = None
+
+    if pinned_model:
         sys.stderr.write(
             f"[sbtdd] INV-0 cascade: CLAUDE.md pins {pinned_model!r}"
-            f"{source_note}; plugin.local.md per-skill model fields "
-            f"silently overridden\n"
+            f" (source: {pinned_source}); plugin.local.md per-skill "
+            f"model fields silently overridden\n"
         )
 
     def _pick(field_value: str | None, default: str) -> str:
@@ -1597,6 +1617,70 @@ def test_j2_2b_global_pin_wins_over_project_pin(monkeypatch, capsys):
     assert "INV-0 cascade" in captured.err
     # Breadcrumb mentions source = global (regression guard for cascade order).
     assert "global" in captured.err
+
+
+def test_j2_2c_multi_pin_shadow_breadcrumb(monkeypatch, capsys):
+    """J2-2c (melchior iter 4 W7): when both global AND project pin
+    DIFFERENT models, an additional shadow breadcrumb tells the
+    operator the project pin was overridden. Same-pin case is silent.
+    """
+    from auto_cmd import _resolve_all_models_once
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+
+    def fake_read_text(self, **_kw):
+        if str(self) == str(global_path):
+            return "Use claude-opus-4-7 for all sessions"
+        if str(self) == str(project_path):
+            return "Use claude-haiku-4-5 for all sessions"
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = None
+    config.spec_reviewer_model = None
+    config.code_review_model = None
+    config.magi_dispatch_model = None
+
+    _resolve_all_models_once(config)
+    captured = capsys.readouterr()
+    # Shadow breadcrumb explicitly tells operator the project pin was overridden.
+    assert "OVERRIDES" in captured.err
+    assert "claude-opus-4-7" in captured.err  # global pin shown
+    assert "claude-haiku-4-5" in captured.err  # project pin shown
+    assert "shadowed" in captured.err.lower()
+
+
+def test_j2_2d_no_shadow_breadcrumb_when_pins_match(monkeypatch, capsys):
+    """J2-2d: when global AND project pin the SAME model, no shadow
+    breadcrumb fires (no shadow happened, no surprise to surface).
+    """
+    from auto_cmd import _resolve_all_models_once
+
+    global_path = Path.home() / ".claude" / "CLAUDE.md"
+    project_path = Path.cwd() / "CLAUDE.md"
+    same_pin_text = "Use claude-opus-4-7 for all sessions"
+
+    def fake_read_text(self, **_kw):
+        if str(self) in (str(global_path), str(project_path)):
+            return same_pin_text
+        return ""
+
+    monkeypatch.setattr("pathlib.Path.read_text", fake_read_text)
+    config = MagicMock()
+    config.implementer_model = None
+    config.spec_reviewer_model = None
+    config.code_review_model = None
+    config.magi_dispatch_model = None
+
+    _resolve_all_models_once(config)
+    captured = capsys.readouterr()
+    # The single-pin breadcrumb still fires.
+    assert "INV-0 cascade" in captured.err
+    # But the shadow-specific message does NOT fire (no contradiction).
+    assert "OVERRIDES" not in captured.err
+    assert "shadowed" not in captured.err.lower()
 ```
 
 - [ ] **Step 2: Run + verify pass**
