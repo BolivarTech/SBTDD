@@ -8,6 +8,191 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [0.5.0] - 2026-05-02
+
+### Added
+
+- **Heartbeat in-band emitter** (`scripts/heartbeat.py`) -- context manager
+  wrapping long subprocess dispatches; daemon thread emits stderr breadcrumb
+  every 15s (configurable) with iter / phase / task / dispatch / elapsed.
+  Lock-protected singleton + Event-interruptible tick loop. INV-32 enforces
+  resilience: heartbeat thread NEVER blocks/kills the auto run; first-failure
+  stderr breadcrumb + queue-reported counter to main thread for incremental
+  `auto-run.json` persistence.
+- **`/sbtdd status --watch`** companion subcommand (sec.2.2 W1-W6) for
+  out-of-band monitoring; default TTY rewrite-line render, `--json` flag for
+  piping, `--interval N` override (validated >= 0.1s). 5x retry with
+  exponential backoff on JSON parse contention; slow-poll fallback after 3
+  consecutive parse failures (idle auto-runs do NOT trigger slow-poll).
+- **Per-stream timeout helper (J3, opt-in)** --
+  `subprocess_utils.run_streamed_with_timeout` ships as an opt-in helper
+  with binary-mode pipes + `os.read` + incremental UTF-8 decoder (POSIX)
+  and `threading.Thread` + `queue.Queue` reader fallback (Windows). Kills
+  subprocess if all open streams silent for
+  `auto_per_stream_timeout_seconds` (default 900s).
+  `auto_no_timeout_dispatch_labels` allowlist exempts MAGI dispatches by
+  default (`["magi-*"]`). Bare `*` rejected at config load. Production
+  wiring of existing `run_with_timeout` callers is **deferred to v0.5.1**.
+- **Origin disambiguation helper (J7, opt-in)** -- same helper provides
+  100ms temporal-window prefix logic (W3 default 100ms, raised from
+  iter-1 50ms baseline for OS scheduling jitter tolerance) gated behind
+  `auto_origin_disambiguation` (default `True`). Forward-only semantics
+  (no retroactive prefix). Tests cover O1-O4 scenarios; production wiring
+  of existing `run_with_timeout` callers is **deferred to v0.5.1**.
+- **C1 + C2 streaming pump fold-ins** (Checkpoint 2 iter 4): binary-mode
+  pipes + `os.read` + incremental UTF-8 decoder (POSIX) and
+  `threading.Thread` + `queue.Queue` reader fallback (Windows). Multi-byte
+  UTF-8 sequences split across chunk boundaries are reassembled cleanly;
+  `selectors.DefaultSelector` is bypassed on Windows where it does not
+  support pipe FDs.
+- **ProgressContext dataclass** (frozen) in `models.py`; lock-protected
+  singleton in `scripts/heartbeat.py` with `get_current_progress()` /
+  `set_current_progress()`. Serialised to `auto-run.json` under `progress`
+  key with ISO 8601 UTC datetimes (`Z` suffix).
+- **5 new PluginConfig fields** (sec.4.3):
+  `auto_per_stream_timeout_seconds`, `auto_heartbeat_interval_seconds`,
+  `status_watch_default_interval_seconds`, `auto_origin_disambiguation`,
+  `auto_no_timeout_dispatch_labels`.
+- **3 new invariants**: INV-32 (heartbeat resilience + queue-based
+  incremental persistence), INV-33 (per-stream timeout last-resort kill --
+  heartbeat 1st-line, watch 2nd-line, timeout 3rd-line, operator
+  intervention 4th), INV-34 (timeout-vs-interval ratio + floor + ceiling
+  validation -- 4 clauses with distinct error messages, validated at
+  config load with the ratio check leading per fixture contract).
+
+### Changed
+
+- `auto-run.json` schema gains `progress` key (ProgressContext snapshot,
+  ISO 8601 UTC datetimes) and `heartbeat_failed_writes_total` counter.
+  Backward-compat: v0.4.0 files without these fields parse cleanly.
+
+### Hotfixes folded
+
+- HF1: recovery breadcrumb wording aligned across spec / CHANGELOG / impl
+  (single-line canonical text, whitespace-normalised cross-artifact test
+  in `tests/test_changelog.py`).
+- HF2: marker file schema docs (`verdict`, `iteration`, `agents`,
+  `timestamp`) match the actual emission fields documented in the
+  `magi_dispatch._MARKER_FILENAME` docstring.
+- HF3: F45 verdict-set delta documented (validates `verdict in
+  VERDICT_RANK ∪ agent-aliases`; unknown values raise `ValidationError`).
+
+### Process notes
+
+- Spec/plan bundle accepted via INV-0 override after MAGI Checkpoint 2
+  4-iter convergence pattern (verdict stable `GO_WITH_CAVEATS (3-0)` full
+  no-degraded; iter 4 verdict 2 APPROVE + 1 CONDITIONAL with deferrables).
+  Known Limitations from Checkpoint 2 iter 4 documented in spec sec.11;
+  resolution in this implementation phase via plan sec.13 fold-in tasks.
+- **Pre-merge MAGI Loop 2 audit trail (4 iters, 2026-05-02):**
+  - **Iter 1**: GO_WITH_CAVEATS (3-0); 1 CRITICAL (self-deadlock) + 10
+    WARNINGs. Fold-in via mini-cycle TDD (Loop 2 iter 1 fix subagent, 13
+    commits).
+  - **Iter 2**: GO_WITH_CAVEATS (3-0); 0 CRITICALs + 14 WARNINGs (mostly
+    polish). Fold-in via Groups A-G (Loop 2 iter 2 fix subagent, 16 commits).
+  - **Iter 3**: GO_WITH_CAVEATS (3-0); Caspar APPROVE 82% (first APPROVE);
+    0 CRITICALs + 8 WARNINGs (1 structural — `RLock._is_owned()` private API).
+    Fold-in via Groups A-F + G (Loop 2 iter 3 fix subagent, 9 commits).
+  - **Iter 4 (final)**: GO_WITH_CAVEATS (3-0); **2 APPROVE (Melchior 84%,
+    Balthasar 78%) + 1 CONDITIONAL (Caspar 75%)**; 0 CRITICALs + 7 WARNINGs
+    (mostly v0.5.1 deferrable). Accepted via INV-0 override 2026-05-02.
+    Caspar's iter 4 quote: "the v0.5.0 observability pillar can land safely
+    with these caveats acknowledged". Melchior: "APPROVE for ship... none
+    block merge". Balthasar: "Approve and ship v0.5.0".
+  - **Convergence pattern**: 0 CRITICALs maintained 3 consecutive iters;
+    WARNING count 14 → 8 → 7; agent verdicts trended Conditional → Approve.
+    Architecture consistently approved by all 3 agents in all 4 iters.
+- True parallel 2-subagent dispatch repeated (Heartbeat track vs
+  Streaming/Watch/Docs track), surfaces 100% disjoint, ~6-8h wall time.
+- W1 (Checkpoint 2 iter 4 melchior + caspar): INV-34 clause 1 is
+  mathematically subsumed by clauses 2 + 4 in the default range; preserved
+  explicitly as defense-in-depth. See `docs/v0.5.0-config-matrix.md`.
+- W7 (Checkpoint 2 iter 4 balthasar): threading correctness in heartbeat
+  + Windows reader fallback is treated as accepted-risk per the
+  single-thread `auto_cmd` invariant + lock-protected singleton.
+- **C4 file-lock scope (Loop 2 WARNING #2 fix):** the `_with_file_lock`
+  helper around the three `auto-run.json` writers
+  (`_update_progress`, `_write_auto_run_audit`,
+  `_drain_heartbeat_queue_and_persist`) provides **intra-process**
+  writer serialisation. External readers (`status --watch`, operator
+  `cat`, OS backup tools) bypass the lock and rely on the atomic-rename
+  semantics of `os.replace` (POSIX + Windows) to never observe a torn
+  JSON document. Earlier docstrings called the lock "cross-process",
+  which overclaimed: no external process today acquires this exact
+  lock, and atomic rename is what actually protects readers.
+- **Scope-trim default for future MAGI Checkpoint 2 cycles (Loop 2
+  WARNING #5 fix):** the v0.5.0 cycle accepted MAGI Checkpoint 2 at
+  iter 4 via INV-0 override. That precedent is acceptable for v0.5.0
+  specifically because the bundle combined multiple disjoint surfaces
+  (heartbeat, status --watch, J3, J7) that exceeded the standard 3-iter
+  budget for spec clarification rather than for fundamental scope
+  problems. **For v0.6.0+ cycles, any plan needing >3 MAGI Checkpoint 2
+  iterations should be treated as a scope-trim signal rather than an
+  INV-0 override candidate.** The orchestrator should default to
+  splitting the bundle (deferring the lower-priority surface to the
+  next minor release) at iter 3 unless the user explicitly chooses to
+  override with documented rationale. This is process commitment, not
+  a hard rule (INV-0 remains available), but bundle width should be
+  the first hypothesis when MAGI Checkpoint 2 fails to converge in 3
+  iterations. Rationale: MAGI iter budget is calibrated for spec/plan
+  misalignment; recurring iter exhaustion signals scope is too wide
+  to evaluate coherently in a single review pass.
+
+### Deferred (rolled to v0.5.1, target ship: within 2 weeks of v0.5.0 tag)
+
+- **J3 + J7 production wiring** (LOCKED v0.5.1 blocker): route the 33
+  existing `run_with_timeout` callers in `auto_cmd.py` /
+  `pre_merge_cmd.py` through
+  `subprocess_utils.run_streamed_with_timeout`. The helper itself ships
+  in v0.5.0 as opt-in; tests cover the helper's behavior, but no v0.5.0
+  production caller invokes it. Until this lands, the J3 + J7 helpers
+  ship as opt-in infrastructure with zero production callers (Loop 2
+  iter 3 W3 fix: explicit ship-date target documented to keep the gap
+  visible).
+
+- **Loop 2 iter 4 Known Limitations** (folded as v0.5.1 backlog per INV-0
+  acceptance 2026-05-02 — verdict `GO_WITH_CAVEATS (3-0)` full no-degraded
+  with 2 APPROVE + 1 CONDITIONAL):
+  - **W4 (caspar)**: `pre_merge_cmd._wrap_with_heartbeat_if_auto` bare-except
+    neutralizes the fail-loud `_dispatch_with_heartbeat` contract introduced
+    in Loop 1 iter 1. Fix in v0.5.1: narrow except to the specific introspection
+    failures (`AttributeError`, `RuntimeError`) the wrap is guarding against;
+    let `ValueError` (the fail-loud signal) propagate.
+  - **W5 (caspar)**: `status_cmd.watch_main` poll loop has no exception guard
+    around the cycle body. Long-running UX feature should survive transient
+    errors. Fix in v0.5.1: wrap the cycle body in try/except logging unexpected
+    exceptions to stderr and continuing the poll loop.
+  - **W6 (caspar)**: tests directly mutate `auto_cmd._assert_main_thread`
+    instead of `monkeypatch.setattr`. Fix in v0.5.1: convert to monkeypatch.setattr
+    so cleanup is automatic on test failure. Coverage gap acknowledged in W5
+    rationale comments (Loop 2 iter 3 fix).
+  - **W7 (caspar)**: decode-error dedup + observability counter self-defeat
+    when persistence itself is the failing path. Fix in v0.5.1: separate
+    persistence-failure breadcrumb from drain-failure breadcrumb.
+  - **B1, B2, B3 (balthasar)**: J3/J7 zero callers (already tracked above);
+    test concurrency bypasses fragile (W6 above); threading complexity high
+    (acknowledged process risk, no concrete fix needed in v0.5.0+).
+  - **5 INFO-level items**: bytecode-deployment fragility of inspect.getsource
+    assertion; BaseException catch in _write_auto_run_audit delays SystemExit;
+    INV-34 messages omit unit suffix; autouse fixture only in test_auto_progress.py;
+    Windows kill-path race with reader chunks despite W7 drain. Fix in v0.5.1
+    housekeeping pass.
+
+- **Pre-existing Windows test flake** (noted in Loop 2 iter 3 fix subagent):
+  `test_concurrent_write_audit_writers_serialize_via_file_lock` exhibits
+  intermittent `PermissionError` on Windows during concurrent `os.replace`
+  of `.tmp.{getpid()}` files (collides between threads sharing PID). Fix
+  in v0.5.1: include thread-id in tmp filename pattern in the three writers
+  (`auto_cmd.py:644, 997, 2469`).
+
+### Deferred (rolled to v1.0.0)
+
+- Feature G: MAGI -> /requesting-code-review cross-check meta-reviewer.
+- F44.3: `retried_agents` propagation to `auto-run.json` audit field.
+- J2: ResolvedModels preflight dataclass.
+- Feature I: `schema_version` + migration tool.
+- Feature H: Group B re-eval + INV-31 default-on opt-in re-evaluation.
+
 ## Unreleased (Deferred — tracked for v1.0.0)
 
 v0.3.0 shipped Track D (auto progress visibility) and Track E (per-skill
@@ -48,6 +233,11 @@ v1.0.0 LOCKED items remaining:
     legacy `magi-report.json` lookup so MAGI 2.x layouts (which still
     write `magi-report.json`) continue to work unchanged. Forward-compat
     for future MAGI versions that emit `MAGI_VERDICT_MARKER.json`.
+    Marker schema (HF2 alignment with the impl-side documentation in
+    `magi_dispatch._MARKER_FILENAME` docstring): the four canonical
+    fields are `verdict`, `iteration`, `agents`, `timestamp`. Optional
+    fields tolerated by the parser: `retried_agents`,
+    `synthesizer_status`.
   - `MAGIVerdict.retried_agents: tuple[str, ...]` consumes the new
     MAGI 2.2.1+ telemetry field with default `()` for MAGI 2.1.x
     backward compat (F44). v0.4.0 ships the dataclass field + parser
@@ -68,6 +258,14 @@ v1.0.0 LOCKED items remaining:
     `models.VERDICT_RANK ∪ {approve, conditional, reject}`; verdict
     typos (e.g. `"GO_LATER"`) no longer slip through to silently
     weigh as 0.0 in `_manual_synthesis_recovery`.
+  - HF3 (sec.2.5 doc-alignment): the F45 tolerant parser additionally
+    validates that every parsed `verdict` field is a member of the
+    known `VERDICT_RANK` set (∪ the agent-side `{approve, conditional,
+    reject}` aliases). Agent JSON carrying an unknown verdict raises
+    `ValidationError` instead of silently passing through with weight
+    0.0 -- the v0.3.x strict-parser baseline accepted any string in
+    the verdict slot, the v0.4.0 tolerant parser rejects unknowns.
+    Behavior delta documented for downstream consumers.
   - `magi_dispatch._manual_synthesis_recovery(run_dir)` (F46) rescues a
     `MAGIVerdict` when the MAGI synthesizer crashed (`"Only N agent(s)
     succeeded"` stderr) but at least one agent persisted recoverable

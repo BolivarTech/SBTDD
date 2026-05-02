@@ -153,3 +153,41 @@ def test_dispatch_review_spec_compliance_routes_to_cmd(monkeypatch):
     monkeypatch.setitem(run_sbtdd.SUBCOMMAND_DISPATCH, "review-spec-compliance", fake)
     assert run_sbtdd.main(["review-spec-compliance", "3"]) == 0
     assert called == [["3"]]
+
+
+def test_status_watch_dispatches_with_new_flags(monkeypatch):
+    """S2-10: --watch + --interval + --json flags route to status_cmd.watch_main."""
+    import status_cmd
+    from run_sbtdd import main
+
+    captured: dict[str, object] = {}
+
+    def fake_watch_main(auto_run_path, *, interval, json_mode):
+        captured["interval"] = interval
+        captured["json_mode"] = json_mode
+        return 0
+
+    monkeypatch.setattr(status_cmd, "watch_main", fake_watch_main)
+    rc = main(["status", "--watch", "--interval", "2.0", "--json"])
+    assert rc == 0
+    assert captured["interval"] == 2.0
+    assert captured["json_mode"] is True
+
+
+def test_status_watch_default_interval_is_one_second(monkeypatch):
+    """S2-10: --interval omitted -> 1.0s default per spec sec.4.3."""
+    import status_cmd
+    from run_sbtdd import main
+
+    captured: dict[str, object] = {}
+
+    def fake_watch_main(auto_run_path, *, interval, json_mode):
+        captured["interval"] = interval
+        captured["json_mode"] = json_mode
+        return 0
+
+    monkeypatch.setattr(status_cmd, "watch_main", fake_watch_main)
+    rc = main(["status", "--watch"])
+    assert rc == 0
+    assert captured["interval"] == 1.0
+    assert captured["json_mode"] is False

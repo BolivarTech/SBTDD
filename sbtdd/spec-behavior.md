@@ -57,6 +57,15 @@ Plus folded:
   impl, marker file schema actual emission docs, F45 verdict-set behavior
   delta documentation).
 
+**Known Limitations folded from Checkpoint 2 iter 3 caspar finding:**
+- **started_at race window during dispatch_label transitions**: in theory,
+  a heartbeat tick could fire between the moment `_set_progress` mutates
+  `_current_progress` to a new dispatch's pre-state and finishes the
+  atomic snapshot replacement. Under current single-threaded `auto_cmd`
+  this race window does NOT occur (writer + caller are same thread,
+  reader thread sees consistent post-write state). Documented for future
+  parallel auto_cmd designs that may relax single-thread invariant.
+
 **Out-of-scope v0.5.0** (defer a v1.0.0):
 - Feature G (MAGI -> /requesting-code-review cross-check).
 - Feature H Group B re-eval + INV-31 default-on opt-in re-eval.
@@ -98,14 +107,18 @@ transitions enumeradas en sec.3 + HeartbeatEmitter wraps long dispatches).
   bajo ningun fallo (stderr broken pipe, OSError, etc.). Failures se
   swallow con counter + breadcrumb on first failure only.
 
-**Escenario H1: heartbeat emite tick periodico durante dispatch largo**
+**Escenario H1: heartbeat emite primer tick a t=0 + ticks subsiguientes cada interval**
 
 > **Given** auto run en mid-MAGI Loop 2 dispatch (subprocess running ~5
-> min sin escribir nada en stderr).
-> **When** transcurren 15s desde el inicio del dispatch.
-> **Then** stderr emite linea
-> `[sbtdd auto] tick: iter 2 phase 3 task 14/36 dispatch=magi-loop2-iter2 elapsed=0m15s`.
-> Subsiguientes ticks cada 15s.
+> min sin escribir nada en stderr). HeartbeatEmitter recien __enter__'d.
+> **When** thread loop arranca.
+> **Then** stderr emite **inmediatamente** (t=0) linea
+> `[sbtdd auto] tick: iter 2 phase 3 task 14/36 dispatch=magi-loop2-iter2 elapsed=0m0s`
+> (operator ve liveness signal ASAP). Despues, cada 15s, emite tick
+> subsiguiente con elapsed creciendo monotonically dentro del mismo
+> dispatch. Pinned post-Checkpoint 2 iter 3 melchior finding: emit-at-entry
+> semantica documentada explicit, alineada con impl que llama
+> `_emit_tick()` BEFORE el primer `_stop_event.wait(interval)`.
 
 **Escenario H2: heartbeat NO bloquea exit cuando dispatch termina**
 
@@ -125,7 +138,7 @@ transitions enumeradas en sec.3 + HeartbeatEmitter wraps long dispatches).
 > wait retorna inmediatamente cuando event se setea, o transcurre el
 > timeout completo si nunca se setea (caso normal entre ticks).
 
-**Escenario H3: heartbeat resilient a stderr write failure + incremental persistence**
+**Escenario H3: heartbeat resilient a stderr write failure + queue-based persistence**
 
 > **Given** HeartbeatEmitter activo con stderr cerrado / broken pipe (caso
 > patologico: piping to head, terminal closed, etc.).
@@ -134,21 +147,23 @@ transitions enumeradas en sec.3 + HeartbeatEmitter wraps long dispatches).
 > fallo emite single warning a stderr en formato
 > `[sbtdd auto] heartbeat write failed (will continue silently): <error>`,
 > ticks subsiguientes silent. Auto run NO killed; thread sigue runneando
-> hasta __exit__ signal. **Adicionalmente** (post-iter 2 caspar finding),
-> cada N=10 incrementos del counter, thread CALLS
-> `auto_cmd._update_heartbeat_failed_writes(_failed_writes)` para persistir
-> a `auto-run.json` incrementally — NO dependency en stderr funcionando
-> para audit trail. Si stderr ES el broken pipe, el audit trail sigue
-> capturando counter via auto-run.json.
+> hasta __exit__ signal. **Adicionalmente** (post-iter 2/3 + Checkpoint 2
+> melchior/caspar findings), cada N=10 incrementos del counter, thread
+> envia el counter a `_failures_queue: queue.Queue[int]` via `put_nowait`.
+> El queue es drained por el main thread (auto_cmd) en cada
+> `_update_progress` call y persistido a `auto-run.json` bajo
+> `heartbeat_failed_writes_total` field — heartbeat thread NUNCA escribe
+> directamente al archivo (sec.3 single-writer rule). Si stderr ES el
+> broken pipe, el audit trail sigue capturando counter via queue → main
+> thread → auto-run.json.
 
 > **And given** HeartbeatEmitter `__exit__` invocado con `_failed_writes > 0`.
 > **When** exit fires.
-> **Then** logs summary breadcrumb a stderr en formato
+> **Then** envia el counter final a `_failures_queue.put_nowait` (best-effort;
+> swallow on queue.Full) + logs summary breadcrumb a stderr en formato
 > `[sbtdd auto] heartbeat completed with N silent write failures`
 > (best-effort; si stderr broken, breadcrumb pierde pero counter ya esta
-> persisted en auto-run.json). Final flush:
-> `auto_cmd._update_heartbeat_failed_writes(_failed_writes)` garantiza
-> ultima cifra registrada para post-mortem.
+> en queue para drain del main thread).
 
 **Escenario H4: ProgressContext immutable per-snapshot, lock-protected reference swap**
 
@@ -230,14 +245,23 @@ transitions enumeradas en sec.3 + HeartbeatEmitter wraps long dispatches).
 > en exhaustion (visible al operador, NO silent), skip render cycle, continue
 > next poll. NO crash.
 
-> **And given** `_json_parse_failures >= 3` consecutive renders (sustained
-> AV storm detected).
+> **And given** `_json_parse_failures >= 3` consecutive **JSON parse failures**
+> (sustained AV storm detected; **NO** counted: idle auto run with no
+> progress changes — that returns same data successfully, NOT a parse
+> failure).
 > **When** next poll cycle scheduled.
 > **Then** **slow-poll fallback** active: poll interval doubled
-> (default 1s → 2s; cap at 10s). Counter resets cuando next render
-> succeeds. Avoids busy-loop saturating disk during sustained AV.
-> Recovery automatic: si AV storm pasa y renders succeed again, interval
-> reverts to configured default in 3 successful cycles.
+> (default 1s → 2s; cap at 10s). Counter resets cuando next JSON parse
+> succeeds (NOT cuando idle returns same data). Avoids busy-loop
+> saturating disk during sustained AV; idle auto run continues at default
+> interval (operator wants live updates, not slow-poll).
+
+> **Critical distinction (PINNED post-Checkpoint 2 iter 1 caspar finding):**
+> `record_failure()` solo se llama cuando `_read_auto_run_with_retry`
+> retorna `None` (5x retries exhausted on JSON parse error), NO cuando el
+> retry succeeds and progress dict equals previous (idle case). Conflating
+> idle vs contention degrades watch UX: an idle auto-run would falsely
+> trigger slow-poll, masking when MAGI dispatch finishes.
 
 **Escenario W5: watch handles Ctrl+C cleanly**
 
@@ -259,11 +283,30 @@ transitions enumeradas en sec.3 + HeartbeatEmitter wraps long dispatches).
 **Files tocados:** `subprocess_utils.py` streaming pump (extends `last_write_at`
 tracking + kill on silent stream).
 
+> **v0.5.0 ship scope (Loop 2 WARNING #4 alignment):** v0.5.0 ships J3
+> as an **opt-in helper** (`subprocess_utils.run_streamed_with_timeout`).
+> The behavioral contract below (timeout floor, allowlist, semantics)
+> describes the helper's behavior, not the production-wired behavior of
+> existing `run_with_timeout` callers. Production wiring of the 33
+> existing dispatch sites in `auto_cmd.py` / `pre_merge_cmd.py` is
+> **deferred to v0.5.1** per CHANGELOG `[0.5.0]` Deferred section.
+> Existing callers retain their pre-v0.5.0 wall-clock-only timeout
+> until they are migrated.
+
 **Default rationale:** `auto_per_stream_timeout_seconds = 900` (15 min).
 Iter 2 review consolido el balance entre iter 1 caspar finding ("600s mata
 legitimate caspar runs >10min") y iter 2 melchior/balthasar pushback ("1800s
 demasiado generoso para default"). 900s = 15min cubre worst-case caspar opus
 runs observados (~10 min) con 5min margin antes de kill, sin overshoot.
+
+**Absolute timeout floor (PINNED post-Checkpoint 2 iter 1 caspar finding):**
+INV-34 clause 4: `auto_per_stream_timeout_seconds >= 600`. Razon: incluso
+con clause 1 (timeout >= 5*interval), si interval=15 entonces timeout
+podria ser tan bajo como 75s — que kill legitimate caspar opus runs (~10 min
+empirically observed). 600s absolute floor garantiza que ningun dispatch
+caspar normal sea killed por config user pathological. Validation message:
+`auto_per_stream_timeout_seconds must be >= 600s (caspar opus runs observed
+empirically up to 10min); got <T>s`.
 
 **Allowlist mechanism (post-iter 2):** field
 `auto_no_timeout_dispatch_labels: list[str]` con default `["magi-*"]` glob
@@ -378,6 +421,14 @@ a stderr orchestrator NO triggerea timeout).
 emission, prefix lines), `config.py` (+`auto_origin_disambiguation: bool = True`
 field).
 
+> **v0.5.0 ship scope (Loop 2 WARNING #4 alignment):** v0.5.0 ships J7
+> as an **opt-in helper** inside the same
+> `subprocess_utils.run_streamed_with_timeout` entry point as J3. The
+> 100ms-window prefix logic described below applies only to that
+> helper's call sites; existing pump consumers in `auto_cmd.py` /
+> `pre_merge_cmd.py` retain unprefixed streaming until v0.5.1
+> production-wires them. See CHANGELOG `[0.5.0]` Deferred section.
+
 **Config gate rationale:** post-MAGI Checkpoint 2 review v0.5.0 iter 1,
 parser-sensitive contexts (downstream tools que consumen raw subprocess
 output) pueden fallar al ver prefix conditional. Solucion: feature gated
@@ -385,22 +436,30 @@ behind `auto_origin_disambiguation: bool = True` (default ON para visibility
 gain). Operator que pipea output a parser regex puede setear `false` en
 `plugin.local.md` para preservar bytes raw.
 
-**"Same iteration" semantica PINNED (post-iter 2 melchior+caspar findings):**
-platform-dependent primitives (`select.select` Unix, `selectors.DefaultSelector`
-Windows) tienen polling granularity que varia. Para spec deterministic,
-"same iteration" se define como **ambos streams emiten chunks dentro de la
-misma 50ms temporal window** del read loop. Implementation:
+**"Same iteration" semantica PINNED (post-iter 2 melchior+caspar findings;
+default raised 50ms → 100ms post Loop 1 v0.5.0 W3 fix per Checkpoint 2
+iter 4 melchior + balthasar findings about Windows CI scheduling
+jitter):** platform-dependent primitives (`select.select` Unix,
+`selectors.DefaultSelector` Windows) tienen polling granularity que
+varia. Para spec deterministic, "same iteration" se define como
+**ambos streams emiten chunks dentro de la misma 100ms temporal
+window** del read loop (default; configurable via
+`origin_window_seconds` parameter on `run_streamed_with_timeout` and
+via `auto_origin_disambiguation` config flag). Implementation:
 - Pump records `last_chunk_at[stream]` per chunk emitted via `time.monotonic()`.
 - Cuando se emiten chunks de stream A, check si
-  `time.monotonic() - last_chunk_at[other_stream] < 0.050` — si si,
+  `time.monotonic() - last_chunk_at[other_stream] < 0.100` — si si,
   prefijar AMBOS chunks (current + recent other-stream).
-- Cross-platform behavioral test (`tests/test_subprocess_utils.py::test_origin_disambig_temporal_window`)
+- Cross-platform behavioral test (`tests/test_subprocess_utils.py::test_o2_dual_stream_within_production_100ms_window_prefixes`)
   spawns subprocess que emite 1 chunk a stdout + 1 chunk a stderr con
-  `time.sleep(0.005)` between (well within 50ms window) y verifica
-  prefix appears en ambos. Test passes en Unix + Windows uniformly.
-- Window 50ms chosen como balance: short enough que sequential single-stream
+  `time.sleep(0.005)` between (well within 100ms window) y verifica
+  prefix appears en al menos uno. Test passes en Unix + Windows uniformly.
+- Window 100ms chosen como balance: short enough que sequential single-stream
   output (e.g., logs scrolling 1+ second apart) NO triggers prefix; large
-  enough que platform polling jitter no reverte el detection.
+  enough que Windows CI scheduler jitter no reverta el detection en loaded
+  systems. Loop 1 v0.5.0 W3 raised the iter-1 baseline of 50ms because
+  Windows CI runs occasionally exceeded that window even with 5ms inter-chunk
+  sleeps; 100ms tolerates ~10x scheduler-jitter margin.
 
 **Escenario O1: solo stdout activo no prefija (feature ON)**
 
@@ -484,7 +543,7 @@ misma 50ms temporal window** del read loop. Implementation:
 | **Heartbeat emitter** | H1-H6 | `tests/test_heartbeat.py` (NEW) |
 | **status --watch** | W1-W6 | `tests/test_status_watch.py` (NEW) |
 | **Per-stream timeout** | T1-T8 (incl. INV-34 + allowlist + closed-stream + kill-tree order) | `tests/test_subprocess_utils.py`, `tests/test_config.py` (extended) |
-| **Origin disambiguation** | O1-O4 (incl. config gate + 50ms temporal window) | `tests/test_subprocess_utils.py` (extended) |
+| **Origin disambiguation** | O1-O4 (incl. config gate + 100ms temporal window default; configurable per call) | `tests/test_subprocess_utils.py` (extended) |
 | **Mechanical smoke fixtures** | R2.3 | `tests/test_heartbeat_smoke.py` (NEW) |
 | **v0.4.1 hotfixes** | HF1-HF3 | `tests/test_changelog.py`, `tests/test_skill_md.py` (extended) |
 
@@ -507,23 +566,38 @@ misma 50ms temporal window** del read loop. Implementation:
   resort. Heartbeat (alive signaling) + watch (out-of-band visibility) son
   las primeras lineas de defensa contra "looks dead" UX. Timeout solo
   kicks in cuando subprocess geniunamente esta colgado sin escribir.
-- **INV-34 (propuesta)**: relacion timeout-vs-interval + absolute floor.
-  PluginConfig load valida:
-  - `auto_per_stream_timeout_seconds >= 5 * auto_heartbeat_interval_seconds`
-    (5x multiplier ratio)
-  - `auto_heartbeat_interval_seconds <= 60` (absolute ceiling — interval
-    no puede exceder 1 min sin operator awareness loss; PINNED post-iter 3
-    caspar finding evitando pathological combinations like interval=600s
-    timeout=3000s donde el factor 5x es valido pero operator solo ve 1
-    tick cada 10 min antes de kill).
-  - `auto_heartbeat_interval_seconds >= 5` (absolute floor — sub-5s ticks
-    spam stderr sin valor; testing fixtures override este floor via
-    explicit fixture parameter, no via plugin.local.md).
+- **INV-34 (propuesta)**: relacion timeout-vs-interval + absolute floor + ceiling.
+  PluginConfig load valida (4 clauses, cada una con error message distinto):
+  - **Clause 1**: `auto_per_stream_timeout_seconds >= 5 * auto_heartbeat_interval_seconds`
+    (ratio multiplier).
+  - **Clause 2**: `auto_heartbeat_interval_seconds <= 60` (absolute ceiling —
+    interval no puede exceder 1 min sin operator awareness loss; PINNED
+    post-iter 3 caspar finding).
+  - **Clause 3**: `auto_heartbeat_interval_seconds >= 5` (absolute floor —
+    sub-5s ticks spam stderr sin valor; testing fixtures override este
+    floor via explicit fixture parameter, no via plugin.local.md).
+  - **Clause 4** (PINNED post-Checkpoint 2 iter 1 caspar finding):
+    `auto_per_stream_timeout_seconds >= 600` (absolute timeout floor —
+    incluso con clause 1, interval=15 permite timeout=75s que matar
+    caspar opus legitimate runs). 600s = 10min cubre observed worst-case.
+
+  **Validation order PINNED (post Loop 2 v0.5.0 WARNING #1/#7)**: clauses
+  son verificadas en orden `4 → 2 → 3 → 1` en `config.py:load_plugin_local`.
+  Razon: cheapest single-field absolute-bound checks (clauses 4, 2, 3)
+  fire first; the two-field ratio (clause 1) checks last. Bajo este
+  ordering una fixture que viola SOLO clause 1 no puede existir porque
+  clauses 2 + 4 mathematicamente subsumen clause 1: cualquier
+  `timeout >= 600` AND `interval <= 60` implica
+  `5 * interval ≤ 300 ≤ 600 ≤ timeout`, satisfaciendo clause 1. Clause 1
+  permanece en code como **defense-in-depth** contra futuro weakening de
+  clauses 2 o 4. Ver `docs/v0.5.0-config-matrix.md` `### W1` para la
+  prueba completa.
+
   Violation raises `ValidationError` con exit 1. Razon: si timeout fires
   antes del primer heartbeat tick, el operador nunca ve signal de vida y
-  el subprocess es killed en silencio — peor UX que "looks dead". El
-  factor 5x da margen para 4-5 ticks visibles antes de kill; absolute
-  floors/ceilings previenen pathological config combinations.
+  el subprocess es killed en silencio. Las 4 clauses combinan: timeout
+  in `[600, inf)`, interval in `[5, 60]`, timeout >= 5*interval (always
+  true with absolute floors).
 - INV-22 (sequential auto) preservado: nada nuevo cambia el sequential
   contract.
 - INV-26 (audit trail) extendido: `auto-run.json` ahora SIEMPRE contiene
@@ -574,7 +648,7 @@ class ProgressContext:
   contra maintainer drift. La iter 1 "atomic pointer no-lock" approach
   funciona en CPython actual pero depende de implementation detail; el
   lock approach es agnostic a memory model.
-- **`started_at` semantics (PINNED post-iter 3 caspar finding)**:
+- **`started_at` semantics (PINNED post-iter 3 + Checkpoint 2 iter 2 caspar findings)**:
   ProgressContext.started_at = **DISPATCH started_at** (timestamp del
   dispatch en curso, no del phase ni del auto run). Razon: heartbeat
   tick muestra `elapsed=` que el operador interpreta como "tiempo del
@@ -582,6 +656,15 @@ class ProgressContext:
   vive en auto-run.json top-level (ya existe, no afectado). Auto run
   started_at vive separado en auto-run.json top-level desde v0.4.0.
   Tres timestamps ortogonales con scopes distintos.
+  - **Refresh contract (Checkpoint 2 iter 2 caspar CRITICAL fix):**
+    `_set_progress` helper PRESERVES `started_at` cuando el `dispatch_label`
+    no cambia entre invocaciones (intra-dispatch update). REFRESHES
+    `started_at = now()` SOLO cuando el `dispatch_label` cambia respecto
+    al ProgressContext actual O cuando current.started_at era None. Sets
+    `started_at = None` cuando `dispatch_label = None` (between-dispatches
+    state). Este contrato hace el `elapsed=` heartbeat tick monotonic
+    dentro de un mismo dispatch sin importar cuantas veces se llame
+    `_set_progress` con la misma label.
 - **`started_at` serialization format (PINNED post-iter 3 melchior finding)**:
   ISO 8601 UTC con sufijo `Z`, e.g., `"2026-05-01T12:34:56Z"`. Igual
   que existing `started_at` field en auto-run.json top-level (preserva
@@ -839,8 +922,8 @@ testing on multiple terminals, Windows-specific AV-related JSON race
 retries (5x exponential backoff implementation), config validation
 implementation (INV-34 timeout-vs-interval), mechanical smoke fixtures
 (track B sec.5.2). Bundle width acknowledged: 4 deliverables + 3 hotfixes +
-4 nuevos config fields + 1 nuevo invariant — 50-100% padding sobre
-v0.4.0 baseline cycle.
+5 nuevos config fields + 3 nuevos invariantes (INV-32, INV-33, INV-34
+con 4 clauses) — 50-100% padding sobre v0.4.0 baseline cycle.
 
 ### 6.2 True parallel dispatch
 
@@ -883,9 +966,11 @@ catches genuine hangs sin matar dispatches caspar opus que escriben a
 - **Added** — Heartbeat in-band emitter, `/sbtdd status --watch` subcommand,
   per-stream timeout (J3), origin disambiguation (J7), ProgressContext
   dataclass + `get_current_progress()` getter en `scripts/heartbeat.py`,
-  4 new PluginConfig fields (`auto_per_stream_timeout_seconds`,
+  **5 new PluginConfig fields** (`auto_per_stream_timeout_seconds`,
   `auto_heartbeat_interval_seconds`, `status_watch_default_interval_seconds`,
-  `auto_origin_disambiguation`), INV-34 timeout-vs-interval validation.
+  `auto_origin_disambiguation`, `auto_no_timeout_dispatch_labels`), **3 new
+  invariants** (INV-32 heartbeat resilience + queue persistence; INV-33
+  timeout last-resort; INV-34 timeout-vs-interval 4-clause validation).
 - **Changed** — `auto-run.json` schema gains `progress` field (J6 already
   preserved; v0.5.0 garantiza emission on every transition).
 - **Hotfixes folded** — recovery breadcrumb wording alignment, marker file
@@ -975,8 +1060,9 @@ v0.5.0 ship-ready cuando:
   exempt para `magi-*` + closed-stream EOF tracking exemption + Windows
   kill-tree R3-1 order preservation).
 - **F4**. Origin disambiguation (J7) — O1-O4 escenarios pass (incl.
-  `auto_origin_disambiguation` config gate + 50ms temporal window
-  cross-platform behavioral test).
+  `auto_origin_disambiguation` config gate + 100ms temporal window
+  default cross-platform behavioral test; configurable via
+  `origin_window_seconds` parameter).
 - **F5**. ProgressContext dataclass + auto-run.json contract — backward
   compat con v0.4.0 files preserved; `heartbeat_failed_writes_total`
   field registrado per INV-32.
@@ -1092,8 +1178,8 @@ diferidas a v0.5.x patches (excepto donde explicitly indicado).
   (Queue-based reporting). H3 wording is descriptive of the OUTCOME, not
   prescriptive of mechanism — the actual code reflects sec.3.
 
-**W1 / W7: INV-34 three-clause validation needs split error messages + worked examples (melchior + balthasar)**
-- Issue: T4 escenario tests one violation; INV-34 has 3 clauses.
+**W1 / W7: INV-34 four-clause validation needs split error messages + worked examples (melchior + balthasar)**
+- Issue: T4 escenario tests one violation; INV-34 has 4 clauses (post-Checkpoint 2 iter 1 caspar finding added clause 4 absolute timeout floor).
 - Resolution path: Subagent #2 implements PluginConfig validation con 3
   separate `if` predicates + 3 distinct ValidationError messages naming the
   violated clause. R9 matrix deliverable (`docs/v0.5.0-config-matrix.md`)
@@ -1102,8 +1188,9 @@ diferidas a v0.5.x patches (excepto donde explicitly indicado).
 **W2 / W6: 50ms temporal window CI flakiness (melchior + balthasar)**
 - Issue: 50ms window risks platform-jitter false positives en Windows CI.
 - Resolution path: Subagent #2 implements origin disambig test with
-  fixture-injectable window override (default 50ms wall-clock; tests
-  override to monkey-patched clock or larger window).
+  fixture-injectable window override (default 100ms wall-clock post Loop 1
+  v0.5.0 W3 fix raising the iter-1 baseline of 50ms; tests override to
+  monkey-patched clock or larger window).
 
 **W3: `_failed_writes` queue drain semantics (melchior)**
 - Issue: queue.Queue drain pattern not specified — max? sum? latest?

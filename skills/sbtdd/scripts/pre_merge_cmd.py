@@ -25,6 +25,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, TypeVar
 
 import escalation_prompt
 import magi_dispatch
@@ -44,8 +45,69 @@ from models import VERDICT_RANK
 from state_file import SessionState
 from state_file import load as load_state
 
+_T = TypeVar("_T")
+
 #: Safety valve for Loop 1 (sec.S.5.6, INV-11). Exceeding aborts with exit 7.
 _LOOP1_MAX: int = 10
+
+
+def _wrap_with_heartbeat_if_auto(
+    invoke: Callable[[], _T],
+    *,
+    iter_num: int = 0,
+    phase: int,
+    dispatch_label: str,
+) -> _T:
+    """Conditionally wrap ``invoke`` with auto-mode's heartbeat emitter.
+
+    Loop 1 fix v0.5.0 CRITICAL #1: pre-merge dispatches (Loop 1
+    requesting-code-review, Loop 2 invoke_magi, mini-cycle TDD) are
+    multi-minute subprocess calls. Under ``/sbtdd auto`` the operator
+    needs liveness ticks via ``HeartbeatEmitter`` to distinguish
+    "still working" from "hung". Under interactive ``/sbtdd pre-merge``
+    the operator is watching directly so the wrap is a no-op.
+
+    The auto-mode signal is a ``ProgressContext`` whose ``phase`` field
+    is non-zero (auto's ``_phase3_pre_merge`` sets ``phase=3`` before
+    calling ``_loop2``). When invoked outside auto (interactive
+    pre-merge or test fixtures bypassing auto), ``phase==0`` and we
+    fall back to a direct call so the wrapping cost is paid only when
+    the heartbeat actually serves the operator.
+
+    Args:
+        invoke: Zero-argument callable performing the dispatch.
+        iter_num: Optional iteration number to include in progress.
+        phase: Pre-merge phase (3) per spec sec.3 progress enumeration.
+        dispatch_label: Human-readable dispatch identifier (e.g.
+            ``"magi-loop2-iter1"``).
+
+    Returns:
+        Whatever ``invoke()`` returns.
+    """
+    try:
+        from heartbeat import get_current_progress
+
+        import auto_cmd as _auto
+
+        current = get_current_progress()
+        if current.phase != 0:
+            # auto-mode active; wrap with heartbeat emitter.
+            _auto._set_progress(
+                iter_num=iter_num or current.iter_num,
+                phase=phase,
+                task_index=current.task_index,
+                task_total=current.task_total,
+                dispatch_label=dispatch_label,
+            )
+            result: _T = _auto._dispatch_with_heartbeat(invoke=invoke)
+            return result
+    except Exception:  # noqa: BLE001
+        # Defensive: any failure to import / introspect collapses to
+        # the direct call -- the heartbeat is observability, NEVER a
+        # blocker for the actual dispatch (INV-32 spirit).
+        pass
+    return invoke()
+
 
 #: Filename of the auxiliary rejection-feedback file written between iterations.
 #: Lives inside the destination project's ``.claude/`` (gitignored, never
@@ -170,15 +232,26 @@ def _loop1(root: Path) -> None:
         # iteration that produced it. The iter number is 1-based to
         # match the safety-valve diagnostics emitted on divergence.
         loop1_prefix = f"[sbtdd pre-merge loop1 iter-{iteration}]"
-        result = superpowers_dispatch.requesting_code_review(
-            cwd=str(root),
-            stream_prefix=loop1_prefix,
+        # Loop 1 fix v0.5.0 CRITICAL #1: under auto, wrap with heartbeat.
+        result = _wrap_with_heartbeat_if_auto(
+            invoke=lambda: superpowers_dispatch.requesting_code_review(
+                cwd=str(root),
+                stream_prefix=loop1_prefix,
+            ),
+            iter_num=iteration,
+            phase=3,
+            dispatch_label=f"code-review-loop1-iter{iteration}",
         )
         if _is_clean_to_go(result):
             return
-        superpowers_dispatch.receiving_code_review(
-            cwd=str(root),
-            stream_prefix=loop1_prefix,
+        _wrap_with_heartbeat_if_auto(
+            invoke=lambda: superpowers_dispatch.receiving_code_review(
+                cwd=str(root),
+                stream_prefix=loop1_prefix,
+            ),
+            iter_num=iteration,
+            phase=3,
+            dispatch_label=f"receiving-code-review-loop1-iter{iteration}",
         )
     raise Loop1DivergentError(f"Loop 1 did not converge in {_LOOP1_MAX} iterations")
 
@@ -606,10 +679,20 @@ def _loop2(
         # can correlate the (slow, multi-minute) MAGI subprocess output
         # with which Loop 2 iteration is currently running.
         loop2_magi_prefix = f"[sbtdd pre-merge magi-loop2 iter-{iteration}]"
-        verdict = magi_dispatch.invoke_magi(
-            context_paths=iter_paths,
-            cwd=str(root),
-            stream_prefix=loop2_magi_prefix,
+        # Loop 1 fix v0.5.0 CRITICAL #1: under auto, wrap each MAGI
+        # iter in HeartbeatEmitter (label = ``magi-loop2-iter<N>``) so
+        # the operator sees liveness ticks during the multi-minute
+        # consensus run. ``_wrap_with_heartbeat_if_auto`` falls back
+        # to a direct call under interactive pre-merge.
+        verdict = _wrap_with_heartbeat_if_auto(
+            invoke=lambda: magi_dispatch.invoke_magi(
+                context_paths=iter_paths,
+                cwd=str(root),
+                stream_prefix=loop2_magi_prefix,
+            ),
+            iter_num=iteration,
+            phase=3,
+            dispatch_label=f"magi-loop2-iter{iteration}",
         )
         verdict_history.append(verdict)
         if magi_dispatch.verdict_is_strong_no_go(verdict):
@@ -628,10 +711,16 @@ def _loop2(
             # this dispatch is the closest surface in pre_merge for the
             # operator-visibility intent of J8.3.
             fix_findings_prefix = f"[sbtdd pre-merge fix-finding-iter-{iteration}]"
-            review_result = superpowers_dispatch.receiving_code_review(
-                args=_conditions_to_skill_args(verdict.conditions),
-                cwd=str(root),
-                stream_prefix=fix_findings_prefix,
+            # Loop 1 fix v0.5.0 CRITICAL #1: wrap with heartbeat under auto.
+            review_result = _wrap_with_heartbeat_if_auto(
+                invoke=lambda: superpowers_dispatch.receiving_code_review(
+                    args=_conditions_to_skill_args(verdict.conditions),
+                    cwd=str(root),
+                    stream_prefix=fix_findings_prefix,
+                ),
+                iter_num=iteration,
+                phase=3,
+                dispatch_label=f"receiving-magi-findings-iter{iteration}",
             )
             accepted, rejected = _parse_receiving_review(review_result)
             if not accepted and not rejected:

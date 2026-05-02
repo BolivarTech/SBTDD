@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -54,6 +54,14 @@ class PluginConfig:
     spec_reviewer_model: str | None = None
     code_review_model: str | None = None
     magi_dispatch_model: str | None = None
+    # v0.5.0 observability fields (sec.4.3 of spec). Defaults documented in
+    # docs/v0.5.0-config-matrix.md (R9 single-source-of-truth doc) and
+    # cross-validated against INV-34 four-clause checks in load_plugin_local.
+    auto_per_stream_timeout_seconds: int = 900
+    auto_heartbeat_interval_seconds: int = 15
+    status_watch_default_interval_seconds: float = 1.0
+    auto_origin_disambiguation: bool = True
+    auto_no_timeout_dispatch_labels: tuple[str, ...] = field(default_factory=lambda: ("magi-*",))
 
 
 #: Canonical names of the v0.3.0 Feature E model fields. Used both by the
@@ -157,6 +165,127 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
             raise ValidationError(
                 f"{field_name} must be a string or null, got {type(val).__name__}"
             )
+    # v0.5.0 observability defaults applied if absent (sec.4.3 of spec).
+    data.setdefault("auto_per_stream_timeout_seconds", 900)
+    data.setdefault("auto_heartbeat_interval_seconds", 15)
+    data.setdefault("status_watch_default_interval_seconds", 1.0)
+    data.setdefault("auto_origin_disambiguation", True)
+    data.setdefault("auto_no_timeout_dispatch_labels", ["magi-*"])
+    if isinstance(data.get("auto_no_timeout_dispatch_labels"), list):
+        data["auto_no_timeout_dispatch_labels"] = tuple(data["auto_no_timeout_dispatch_labels"])
+    # INV-34 (sec.2.7 of spec): timeout-vs-interval relationship + absolute
+    # floor + ceiling validations.
+    #
+    # Validation order is the spec PINNED order 4 -> 2 -> 3 -> 1 (Loop 2
+    # WARNING #1/#7 fix): cheapest absolute-bound checks fire first
+    # (clauses 4 + 2 + 3 each test a single field against a constant),
+    # then the ratio clause (clause 1) which depends on both fields.
+    # Under this ordering a fixture that violates only clause 1 cannot
+    # exist because clauses 2 + 4 mathematically subsume it: any
+    # ``timeout >= 600`` AND ``interval <= 60`` implies
+    # ``5 * interval <= 300 <= 600 <= timeout``, satisfying clause 1.
+    #
+    # W1 (Checkpoint 2 iter 4 melchior + caspar): clause 1 is therefore
+    # DEFENSE-IN-DEPTH against future weakening of clauses 2 or 4 that
+    # could make clause 1 the only barrier preventing pathological
+    # ratios. Removing clause 1 alone would not change current behavior
+    # but would couple any future change of clauses 2/4 to a separate
+    # re-evaluation of the ratio invariant -- preserving clause 1
+    # avoids that hidden coupling. See ``docs/v0.5.0-config-matrix.md``
+    # `W1` section for the worked-example table.
+    timeout = data["auto_per_stream_timeout_seconds"]
+    interval = data["auto_heartbeat_interval_seconds"]
+    if not isinstance(timeout, int) or timeout < 0:
+        raise ValidationError(f"auto_per_stream_timeout_seconds must be int >= 0, got {timeout!r}")
+    if not isinstance(interval, int) or interval < 0:
+        raise ValidationError(f"auto_heartbeat_interval_seconds must be int >= 0, got {interval!r}")
+    # Clause 4 (timeout absolute floor) -- cheapest single-field bound,
+    # protects against pathological short timeouts that would kill
+    # legitimate caspar opus runs (~10min observed). 600s = 10min.
+    if timeout < 600:
+        raise ValidationError(
+            f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
+            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
+        )
+    # Clause 2 (interval ceiling) -- single-field bound, prevents loss
+    # of operator awareness on intervals exceeding 1 minute.
+    if interval > 60:
+        raise ValidationError(
+            f"INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s "
+            f"to keep operator awareness within 1-minute granularity; got {interval}"
+        )
+    # Clause 3 (interval floor) -- single-field bound, prevents stderr
+    # spam at sub-5s cadences without observable value.
+    if interval < 5:
+        raise ValidationError(
+            f"INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s "
+            f"to avoid stderr spam without value; got {interval}"
+        )
+    # Clause 1 (ratio multiplier) -- two-field invariant, defense-in-depth
+    # against future weakening of clauses 2 + 4 that would make clause 1
+    # the sole barrier preventing pathological ratios.
+    if timeout < 5 * interval:
+        raise ValidationError(
+            f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
+            f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
+            f"= {5 * interval}; got {timeout}"
+        )
+    # W11 (sec.11.1) + Loop 2 W12 hardening: reject any allowlist label
+    # that would defeat the timeout. The allowlist is meant for narrow
+    # well-defined patterns (e.g. ``magi-*``); permissive patterns let
+    # arbitrary dispatches bypass the timeout silently.
+    #
+    # Pre-W12: only exact ``'*'`` and ``''`` rejected. Post-W12 also
+    # rejects:
+    #
+    # - whitespace-only labels (``'  '``) -- after strip these become
+    #   empty strings.
+    # - Unicode lookalikes (``'＊'`` U+FF0A FULLWIDTH ASTERISK,
+    #   ``'？'`` U+FF1F FULLWIDTH QUESTION MARK) -- normalized via
+    #   NFKC before validation so the lookalike maps to the ASCII form.
+    # - multi-wildcard / wildcard-only patterns (``'**'``, ``'*?'``,
+    #   ``'?*'``, ``'?'``) -- match too broadly to be safe in a
+    #   timeout-allowlist context. Specifically: any label whose
+    #   stripped+NFKC form consists exclusively of fnmatch wildcards
+    #   ``*?[]`` is rejected.
+    import unicodedata
+
+    labels = data["auto_no_timeout_dispatch_labels"]
+    _wildcard_only_chars = set("*?[]")
+    if isinstance(labels, (list, tuple)):
+        for label in labels:
+            if not isinstance(label, str):
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: non-string label "
+                    f"{label!r} rejected (must be str)"
+                )
+            # Strip + NFKC-normalize to defeat whitespace-only and
+            # Unicode-lookalike bypasses.
+            normalized = unicodedata.normalize("NFKC", label).strip()
+            if normalized == "":
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: whitespace-only or empty "
+                    f"label {label!r} rejected (would match nothing or "
+                    f"everything depending on downstream semantics); use "
+                    f"specific glob like 'magi-*'"
+                )
+            if normalized == "*":
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: bare '*' rejected "
+                    f"(would defeat timeout); got {label!r}; use specific "
+                    f"glob like 'magi-*'"
+                )
+            # Multi-wildcard / wildcard-only check: every char is a
+            # fnmatch wildcard. ``'*'`` already handled above; this
+            # covers ``'**'``, ``'*?'``, ``'?*'``, ``'?'``,
+            # ``'[abc]'`` (bracket-only), etc.
+            if normalized and all(c in _wildcard_only_chars for c in normalized):
+                raise ValidationError(
+                    f"auto_no_timeout_dispatch_labels: wildcard-only label "
+                    f"{label!r} (normalized: {normalized!r}) rejected "
+                    f"(matches too broadly for a timeout allowlist); "
+                    f"use specific glob like 'magi-*'"
+                )
     try:
         return PluginConfig(**data)
     except TypeError as exc:

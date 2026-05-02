@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
 # Author: Julian Bolivar
-# Version: 1.0.0
-# Date: 2026-04-19
+# Version: 1.1.0
+# Date: 2026-05-02
 """/sbtdd status - read-only report of state + git + plan + drift (sec.S.5.5).
 
 Enforces INV-4 (no state file -> manual mode: only init/spec/status operate)
 and INV-17 (drift surfaced explicitly, never silenced). Never mutates any
 artifact -- status is the diagnostic subcomando.
 
-Exit codes: 0 success, 1 state file corrupt (StateFileError), 3 drift detected.
+v0.5.0 adds the ``--watch`` companion mode (sec.2.2, W1-W6) that polls
+``.claude/auto-run.json`` and emits a TTY rewrite-line render or one
+JSON object per progress change. Helpers live alongside the existing
+``main`` function so they can be unit-tested in isolation.
+
+Exit codes: 0 success, 1 state file corrupt (StateFileError), 3 drift
+detected, 130 SIGINT during ``--watch``.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import subprocess_utils
 from drift import detect_drift
-from errors import StateFileError
+from errors import StateFileError, ValidationError
 from state_file import load as load_state
 
 
@@ -30,6 +40,24 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Read-only status report of active SBTDD session.",
     )
     p.add_argument("--project-root", type=Path, default=Path.cwd())
+    # v0.5.0: --watch companion mode + interval/json flags (sec.2.2 W1-W6).
+    p.add_argument(
+        "--watch",
+        action="store_true",
+        help="Live poll of .claude/auto-run.json (W1-W6).",
+    )
+    p.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Poll interval in seconds (>= 0.1). Only meaningful with --watch.",
+    )
+    p.add_argument(
+        "--json",
+        dest="json_mode",
+        action="store_true",
+        help="Emit JSON per progress change (only with --watch).",
+    )
     return p
 
 
@@ -70,6 +98,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     ns = parser.parse_args(argv)
     root: Path = ns.project_root
+    # v0.5.0: --watch dispatches to the live-poll loop and bypasses the
+    # one-shot report. The watch loop targets .claude/auto-run.json
+    # rather than session-state.json (auto runs vs interactive runs).
+    # Look up watch_main on the live module so monkeypatched stubs
+    # (in run_sbtdd test harness) take effect.
+    if getattr(ns, "watch", False):
+        import status_cmd as _self
+
+        return _self.watch_main(
+            root / ".claude" / "auto-run.json",
+            interval=ns.interval,
+            json_mode=ns.json_mode,
+        )
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
         sys.stdout.write(
@@ -109,3 +150,217 @@ def main(argv: list[str] | None = None) -> int:
 
 
 run = main
+
+
+# ---------------------------------------------------------------------------
+# v0.5.0 — /sbtdd status --watch helpers (sec.2.2 W1-W6)
+# ---------------------------------------------------------------------------
+
+
+def validate_watch_interval(interval: float) -> None:
+    """W6: reject sub-100ms intervals (would spin CPU without operator value).
+
+    Raises:
+        ValidationError: When ``interval`` is below the 0.1s floor.
+    """
+    if interval < 0.1:
+        raise ValidationError(f"--interval must be >= 0.1s (sub-100ms spins CPU); got {interval}")
+
+
+def _watch_render_tty(progress: dict[str, Any]) -> str:
+    """W1: format a ProgressContext snapshot for a TTY rewrite-line render."""
+    parts: list[str] = []
+    if progress.get("iter_num"):
+        parts.append(f"iter {progress['iter_num']}")
+    parts.append(f"phase {progress.get('phase', 0)}")
+    if progress.get("task_index") is not None and progress.get("task_total") is not None:
+        parts.append(f"task {progress['task_index']}/{progress['task_total']}")
+    if progress.get("dispatch_label"):
+        parts.append(f"dispatch={progress['dispatch_label']}")
+    return "[sbtdd watch] " + " ".join(parts)
+
+
+def _watch_loop_once(auto_run_path: Path, *, json_mode: bool) -> int:
+    """W3: single-poll cycle. Returns 0 if missing file (operator-friendly).
+
+    Designed to be unit-testable independent of the real poll loop in
+    :func:`watch_main`. The full loop reuses these helpers but adds the
+    polling cadence and SIGINT handling.
+    """
+    if not auto_run_path.exists():
+        sys.stderr.write("[sbtdd status] no auto run in progress\n")
+        return 0
+    return 0  # full loop wired in S2-9 (see :func:`watch_main`).
+
+
+def _read_auto_run_with_retry(
+    auto_run_path: Path, *, max_retries: int = 5
+) -> dict[str, Any] | None:
+    """W4: 5x exponential backoff on JSON parse error.
+
+    Sleep occurs BETWEEN attempts (not after the last one) — total budget
+    is 4 sleeps (50+100+200+400ms = 750ms) for 5 attempts. Per Checkpoint
+    2 iter 1 melchior fix (no wasted sleep after final failed attempt).
+    """
+    backoff_schedule = [0.05, 0.1, 0.2, 0.4]  # 4 sleeps between 5 attempts
+    for attempt_idx in range(max_retries):
+        try:
+            data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            if attempt_idx < len(backoff_schedule):
+                time.sleep(backoff_schedule[attempt_idx])
+            continue
+        if isinstance(data, dict):
+            return data
+        return None
+    return None
+
+
+@dataclass
+class WatchPollState:
+    """W4 slow-poll fallback: track JSON parse failures, adjust interval.
+
+    Critical (Checkpoint 2 iter 1 caspar fix): only triggered by ACTUAL
+    JSON parse contention failures (5x retry exhaustion). Idle auto-runs
+    that return same data successfully are NOT failures — they keep the
+    default poll interval so operators see updates promptly when MAGI
+    dispatch ends.
+    """
+
+    default_interval: float
+    current_interval: float = field(default=0.0)
+    consecutive_parse_failures: int = 0
+    cap_seconds: float = 10.0
+
+    def __post_init__(self) -> None:
+        if self.current_interval == 0.0:
+            self.current_interval = self.default_interval
+
+    def record_parse_failure(self) -> None:
+        """Called ONLY when ``_read_auto_run_with_retry`` returns None."""
+        self.consecutive_parse_failures += 1
+        if self.consecutive_parse_failures >= 3:
+            self.current_interval = min(self.current_interval * 2, self.cap_seconds)
+
+    def record_parse_success(self) -> None:
+        """Called when JSON parsed (even if progress dict equals previous)."""
+        if self.current_interval > self.default_interval:
+            self.current_interval = self.default_interval
+        self.consecutive_parse_failures = 0
+
+
+_SENTINEL_NOT_PROVIDED: dict[str, Any] = {"__sentinel__": "watch_render_one_not_provided"}
+
+
+def _watch_render_one(
+    auto_run_path: Path,
+    *,
+    json_mode: bool,
+    last_progress: dict[str, Any] | None,
+    data: dict[str, Any] | None = _SENTINEL_NOT_PROVIDED,
+) -> dict[str, Any] | None:
+    """Single-poll render. Returns the new progress dict or last_progress.
+
+    Loop 2 WARNING #9 fix: accepts an already-read ``data`` dict so the
+    caller can share a single ``_read_auto_run_with_retry`` result
+    across both the diff/render path and the state-machine update path.
+
+    Loop 2 WARNING #10 fix: distinguish "data not supplied" (sentinel)
+    from "data supplied as None / parse failed". Pre-W10 the helper
+    re-read the file when ``data is None`` -- so on the parse-failure
+    path of ``watch_main`` (data already supplied as ``None``) the cycle
+    re-read auto-run.json a second time, defeating the W9 single-read
+    consolidation. Post-W10: only re-read when the sentinel default is
+    in effect (legacy callers that omit ``data``); explicit ``None``
+    is treated as "parse failed, use last_progress".
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        json_mode: Emit JSON lines (``True``) or TTY rewrite (``False``).
+        last_progress: The previously-rendered progress dict; used to
+            suppress duplicate emissions when the snapshot has not
+            changed.
+        data: Pre-read auto-run.json dict, or ``None`` when the caller
+            already attempted a read and got a parse failure (W10),
+            or omitted entirely for legacy direct callers (W9 retains
+            the auto-read fallback).
+    """
+    if data is _SENTINEL_NOT_PROVIDED:
+        # Legacy path: caller did not pre-read; do it ourselves.
+        data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+    if data is None:
+        # Either the legacy auto-read above returned None, or the caller
+        # explicitly passed None to signal a parse failure (W10).
+        return last_progress
+    progress = data.get("progress", {}) or {}
+    if progress != last_progress:
+        if json_mode:
+            sys.stdout.write(json.dumps({"timestamp": time.time(), "progress": progress}) + "\n")
+        else:
+            sys.stdout.write("\r" + _watch_render_tty(progress) + " ")
+        sys.stdout.flush()
+    return progress
+
+
+def watch_main(
+    auto_run_path: Path,
+    *,
+    interval: float,
+    json_mode: bool,
+) -> int:
+    """W1-W6: full ``status --watch`` poll loop.
+
+    Distinguishes (a) idle (parse success, same data), (b) contention
+    (parse failure after 5x retries), and (c) file-disappearance (path
+    stops existing mid-poll, e.g. auto-run finished + cleaned up). Per
+    Checkpoint 2 iter 1 + iter 2 caspar fixes.
+    """
+    validate_watch_interval(interval)
+    if not auto_run_path.exists():
+        sys.stderr.write("[sbtdd status] no auto run in progress\n")
+        return 0
+    state = WatchPollState(default_interval=interval)
+    last_progress: dict[str, Any] | None = None
+    try:
+        while True:
+            # Re-check existence each poll: file may disappear mid-watch
+            # (auto-run completed + .claude/ cleanup). Distinguish from
+            # contention.
+            if not auto_run_path.exists():
+                sys.stderr.write(
+                    "\n[sbtdd status] auto run ended (auto-run.json no longer present)\n"
+                )
+                sys.stderr.flush()
+                return 0
+            # Loop 2 WARNING #9 fix: read auto-run.json ONCE per cycle
+            # and share the result between the render/diff path and the
+            # state-machine update path. Pre-fix this loop called
+            # ``_read_auto_run_with_retry`` twice per cycle (once inside
+            # ``_watch_render_one`` and once here), wasting I/O and
+            # risking inconsistent state-machine updates if the two
+            # reads observed different on-disk payloads.
+            data = _read_auto_run_with_retry(auto_run_path, max_retries=5)
+            new_progress = _watch_render_one(
+                auto_run_path,
+                json_mode=json_mode,
+                last_progress=last_progress,
+                data=data,
+            )
+            if data is None:
+                state.record_parse_failure()
+                # Per Checkpoint 2 iter 3 caspar W9 fix: align breadcrumb
+                # cadence with slow-poll trigger threshold (3) rather than 5.
+                if state.consecutive_parse_failures % 3 == 0:
+                    sys.stderr.write(
+                        f"[sbtdd status] contention: JSON parse failed after "
+                        f"5 retries (cumulative={state.consecutive_parse_failures})\n"
+                    )
+                    sys.stderr.flush()
+            else:
+                state.record_parse_success()
+                last_progress = new_progress
+            time.sleep(state.current_interval)
+    except KeyboardInterrupt:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return 130

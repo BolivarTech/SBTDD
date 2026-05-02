@@ -42,8 +42,10 @@ is "in resume; auto never needs it".
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -51,7 +53,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Callable
 
 import close_task_cmd
 import commits
@@ -75,7 +77,12 @@ from errors import (
     ValidationError,
     VerificationIrremediableError,
 )
-from models import COMMIT_PREFIX_MAP
+from heartbeat import (
+    HeartbeatEmitter,
+    get_current_progress,
+    set_current_progress,
+)
+from models import COMMIT_PREFIX_MAP, ProgressContext
 from state_file import SessionState
 from state_file import load as load_state
 from state_file import save as save_state
@@ -100,6 +107,608 @@ _ALLOWED_AUTO_RUN_STATUSES: tuple[str, ...] = (
 #: status value removed). Additive changes (new status, new optional
 #: field) keep the version.
 _AUTO_RUN_SCHEMA_VERSION: int = 1
+
+
+def _set_progress(
+    *,
+    iter_num: int = 0,
+    phase: int,
+    task_index: int | None = None,
+    task_total: int | None = None,
+    dispatch_label: str | None = None,
+) -> None:
+    """Helper: write a fresh ProgressContext for the current transition.
+
+    ``started_at`` semantics (Checkpoint 2 iter 2 caspar CRITICAL #3 fix):
+    ``started_at`` represents the **current dispatch's** start time per
+    spec sec.3. Refreshing per ``_set_progress`` call would break that
+    contract when a single dispatch has multiple intra-dispatch updates
+    (e.g., progress refinement during a long subagent invocation).
+
+    Rules:
+
+    - If ``dispatch_label`` differs from the current ProgressContext's
+      label (or current is ``None``): treat as new dispatch, refresh
+      ``started_at``.
+    - If ``dispatch_label`` matches current: preserve ``started_at``
+      (intra-dispatch update; elapsed timer continues monotonically).
+    - If ``dispatch_label is None`` (between dispatches): set
+      ``started_at`` to ``None``.
+
+    The W2 fold-in (Checkpoint 2 iter 4) pins the ``None -> label`` case
+    as a transition (first labeled dispatch refreshes ``started_at``).
+    """
+    current = get_current_progress()
+    # Single label-transition predicate (Checkpoint 2 iter 3 melchior CRITICAL):
+    # compute is_dispatch_transition first; then derive started_at from one rule.
+    is_dispatch_transition = current.dispatch_label != dispatch_label
+    if dispatch_label is None:
+        new_started = None
+    elif is_dispatch_transition or current.started_at is None:
+        # New dispatch OR first dispatch ever (W2 fold-in: None -> label).
+        new_started = datetime.now(timezone.utc)
+    else:
+        # Same dispatch -- preserve started_at for monotonic elapsed.
+        new_started = current.started_at
+    set_current_progress(
+        ProgressContext(
+            iter_num=iter_num,
+            phase=phase,
+            task_index=task_index,
+            task_total=task_total,
+            dispatch_label=dispatch_label,
+            started_at=new_started,
+        )
+    )
+
+
+# Module-level queue: heartbeat thread -> main thread (sec.3 single-writer rule).
+# ``maxsize=0`` (UNBOUNDED) is a hard contract per Checkpoint 2 iter 3 melchior
+# CRITICAL #3: a bounded queue + ``queue.Full`` silently loses heartbeat audit
+# data. Memory cost is negligible (single tuple per push, bounded by failed-write
+# count + N=10 batching).
+#
+# Loop 2 W2+W7 fix: tagged-tuple protocol replaces ``+1000`` sentinel offset.
+# Items are ``("failed_writes", n)`` or ``("zombie", n)`` tuples. The drain
+# dispatches by tag rather than by numeric range, eliminating two issues:
+#
+# - W2: ``+1000`` collides with legitimate ``failed_writes`` >= 1000 from
+#   long-lived emitters (rare but pathological), causing mis-classification.
+# - W7: multiplexing two semantically distinct counters via numeric offset
+#   is hard to read and maintain; tag dispatch is explicit.
+#
+# Backward compat: plain ``int`` items (legacy producers, third-party tests)
+# are still accepted and treated as ``("failed_writes", n)`` -- same as the
+# original drain behaviour for values < 1000.
+_HeartbeatQueueItem = "tuple[str, int] | int"
+_heartbeat_failures_q: "queue.Queue[tuple[str, int] | int]" = queue.Queue(maxsize=0)
+
+
+# Legacy ``+1000`` sentinel offset, retained for backward compat in the drain
+# helper: producers emitting plain int >= 1000 are interpreted as zombie
+# alerts (pre-W2/W7 protocol). New producers emit ``("zombie", n)`` tuples.
+_HEARTBEAT_ZOMBIE_SENTINEL_OFFSET: int = 1000
+
+
+# Loop 2 W14 fix: dedup flag for the drain-decode-error stderr breadcrumb.
+# Pre-fix, ``_drain_heartbeat_queue_and_persist`` emitted
+# ``[sbtdd] warning: failed to read auto-run.json...`` on every JSON decode
+# failure, spamming stderr if the file was persistently corrupt. Post-fix,
+# emit only on the first failure; subsequent failures are silent until
+# :func:`_reset_drain_decode_error_emitted_for_tests` runs (test-only).
+_drain_decode_error_emitted: bool = False
+
+
+def _reset_drain_decode_error_emitted_for_tests() -> None:
+    """Test-only helper: reset the W14 dedup flag.
+
+    The flag is module-level mutable state; tests that exercise the
+    drain decode-error path must reset it to avoid order-dependent
+    failures.
+    """
+    global _drain_decode_error_emitted
+    _drain_decode_error_emitted = False
+
+
+# Loop 2 I3 (informational): swallowed observability counter. Increments
+# whenever a best-effort observability path silently absorbs an error
+# (heartbeat write fail, drain decode error, etc.). Surfaced in
+# auto-run.json on final flush so operators can see whether observability
+# was lossy during the run, even if breadcrumbs were de-duped.
+_observability_swallowed_count: int = 0
+
+
+def _bump_observability_swallowed_count() -> None:
+    """Increment the swallowed-observability counter (best-effort)."""
+    global _observability_swallowed_count
+    _observability_swallowed_count += 1
+
+
+def _reset_observability_swallowed_count_for_tests() -> None:
+    """Test-only helper: reset the I3 swallowed-observability counter."""
+    global _observability_swallowed_count
+    _observability_swallowed_count = 0
+
+
+def _assert_main_thread() -> None:
+    """W8 fold-in: enforce the single-writer rule mechanically.
+
+    Spec sec.3 stipulates only the auto orchestrator main thread mutates
+    ``.claude/auto-run.json``; this helper raises ``RuntimeError`` when
+    invoked from any other thread.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError(
+            "auto-run.json writer called from non-main thread "
+            f"({threading.current_thread().name!r}); single-writer rule "
+            f"(sec.3) violated"
+        )
+
+
+# Loop 2 W1+W3+W6+W9 fix: replace custom reentrancy bookkeeping with
+# ``threading.RLock``. Stdlib RLock handles reentrancy natively (per-thread
+# depth tracked by the lock itself), eliminating:
+#
+# - W1: race between ``existing_depth`` check and ``_lock_holders[key] = 1``
+#   in the previous custom implementation.
+# - W3: counter leak on early-return paths (open() failure, locking failure).
+# - W6: brittleness vs. the stdlib primitive that solves the problem in
+#   ~5 lines.
+# - W9: fragile key generation via ``str(path.resolve() if path.exists()
+#   else path)`` (same logical path could yield different keys mid-call).
+#
+# Each path string maps to a single ``threading.RLock`` instance, lazily
+# created under ``_file_locks_guard`` to keep the get-or-create step
+# thread-safe. ``threading.RLock`` is reentrant on the same thread by
+# definition, so nested ``_with_file_lock`` calls from inside the locked
+# region (e.g. ``_update_progress`` -> ``_drain_heartbeat_queue_and_persist``)
+# acquire the same lock instance without self-deadlock. The Windows
+# ``msvcrt.locking`` self-deadlock that motivated the original CRITICAL #1
+# fix is bypassed entirely because the OS-level lock is now nested inside
+# the in-process RLock; only the outermost (depth=1) call attempts to
+# acquire the OS-level advisory lock on disk.
+#
+# Loop 2 iter 3 W1+W4+W6 fix: replace ``_is_owned()`` private-API call
+# with a public ``threading.local`` per-thread, per-path depth counter.
+# The previous iter-2 code used ``in_process_lock._is_owned()`` (CPython
+# private API) to detect outermost-vs-reentrant entry; that method is
+# documented but not part of the public stdlib contract and may be
+# renamed/removed in future Python versions. The depth counter uses
+# only public ``threading.local`` storage.
+_file_locks: dict[str, threading.RLock] = {}
+_file_locks_guard = threading.Lock()
+
+# Per-thread, per-path depth counter. Stored on a ``threading.local()`` so
+# each thread sees its own dict; the dict is keyed by the same canonical
+# path string used by :func:`_get_file_lock`. Depth > 0 means the thread
+# is inside a ``_with_file_lock`` call for that path; outermost entry
+# observes depth == 0 and acquires the OS-level disk lock.
+_lock_depth_local = threading.local()
+
+
+def _get_lock_depth_dict() -> dict[str, int]:
+    """Return the per-thread depth dict, lazily creating it on first use.
+
+    ``threading.local`` returns a fresh attribute namespace per thread,
+    so each thread observes its own dict. The dict keys are canonical
+    path strings (matching the keys used by :func:`_get_file_lock`).
+    """
+    if not hasattr(_lock_depth_local, "depths"):
+        _lock_depth_local.depths = {}
+    return _lock_depth_local.depths  # type: ignore[no-any-return]
+
+
+def _canonical_lock_key(path: Path) -> str:
+    """Return the canonical key for a given path (stable across resolve).
+
+    Mirrors the logic in :func:`_get_file_lock` so the depth counter
+    keys match the lock-identity keys exactly. A best-effort ``resolve()``
+    is attempted when the path exists; otherwise the raw path string is
+    returned. ``OSError`` falls back to the raw path string.
+    """
+    try:
+        return str(path.resolve()) if path.exists() else str(path)
+    except OSError:
+        return str(path)
+
+
+def _get_file_lock(path: Path) -> threading.RLock:
+    """Get-or-create a ``threading.RLock`` for the given path.
+
+    Lock identity is keyed by ``str(path)`` after a best-effort
+    ``resolve()`` if the path exists. Two callers passing equivalent
+    paths get the same RLock instance (otherwise serialization breaks).
+
+    Args:
+        path: Target filesystem path.
+
+    Returns:
+        The ``threading.RLock`` associated with ``path``.
+    """
+    key = _canonical_lock_key(path)
+    with _file_locks_guard:
+        lock = _file_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _file_locks[key] = lock
+        return lock
+
+
+def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
+    """Serialize same-process access to ``path``.
+
+    Uses a ``threading.RLock`` for in-process reentrancy (W1+W3+W6+W9
+    fix) layered with an OS-level advisory lock (POSIX ``fcntl.flock``,
+    Windows ``msvcrt.locking``) on a sibling sentinel file
+    (``<path>.lock``).
+
+    **Reentrancy:** ``threading.RLock`` is reentrant on the same thread,
+    so nested calls (e.g. ``_update_progress`` ->
+    ``_drain_heartbeat_queue_and_persist``) re-enter the in-process lock
+    natively; the OS-level advisory lock is acquired only on the
+    outermost (depth=1) call to avoid the Windows
+    ``msvcrt.locking`` self-deadlock that motivated the original Loop 2
+    CRITICAL #1 fix.
+
+    **Scope:** serializes the three in-process auto-run.json writers
+    (``_update_progress``, ``_write_auto_run_audit``,
+    ``_drain_heartbeat_queue_and_persist``). External readers (e.g.
+    ``status --watch``, operator ``cat``) bypass the lock and rely on
+    atomic-rename semantics of ``os.replace`` for consistency.
+
+    **Best-effort:** any OSError during OS-level lock acquisition logs
+    a stderr breadcrumb and proceeds without the disk lock; the
+    in-process RLock still serializes intra-process writers.
+
+    Args:
+        path: Target file whose mutation is serialized.
+        fn: Zero-argument callable that performs the mutation.
+    """
+    in_process_lock = _get_file_lock(path)
+    # Detect outermost-vs-reentrant entry so the OS-level disk lock is
+    # acquired only once per logical critical section. Use a public
+    # ``threading.local`` depth counter rather than the iter-2 RLock
+    # private-API call (Loop 2 iter 3 W1+W4+W6 fix). The depth dict is
+    # per-thread (via threading.local) and keyed by the canonical path
+    # string; depth == 0 at entry means outermost.
+    depth_dict = _get_lock_depth_dict()
+    key = _canonical_lock_key(path)
+    is_outer = depth_dict.get(key, 0) == 0
+    with in_process_lock:
+        depth_dict[key] = depth_dict.get(key, 0) + 1
+        try:
+            if not is_outer:
+                # Reentrant call: in-process RLock has been re-acquired
+                # natively. Skip the OS-level lock (already held by the
+                # outer frame on this same thread).
+                fn()
+                return
+            lock_path = path.with_suffix(path.suffix + ".lock")
+            try:
+                lock_fd = open(lock_path, "a+b")
+            except OSError as exc:
+                sys.stderr.write(
+                    f"[sbtdd] warning: could not open lock file {lock_path}: "
+                    f"{exc!s}; proceeding without intra-process lock\n"
+                )
+                sys.stderr.flush()
+                fn()
+                return
+            try:
+                if sys.platform == "win32":
+                    try:
+                        import msvcrt
+
+                        lock_fd.seek(0)
+                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+                    except (OSError, ImportError) as exc:
+                        sys.stderr.write(
+                            f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
+                            f"proceeding without intra-process lock\n"
+                        )
+                        sys.stderr.flush()
+                        fn()
+                        return
+                else:
+                    try:
+                        import fcntl
+
+                        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                    except (OSError, ImportError) as exc:
+                        sys.stderr.write(
+                            f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
+                            f"proceeding without intra-process lock\n"
+                        )
+                        sys.stderr.flush()
+                        fn()
+                        return
+                try:
+                    fn()
+                finally:
+                    if sys.platform == "win32":
+                        try:
+                            import msvcrt
+
+                            lock_fd.seek(0)
+                            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                        except OSError:
+                            pass
+                    else:
+                        try:
+                            import fcntl
+
+                            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                        except OSError:
+                            pass
+            finally:
+                try:
+                    lock_fd.close()
+                except OSError:
+                    pass
+        finally:
+            # Decrement depth; remove key when depth returns to zero so
+            # the per-thread dict stays small even after many distinct
+            # paths have been locked.
+            new_depth = depth_dict.get(key, 0) - 1
+            if new_depth <= 0:
+                depth_dict.pop(key, None)
+            else:
+                depth_dict[key] = new_depth
+
+
+# Loop 2 iter 3 caspar R1 fold-in: cheap insurance against accidental
+# re-introduction of the threading.RLock private-API call. Inspect the
+# helper's source at module-import time and assert the forbidden token
+# is absent. Catches copy-paste regressions from older Loop 2 iter 2
+# docs/tests before the unit-test suite even runs. The token is split
+# at concatenation so this very line cannot trigger a self-match.
+_FORBIDDEN_PRIVATE_API_TOKEN = "_is" + "_owned"
+_with_file_lock_source = inspect.getsource(_with_file_lock)
+assert _FORBIDDEN_PRIVATE_API_TOKEN not in _with_file_lock_source, (
+    "_with_file_lock must not depend on threading.RLock private API "
+    "(Loop 2 iter 3 W1+W4+W6 + caspar R1)."
+)
+del _with_file_lock_source
+del _FORBIDDEN_PRIVATE_API_TOKEN
+
+
+_PROGRESS_DRAIN_INTERVAL_SECONDS: int = 30
+
+
+@dataclass
+class _DrainState:
+    """Encapsulates last-drain timestamp to avoid module-level mutable state.
+
+    Per Checkpoint 2 iter 1 caspar fix: a module-level ``_last_drain_at``
+    causes test order dependence. Encapsulating in a dataclass instance
+    allows fixture reset and parallel-test isolation.
+    """
+
+    last_drain_at: float = 0.0
+
+
+_drain_state = _DrainState()
+
+
+def _periodic_drain_if_due(
+    auto_run_path: Path,
+    *,
+    force: bool = False,
+    state: _DrainState = _drain_state,
+) -> None:
+    """Drain heartbeat queue if 30s elapsed since last drain (sec.11.1 W8).
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        force: When True, drain unconditionally and reset the timestamp.
+        state: Drain-state container; default uses module singleton.
+    """
+    now = time.monotonic()
+    if not force and (now - state.last_drain_at) < _PROGRESS_DRAIN_INTERVAL_SECONDS:
+        return
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    state.last_drain_at = now
+
+
+def _reset_drain_state_for_tests() -> None:
+    """Test-only helper: reset drain state to ensure isolation."""
+    _drain_state.last_drain_at = 0.0
+
+
+def _serialize_progress() -> dict[str, Any]:
+    """Serialize current ProgressContext to a JSON-friendly dict (ISO 8601 UTC).
+
+    The ``started_at`` datetime is normalized to UTC and rendered with the
+    ``Z`` suffix using :func:`datetime.strftime` -- NOT
+    ``str.replace('+00:00', 'Z')`` which would break if the input already
+    has ``Z`` or different ``tzinfo`` formatting (Checkpoint 2 iter 1
+    melchior fix).
+
+    Per W8 fold-in, this helper is restricted to main-thread callers.
+    """
+    _assert_main_thread()
+    ctx = get_current_progress()
+    started = ctx.started_at
+    started_str: str | None
+    if started is not None:
+        started_str = started.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        started_str = None
+    return {
+        "iter_num": ctx.iter_num,
+        "phase": ctx.phase,
+        "task_index": ctx.task_index,
+        "task_total": ctx.task_total,
+        "dispatch_label": ctx.dispatch_label,
+        "started_at": started_str,
+    }
+
+
+def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
+    """Drain :data:`_heartbeat_failures_q` and persist max() counter.
+
+    Implements the sec.3 single-writer rule: only the main thread reads
+    the queue and writes to ``auto-run.json``. The C4 fold-in adds an
+    intra-process advisory lock so concurrent in-process writers (the
+    other two ``auto-run.json`` writers) cannot corrupt the JSON. External
+    readers (e.g. ``status --watch``) rely on atomic-rename semantics
+    rather than the lock.
+
+    Loop 2 W2+W7 fix: items are ``("failed_writes", n)`` or
+    ``("zombie", n)`` tuples; drain dispatches by tag. Backward compat:
+    plain ``int`` items are interpreted as ``("zombie", n - 1000)`` if
+    ``n >= 1000`` else ``("failed_writes", n)`` -- preserving the
+    pre-fix ``+1000`` sentinel scheme for any leftover producers.
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+    """
+    _assert_main_thread()
+    drained: list[tuple[str, int] | int] = []
+    while True:
+        try:
+            drained.append(_heartbeat_failures_q.get_nowait())
+        except queue.Empty:
+            break
+    if not drained:
+        return
+
+    failed_writes_values: list[int] = []
+    zombie_values: list[int] = []
+    for item in drained:
+        if isinstance(item, tuple) and len(item) == 2:
+            tag, count = item
+            if tag == "failed_writes":
+                failed_writes_values.append(int(count))
+            elif tag == "zombie":
+                zombie_values.append(int(count))
+            # Unknown tags silently dropped (defensive vs. future
+            # producer bugs; not failing-loud avoids killing the drain).
+        elif isinstance(item, int):
+            # Backward compat with pre-W2/W7 plain-int protocol.
+            if item >= _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET:
+                zombie_values.append(item - _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET)
+            else:
+                failed_writes_values.append(item)
+
+    def _do_persist() -> None:
+        global _drain_decode_error_emitted
+        try:
+            data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            # Loop 2 W14 fix: emit the breadcrumb only on the first decode
+            # failure; subsequent failures are silent. I3: increment the
+            # observability-swallowed counter on every silent failure.
+            if not _drain_decode_error_emitted:
+                sys.stderr.write(
+                    f"[sbtdd] warning: failed to read auto-run.json for heartbeat "
+                    f"drain: {type(exc).__name__}: {exc!s} (further drain "
+                    f"decode errors silenced; see "
+                    f"heartbeat_observability_swallowed in auto-run.json)\n"
+                )
+                sys.stderr.flush()
+                _drain_decode_error_emitted = True
+            else:
+                _bump_observability_swallowed_count()
+            return
+        if not isinstance(data, dict):
+            return
+        if failed_writes_values:
+            existing = data.get("heartbeat_failed_writes_total", 0)
+            try:
+                existing_int = int(existing)
+            except (TypeError, ValueError):
+                existing_int = 0
+            data["heartbeat_failed_writes_total"] = max(existing_int, *failed_writes_values)
+        if zombie_values:
+            zombie_count = max(zombie_values)
+            existing_z = data.get("heartbeat_zombie_thread_count", 0)
+            try:
+                existing_z_int = int(existing_z)
+            except (TypeError, ValueError):
+                existing_z_int = 0
+            data["heartbeat_zombie_thread_count"] = max(existing_z_int, zombie_count)
+        # Loop 2 I3: surface the swallowed-observability counter so
+        # operators can see whether de-duped breadcrumbs masked recurrent
+        # silent failures during the run.
+        if _observability_swallowed_count > 0:
+            existing_obs = data.get("heartbeat_observability_swallowed", 0)
+            try:
+                existing_obs_int = int(existing_obs)
+            except (TypeError, ValueError):
+                existing_obs_int = 0
+            data["heartbeat_observability_swallowed"] = max(
+                existing_obs_int, _observability_swallowed_count
+            )
+        # Atomic rename (preserve existing _update_progress mechanism).
+        tmp_path = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
+        try:
+            tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp_path, auto_run_path)
+        except OSError as exc:
+            sys.stderr.write(
+                f"[sbtdd] warning: failed to persist heartbeat counters: "
+                f"{type(exc).__name__}: {exc!s}\n"
+            )
+            sys.stderr.flush()
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    _with_file_lock(auto_run_path, _do_persist)
+
+
+def _dispatch_with_heartbeat(
+    *,
+    invoke: Callable[..., Any],
+    heartbeat_interval: float = 15.0,
+    **invoke_kwargs: Any,
+) -> Any:
+    """Wrap a long subprocess invocation in a HeartbeatEmitter.
+
+    The dispatch label is **derived from the current ProgressContext**
+    (set by :func:`_set_progress` immediately before this call). This
+    eliminates the iter-1 Checkpoint 2 caspar finding: dispatch_label
+    drift between the writer hook and the heartbeat wrapper.
+
+    **Fail-loud (Checkpoint 2 iter 2 melchior fix)**: raises
+    ``ValueError`` if ``dispatch_label`` is ``None`` at call time.
+    Silent fallback to ``"unlabeled-dispatch"`` was rejected per
+    fail-loud principle -- caller MUST establish dispatch context
+    before invoking the wrapper.
+
+    The failures queue is the module-level ``_heartbeat_failures_q``
+    drained by :func:`_drain_heartbeat_queue_and_persist` (single-
+    writer rule per sec.3 of spec).
+
+    Args:
+        invoke: The callable performing the actual subprocess work.
+        heartbeat_interval: Tick cadence in seconds.
+        **invoke_kwargs: Forwarded verbatim to ``invoke``.
+
+    Returns:
+        Whatever ``invoke`` returns.
+
+    Raises:
+        ValueError: When ``ProgressContext.dispatch_label`` is None.
+    """
+    ctx = get_current_progress()
+    if ctx.dispatch_label is None:
+        raise ValueError(
+            "_dispatch_with_heartbeat called without dispatch_label set. "
+            "Caller must invoke `_set_progress(..., dispatch_label='...')` "
+            "BEFORE this wrapper. Silent fallback rejected per fail-loud "
+            "(Checkpoint 2 iter 2 melchior CRITICAL #1)."
+        )
+    with HeartbeatEmitter(
+        label=ctx.dispatch_label,
+        interval_seconds=heartbeat_interval,
+        failures_queue=_heartbeat_failures_q,
+    ):
+        return invoke(**invoke_kwargs)
 
 
 def _stream_subprocess(
@@ -300,6 +909,49 @@ def _update_progress(
         terminating mid-cycle on a transient filesystem error (disk
         full, locked file, antivirus interference, etc.). The original
         ``auto-run.json`` is preserved unchanged on failure.
+
+    Loop 1 fix (v0.5.0 CRITICAL #3): the full read-modify-write cycle
+    is now wrapped in :func:`_with_file_lock`. Pre-fix only
+    :func:`_drain_heartbeat_queue_and_persist` held the intra-process
+    advisory lock; this writer plus :func:`_write_auto_run_audit`
+    performed RMW unprotected, so the C4 contract was incomplete. The
+    fix routes both writers through the same lock helper so all three
+    in-process writers serialise correctly. External readers
+    (``status --watch``) bypass the lock and rely on atomic-rename
+    semantics for consistency (Loop 2 WARNING #2 scope clarification).
+
+    Loop 2 W13 fix: ``_assert_main_thread`` is invoked at entry so the
+    single-writer rule (sec.3) trips immediately on misuse rather than
+    after partial work inside ``_serialize_progress`` (which only runs
+    AFTER the read step has already happened).
+    """
+    _assert_main_thread()
+
+    def _do_write() -> None:
+        _do_update_progress(
+            auto_run_path,
+            phase=phase,
+            task_index=task_index,
+            task_total=task_total,
+            sub_phase=sub_phase,
+        )
+
+    _with_file_lock(auto_run_path, _do_write)
+
+
+def _do_update_progress(
+    auto_run_path: Path,
+    *,
+    phase: int,
+    task_index: int | None,
+    task_total: int | None,
+    sub_phase: str | None,
+) -> None:
+    """Inner RMW for ``_update_progress`` -- runs UNDER ``_with_file_lock``.
+
+    The original ``_update_progress`` body, factored out so the public
+    entry point can wrap the full RMW cycle in the intra-process advisory
+    lock without duplicating the read / merge / atomic-replace logic.
     """
     tmp: Path | None = None
     try:
@@ -317,6 +969,14 @@ def _update_progress(
         # JSON ``null`` rather than absent keys so future
         # ``/sbtdd status --watch`` consumers can rely on the shape and
         # treat ``null`` as the explicit "unknown" sentinel.
+        #
+        # v0.5.0 S1-12: also emit the ProgressContext-derived snapshot as
+        # ``progress_context`` (sec.3 PINNED schema:
+        # ``{iter_num, phase, task_index, task_total, dispatch_label,
+        # started_at}``). Both keys coexist during the v0.5 transition
+        # so D4.3 absent-tolerant downstream readers (status --watch
+        # consumers expecting the v0.4 shape) keep working while the
+        # new ProgressContext-aware readers can adopt the richer key.
         progress: dict[str, object | None] = {
             "phase": phase,
             "task_index": task_index,
@@ -324,6 +984,16 @@ def _update_progress(
             "sub_phase": sub_phase,
         }
         existing["progress"] = progress
+        # Best-effort: serialize the ProgressContext singleton too. If
+        # the singleton is at default (no _set_progress fired yet), we
+        # still write the snapshot so consumers see a deterministic
+        # shape.
+        try:
+            existing["progress_context"] = _serialize_progress()
+        except RuntimeError:
+            # _assert_main_thread tripped (off-thread caller); don't
+            # corrupt auto-run.json.
+            pass
         tmp = auto_run_path.with_suffix(auto_run_path.suffix + f".tmp.{os.getpid()}")
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         # ``os.replace`` is atomic on POSIX and Windows, but on Windows it
@@ -338,6 +1008,14 @@ def _update_progress(
         for _ in range(20):
             try:
                 os.replace(tmp, auto_run_path)
+                # v0.5.0 S1-11: piggyback heartbeat queue drain on each
+                # successful progress write (single-writer rule sec.3).
+                # Best-effort: drain failures should never interrupt the
+                # main auto run.
+                try:
+                    _drain_heartbeat_queue_and_persist(auto_run_path)
+                except Exception:  # noqa: BLE001
+                    pass
                 return
             except PermissionError as exc:
                 last_err = exc
@@ -656,6 +1334,8 @@ def _phase1_preflight(ns: argparse.Namespace) -> tuple[SessionState, PluginConfi
         PreconditionError: Missing state file or ``plan_approved_at is None``.
         DependencyError: Any pre-flight check reported non-OK status.
     """
+    # v0.5.0 S1-9 transition site #1: phase 1 entry.
+    _set_progress(phase=1)
     root: Path = ns.project_root
     state_path = root / ".claude" / "session-state.json"
     if not state_path.exists():
@@ -720,9 +1400,26 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
         VerificationIrremediableError: Non-quota verification failures
             exhausted the retry budget (exit 6).
     """
+    # Loop 1 fix v0.5.0 CRITICAL #1: wrap each verification + sys-debug
+    # dispatch in ``_dispatch_with_heartbeat`` so the operator sees liveness
+    # ticks during multi-minute subagent invocations. ``_set_progress`` MUST
+    # establish ``dispatch_label`` before the wrapper fires (fail-loud per
+    # Checkpoint 2 iter 2 melchior). The label is preserved (started_at
+    # refreshed) for the verification call and replaced for systematic-
+    # debugging via the same helper.
+    current = get_current_progress()
     for attempt in range(retries + 1):
         try:
-            superpowers_dispatch.verification_before_completion(cwd=str(root))
+            _set_progress(
+                iter_num=current.iter_num,
+                phase=current.phase,
+                task_index=current.task_index,
+                task_total=current.task_total,
+                dispatch_label="verification",
+            )
+            _dispatch_with_heartbeat(
+                invoke=lambda: superpowers_dispatch.verification_before_completion(cwd=str(root)),
+            )
             return
         except QuotaExhaustedError:
             # MAGI Loop 2 iter 1 Finding 2: quota exhaustion is NOT a
@@ -739,7 +1436,16 @@ def _run_verification_with_retries(root: Path, retries: int) -> None:
                 raise VerificationIrremediableError(
                     f"verification failed after {retries} retries: {exc}"
                 ) from exc
-            superpowers_dispatch.systematic_debugging(cwd=str(root))
+            _set_progress(
+                iter_num=current.iter_num,
+                phase=current.phase,
+                task_index=current.task_index,
+                task_total=current.task_total,
+                dispatch_label="systematic-debugging",
+            )
+            _dispatch_with_heartbeat(
+                invoke=lambda: superpowers_dispatch.systematic_debugging(cwd=str(root)),
+            )
 
 
 def _phase_prefix(phase: str) -> str:
@@ -807,7 +1513,19 @@ def _run_spec_review_gate(
         kwargs["model"] = model
     if stream_prefix is not None:
         kwargs["stream_prefix"] = stream_prefix
-    spec_review_dispatch.dispatch_spec_reviewer(**kwargs)
+    # Loop 1 fix v0.5.0 CRITICAL #1: wrap with heartbeat so the operator
+    # sees liveness ticks during the spec-reviewer subagent invocation.
+    current = get_current_progress()
+    _set_progress(
+        iter_num=current.iter_num,
+        phase=current.phase,
+        task_index=current.task_index,
+        task_total=current.task_total,
+        dispatch_label="spec-review",
+    )
+    _dispatch_with_heartbeat(
+        invoke=lambda: spec_review_dispatch.dispatch_spec_reviewer(**kwargs),
+    )
 
 
 #: Maximum outer iterations for the B6 feedback loop, mirroring INV-11
@@ -945,20 +1663,39 @@ def _run_mini_cycle_for_finding(
         ("refactor", COMMIT_PREFIX_MAP["refactor"]),
     )
     for phase_label, prefix in phase_prefix_pairs:
+        # Loop 1 fix v0.5.0 CRITICAL #1: wrap each phase dispatch in
+        # ``_dispatch_with_heartbeat`` so multi-minute implementer subagent
+        # invocations emit liveness ticks. Use a phase-tagged label so the
+        # heartbeat output names which mini-cycle phase is in flight.
+        current = get_current_progress()
+        mini_cycle_label = f"spec-review-mini-cycle-{phase_label}"
+        _set_progress(
+            iter_num=current.iter_num,
+            phase=current.phase,
+            task_index=current.task_index,
+            task_total=current.task_total,
+            dispatch_label=mini_cycle_label,
+        )
         # v0.3.0 Feature E: omit model kwargs entirely when None so test
         # stubs pre-dating v0.3.0 keep accepting the call signature.
         if implementer_model is None:
-            superpowers_dispatch.test_driven_development(
-                args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
-                cwd=str(root),
-            )
+
+            def _invoke_tdd(_phase: str = phase_label) -> None:
+                superpowers_dispatch.test_driven_development(
+                    args=[f"--phase={_phase}", f"--finding={finding}", f"--task-id={task_id}"],
+                    cwd=str(root),
+                )
         else:
-            superpowers_dispatch.test_driven_development(
-                args=[f"--phase={phase_label}", f"--finding={finding}", f"--task-id={task_id}"],
-                cwd=str(root),
-                model=implementer_model,
-                skill_field_name="implementer_model",
-            )
+
+            def _invoke_tdd(_phase: str = phase_label) -> None:
+                superpowers_dispatch.test_driven_development(
+                    args=[f"--phase={_phase}", f"--finding={finding}", f"--task-id={task_id}"],
+                    cwd=str(root),
+                    model=implementer_model,
+                    skill_field_name="implementer_model",
+                )
+
+        _dispatch_with_heartbeat(invoke=_invoke_tdd)
         _run_verification_with_retries(root, retries)
         _commit_mini_cycle_phase(root, task_id, finding, prefix, phase_label)
 
@@ -1236,8 +1973,18 @@ def _phase2_task_loop(
         task_total=_t_total,
         sub_phase=current.current_phase,
     )
+    # v0.5.0 S1-9 transition site #2: phase 2 entry (task loop start).
+    _set_progress(
+        phase=2,
+        task_index=_t_idx,
+        task_total=_t_total,
+        dispatch_label=current.current_phase,
+    )
     try:
         while current.current_task_id is not None:
+            # v0.5.0 S1-13: bound heartbeat counter persistence latency
+            # to <= 30s even when no transition fires (long dispatches).
+            _periodic_drain_if_due(auto_run)
             phase_idx = (
                 _PHASE_ORDER.index(current.current_phase)
                 if current.current_phase in _PHASE_ORDER
@@ -1360,6 +2107,14 @@ def _phase2_task_loop(
                         task_total=_t_total,
                         sub_phase=next_phase,
                     )
+                    # v0.5.0 S1-9 transition site #3: per-phase dispatch
+                    # (red/green/refactor) within a task.
+                    _set_progress(
+                        phase=2,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        dispatch_label=next_phase,
+                    )
                 else:
                     # H6 (INV-31): spec-reviewer gate BEFORE mark_and_advance.
                     assert current.current_task_id is not None
@@ -1437,6 +2192,14 @@ def _phase2_task_loop(
                         task_index=_t_idx,
                         task_total=_t_total,
                         sub_phase=current.current_phase,
+                    )
+                    # v0.5.0 S1-9 transition site #4: per-task iteration
+                    # advance after mark_and_advance().
+                    _set_progress(
+                        phase=2,
+                        task_index=_t_idx,
+                        task_total=_t_total,
+                        dispatch_label=current.current_phase,
                     )
                     # Plan D iter 2 Caspar: incremental audit write after
                     # each task close so a mid-loop raise preserves the
@@ -1526,6 +2289,8 @@ def _phase3_pre_merge(ns: argparse.Namespace, cfg: PluginConfig) -> object:
     import magi_dispatch
     import pre_merge_cmd
 
+    # v0.5.0 S1-9 transition site #5: phase 3 entry (pre-merge).
+    _set_progress(phase=3)
     root: Path = ns.project_root
     pre_merge_cmd._loop1(root)
     max_iter = (
@@ -1566,6 +2331,8 @@ def _phase4_checklist(root: Path, state: SessionState, cfg: PluginConfig) -> Non
     """
     import finalize_cmd
 
+    # v0.5.0 S1-9 transition site #6: phase 4 entry (checklist).
+    _set_progress(phase=4)
     magi_verdict_path = root / ".claude" / "magi-verdict.json"
     items = finalize_cmd._checklist(root, state, magi_verdict_path, cfg)
     failures = [(n, d) for (n, ok, d) in items if not ok]
@@ -1590,6 +2357,8 @@ def _phase5_report(root: Path, started: str, verdict: object) -> None:
             run aborted before Phase 3 completed (never expected in the
             happy path).
     """
+    # v0.5.0 S1-9 transition site #7: phase 5 entry (audit + report).
+    _set_progress(phase=5)
     auto_run = root / ".claude" / "auto-run.json"
     finished = _now_iso()
     tasks_completed = _read_audit_tasks_completed(auto_run)
@@ -1664,33 +2433,58 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
         )
     payload.validate_schema()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # v0.4.0 J6: preserve the ``progress`` field (and only that field)
-    # from any pre-existing on-disk payload so audit refreshes do not
-    # transiently drop the live progress snapshot. Failures to read or
-    # parse the prior payload are swallowed -- a corrupted or missing
-    # file means we have nothing to preserve, which is acceptable.
-    audit_dict: dict[str, object] = dict(payload.to_dict())
-    if path.exists():
+
+    # Loop 1 fix (v0.5.0 CRITICAL #3): wrap the full RMW cycle in
+    # ``_with_file_lock`` so this writer serialises with the other two
+    # in-process ``auto-run.json`` writers (``_update_progress`` and
+    # ``_drain_heartbeat_queue_and_persist``). The C4 claim in CHANGELOG
+    # `[0.5.0]` previously held only for the drain helper; this fix
+    # extends it to all three writers.
+    #
+    # Loop 2 WARNING #2: the lock is **intra-process**, not cross-process.
+    # External readers (``status --watch``, operator ``cat``) bypass the
+    # lock; they rely on the atomic-rename semantics of ``os.replace``
+    # (POSIX + Windows) to never observe a torn JSON document.
+    propagated_error: list[BaseException] = []
+
+    def _do_write() -> None:
         try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(existing, dict) and "progress" in existing:
-                audit_dict["progress"] = existing["progress"]
-        except (OSError, json.JSONDecodeError):
-            pass
-    # Atomic write via tmp + os.replace (MAGI Loop 2 D iter 1 Caspar):
-    # mirrors state_file.save so a process killed mid-write never leaves
-    # a corrupted auto-run.json. If os.replace fails the tmp file is
-    # cleaned up before the error propagates so nothing leaks.
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
-    try:
-        os.replace(tmp, path)  # atomic on POSIX and Windows
-    except OSError:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+            # v0.4.0 J6: preserve the ``progress`` field (and only that field)
+            # from any pre-existing on-disk payload so audit refreshes do not
+            # transiently drop the live progress snapshot. Failures to read or
+            # parse the prior payload are swallowed -- a corrupted or missing
+            # file means we have nothing to preserve, which is acceptable.
+            audit_dict: dict[str, object] = dict(payload.to_dict())
+            if path.exists():
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(existing, dict) and "progress" in existing:
+                        audit_dict["progress"] = existing["progress"]
+                except (OSError, json.JSONDecodeError):
+                    pass
+            # Atomic write via tmp + os.replace (MAGI Loop 2 D iter 1 Caspar):
+            # mirrors state_file.save so a process killed mid-write never leaves
+            # a corrupted auto-run.json. If os.replace fails the tmp file is
+            # cleaned up before the error propagates so nothing leaks.
+            tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+            tmp.write_text(json.dumps(audit_dict, indent=2), encoding="utf-8")
+            try:
+                os.replace(tmp, path)  # atomic on POSIX and Windows
+            except OSError:
+                try:
+                    tmp.unlink()
+                except FileNotFoundError:
+                    pass
+                raise
+        except BaseException as exc:  # noqa: BLE001
+            # _with_file_lock signature swallows fn return; capture the
+            # exception so we can re-raise on the calling thread (preserves
+            # OSError semantics expected by callers).
+            propagated_error.append(exc)
+
+    _with_file_lock(path, _do_write)
+    if propagated_error:
+        raise propagated_error[0]
 
 
 def main(argv: list[str] | None = None) -> int:

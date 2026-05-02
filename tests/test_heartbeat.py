@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+# Author: Julian Bolivar
+# Version: 1.0.0
+# Date: 2026-05-02
+"""Unit tests for the v0.5.0 heartbeat module."""
+
+from __future__ import annotations
+
+import sys
+import time
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from heartbeat import (
+    HeartbeatEmitter,
+    get_current_progress,
+    reset_current_progress,
+    set_current_progress,
+)
+from models import ProgressContext
+
+
+@pytest.fixture(autouse=True)
+def _reset_progress():
+    reset_current_progress()
+    yield
+    reset_current_progress()
+
+
+def test_get_current_progress_initial_is_default_progress():
+    assert get_current_progress() == ProgressContext()
+
+
+def test_set_then_get_returns_same_reference():
+    new_ctx = ProgressContext(iter_num=2, phase=3)
+    set_current_progress(new_ctx)
+    assert get_current_progress() is new_ctx
+
+
+def test_repeated_set_replaces_singleton():
+    set_current_progress(ProgressContext(iter_num=1))
+    set_current_progress(ProgressContext(iter_num=2))
+    assert get_current_progress().iter_num == 2
+
+
+def test_reset_returns_default_after_set():
+    set_current_progress(ProgressContext(iter_num=99))
+    reset_current_progress()
+    assert get_current_progress() == ProgressContext()
+
+
+def test_heartbeat_emitter_class_exists():
+    """Smoke check: scaffold class importable; full behavior tested in S1-3+."""
+    assert HeartbeatEmitter is not None
+
+
+def test_heartbeat_emitter_context_manager_protocol():
+    emitter = HeartbeatEmitter(label="test-dispatch", interval_seconds=15)
+    assert emitter.label == "test-dispatch"
+    assert emitter.interval_seconds == 15
+    with emitter as e:
+        assert e is emitter
+
+
+def test_heartbeat_emitter_validates_interval_positive():
+    with pytest.raises(ValueError, match="interval_seconds must be > 0"):
+        HeartbeatEmitter(label="x", interval_seconds=0)
+    with pytest.raises(ValueError, match="interval_seconds must be > 0"):
+        HeartbeatEmitter(label="x", interval_seconds=-1)
+
+
+def test_heartbeat_thread_emits_ticks_during_active_lifetime(capsys):
+    set_current_progress(
+        ProgressContext(
+            iter_num=2,
+            phase=3,
+            task_index=14,
+            task_total=36,
+            dispatch_label="test-dispatch",
+            started_at=datetime.now(timezone.utc),
+        )
+    )
+    with HeartbeatEmitter(label="test-dispatch", interval_seconds=0.05):
+        time.sleep(0.18)  # ~3 ticks at 50ms cadence
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines() if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert len(tick_lines) >= 2
+
+
+def test_heartbeat_exit_join_returns_within_timeout_when_thread_sleeping():
+    """Verify Event.wait() (NOT time.sleep) so __exit__ can interrupt mid-tick."""
+    emitter = HeartbeatEmitter(label="x", interval_seconds=10.0)
+    t0 = time.monotonic()
+    with emitter:
+        time.sleep(0.1)
+    t1 = time.monotonic()
+    assert t1 - t0 < 2.5, (
+        f"exit took {t1 - t0:.2f}s; thread loop is using time.sleep instead of "
+        f"threading.Event.wait()"
+    )
+    # Make sure sys is referenced so import isn't unused.
+    _ = sys.stderr
+
+
+def test_format_tick_full_fields_matches_h5():
+    fake_start = datetime.now(timezone.utc) - timedelta(seconds=15)
+    ctx = ProgressContext(
+        iter_num=2,
+        phase=3,
+        task_index=14,
+        task_total=36,
+        dispatch_label="magi-loop2-iter2",
+        started_at=fake_start,
+    )
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ctx)
+    assert line.startswith("[sbtdd auto] tick:")
+    assert "iter 2" in line
+    assert "phase 3" in line
+    assert "task 14/36" in line
+    assert "dispatch=magi-loop2-iter2" in line
+    assert "elapsed=" in line
+    assert any(s in line for s in ("0m14s", "0m15s", "0m16s"))
+
+
+def test_format_tick_omits_null_fields_h6():
+    fake_start = datetime.now(timezone.utc) - timedelta(seconds=45)
+    ctx = ProgressContext(phase=1, started_at=fake_start)
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ctx)
+    assert "phase 1" in line
+    assert "iter " not in line
+    assert "task " not in line
+    assert "dispatch=" not in line
+    assert "elapsed=" in line
+
+
+def test_format_tick_no_started_at_omits_elapsed():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    line = emitter._format_tick(ProgressContext())
+    assert line.startswith("[sbtdd auto] tick:")
+    assert "phase 0" in line
+    assert "elapsed" not in line
+
+
+def test_heartbeat_first_failure_emits_breadcrumb_then_silent(monkeypatch):
+    write_calls = {"count": 0}
+    real_write = sys.stderr.write
+
+    def failing_write(s):
+        write_calls["count"] += 1
+        if write_calls["count"] == 1 or write_calls["count"] >= 3:
+            raise OSError("broken pipe")
+        return real_write(s)
+
+    monkeypatch.setattr(sys.stderr, "write", failing_write)
+    emitter = HeartbeatEmitter(label="x", interval_seconds=0.05)
+    with emitter:
+        time.sleep(0.18)
+    assert emitter._failed_writes >= 1
+
+
+def test_heartbeat_failed_writes_counter_starts_zero():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15)
+    assert emitter._failed_writes == 0
+
+
+def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
+    """Loop 2 W2+W7 update: producer emits ``("failed_writes", n)`` tuples."""
+    import queue as _q
+
+    def always_fail(s):
+        raise OSError("broken pipe")
+
+    monkeypatch.setattr(sys.stderr, "write", always_fail)
+    q: "_q.Queue[tuple[str, int] | int]" = _q.Queue()
+    emitter = HeartbeatEmitter(
+        label="x",
+        interval_seconds=0.01,
+        failures_queue=q,
+    )
+    with emitter:
+        deadline = time.monotonic() + 2.0
+        while emitter._failed_writes < 10 and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert emitter._failed_writes >= 10
+    drained: list[tuple[str, int] | int] = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    # Look for ("failed_writes", n) tuples with n >= 10.
+    assert any(
+        isinstance(item, tuple) and item[0] == "failed_writes" and item[1] >= 10 for item in drained
+    ), f"expected ('failed_writes', >=10) tuple in queue, got {drained}"
+
+
+def test_heartbeat_exit_pushes_final_counter_to_queue():
+    """Loop 2 W2+W7 update: final flush emits ``("failed_writes", 7)``."""
+    import queue as _q
+
+    q: "_q.Queue[tuple[str, int] | int]" = _q.Queue()
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=q)
+    with emitter:
+        emitter._failed_writes = 7
+    drained: list[tuple[str, int] | int] = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert drained[-1] == ("failed_writes", 7)
+
+
+def test_heartbeat_no_queue_means_no_persistence():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=None)
+    with emitter:
+        emitter._failed_writes = 5
+    # No assertion failure expected; just exercise the no-queue path.
+
+
+def test_zombie_thread_count_persists_across_emitter_lifecycles():
+    """C3 fold-in: class-level zombie counter persists across instances."""
+    from heartbeat import HeartbeatEmitter as HE
+
+    initial = HE._zombie_thread_count
+    # Smoke: instances do not reset class-level counter.
+    HeartbeatEmitter(label="a", interval_seconds=1.0)
+    HeartbeatEmitter(label="b", interval_seconds=1.0)
+    assert HE._zombie_thread_count == initial
+
+
+def test_zombie_thread_threshold_never_raises_per_inv_32(monkeypatch):
+    """INV-32: heartbeat thread NEVER blocks/kills auto run.
+
+    Even at zombie threshold, ``__exit__`` must NOT raise -- the class-level
+    counter + queue sentinel (+1000) + fd=2 breadcrumb already give operator
+    visibility. If escalation is needed, it should happen post-dispatch from
+    main thread, NOT from ``__exit__``.
+
+    Pre-fix: __exit__ raised ``RuntimeError`` at threshold; this swallowed
+    any pending real ``exc`` from inside the ``with`` block AND violated
+    INV-32. Post-fix: __exit__ returns None, persists the +1000 sentinel
+    via the failures queue, emits the FATAL breadcrumb, but never raises.
+    """
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        # Force the counter to (and beyond) the threshold so the C3 path fires.
+        HE._zombie_thread_count = HE._max_zombie_threads - 1
+        emitter = HeartbeatEmitter(label="z", interval_seconds=10.0)
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        emitter._stop_event = __import__("threading").Event()
+        emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
+        # MUST NOT RAISE per INV-32:
+        result = emitter.__exit__(None, None, None)
+        assert result is None
+        # Counter advanced as expected:
+        assert HE._zombie_thread_count >= HE._max_zombie_threads
+    finally:
+        HE._zombie_thread_count = original
+
+
+def test_zombie_thread_threshold_does_not_swallow_pending_exception(monkeypatch):
+    """INV-32: __exit__ must not raise even when (zombie + pending exc).
+
+    Pre-fix: raising RuntimeError from __exit__ at zombie threshold swallowed
+    any exc the user code raised inside the ``with`` block. Post-fix:
+    __exit__ returns None, the user's exc propagates normally because Python
+    only swallows when __exit__ returns truthy.
+    """
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        HE._zombie_thread_count = HE._max_zombie_threads - 1
+        emitter = HeartbeatEmitter(label="z", interval_seconds=10.0)
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        emitter._stop_event = __import__("threading").Event()
+        emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
+        # Simulate calling __exit__ with a pending exception (the user's
+        # work raised inside the with-block). __exit__ must not raise its
+        # own RuntimeError; it returns None so the original exc propagates.
+        result = emitter.__exit__(ValueError, ValueError("user error"), None)
+        assert result is None
+    finally:
+        HE._zombie_thread_count = original
+
+
+def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
+    """Loop 2 W2+W7: zombie counter persisted as ``("zombie", n)`` tuple."""
+    import queue as _q
+
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        HE._zombie_thread_count = 0
+        q: "_q.Queue[tuple[str, int] | int]" = _q.Queue()
+        emitter = HeartbeatEmitter(label="z", interval_seconds=10.0, failures_queue=q)
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        emitter._stop_event = __import__("threading").Event()
+        emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
+        emitter.__exit__(None, None, None)
+        # Drain queue and look for ("zombie", n) tuple.
+        drained: list[tuple[str, int] | int] = []
+        while not q.empty():
+            drained.append(q.get_nowait())
+        assert any(
+            isinstance(item, tuple) and item[0] == "zombie" and item[1] >= 1 for item in drained
+        ), f"expected ('zombie', >=1) tuple in queue, got {drained}"
+    finally:
+        HE._zombie_thread_count = original
+
+
+def test_zombie_fatal_breadcrumb_is_dedup(capfd):
+    """Loop 2 W11: zombie FATAL breadcrumb on threshold breach is de-duped.
+
+    Pre-fix: every ``__exit__`` invocation that found
+    ``_zombie_thread_count >= _max_zombie_threads`` emitted the FATAL
+    breadcrumb via ``os.write(2, ...)``. Repeated zombie events past
+    the threshold spammed fd=2. Post-fix: emit only on the first
+    breach; subsequent breaches are silent until a test-only reset.
+
+    Uses ``capfd`` (not ``capsys``) because the breadcrumb is written
+    via ``os.write(fd=2)`` which bypasses Python-level stderr capture.
+    """
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        HE._zombie_thread_count = HE._max_zombie_threads - 1
+        from heartbeat import _reset_zombie_breadcrumb_emitted_for_tests
+
+        _reset_zombie_breadcrumb_emitted_for_tests()
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        # First exit: breadcrumb emitted.
+        e1 = HeartbeatEmitter(label="z1", interval_seconds=10.0)
+        e1._stop_event = __import__("threading").Event()
+        e1._thread = FakeBlockedThread()  # type: ignore[assignment]
+        e1.__exit__(None, None, None)
+
+        # Second exit: ALSO past threshold. Pre-fix would emit again.
+        e2 = HeartbeatEmitter(label="z2", interval_seconds=10.0)
+        e2._stop_event = __import__("threading").Event()
+        e2._thread = FakeBlockedThread()  # type: ignore[assignment]
+        e2.__exit__(None, None, None)
+
+        captured = capfd.readouterr()
+        fatal_lines = [
+            line
+            for line in captured.err.splitlines()
+            if "FATAL: heartbeat zombie threshold reached" in line
+        ]
+        assert len(fatal_lines) == 1, (
+            f"expected exactly 1 dedup'd FATAL breadcrumb across 2 threshold "
+            f"breaches, got {len(fatal_lines)}: {fatal_lines}"
+        )
+    finally:
+        HE._zombie_thread_count = original
