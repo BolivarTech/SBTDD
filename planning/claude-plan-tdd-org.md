@@ -2200,9 +2200,9 @@ gate entry. This task closes the wiring gap on the consumer side.
 
 ```python
 def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
-    """H2-3: pre_merge_cmd._check_spec_snapshot_drift raises PreMergeError when scenarios changed."""
+    """H2-3: pre_merge_cmd._check_spec_snapshot_drift raises MAGIGateError when scenarios changed."""
     from pre_merge_cmd import _check_spec_snapshot_drift
-    from errors import PreMergeError
+    from errors import MAGIGateError  # caspar iter 4 CRITICAL: reuse existing
 
     # Persisted snapshot at plan-approval time.
     persisted = tmp_path / "spec-snapshot.json"
@@ -2217,7 +2217,7 @@ def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
         lambda _p: {"S1: parser handles empty input": "new-hash"},
     )
 
-    with pytest.raises(PreMergeError) as excinfo:
+    with pytest.raises(MAGIGateError) as excinfo:
         _check_spec_snapshot_drift(spec_path=spec, snapshot_path=persisted)
     msg = str(excinfo.value)
     assert "S1: parser handles empty input" in msg
@@ -2268,10 +2268,19 @@ Expected: `ImportError` for `_check_spec_snapshot_drift` not yet defined.
 
 - [ ] **Step 3: Implement `_check_spec_snapshot_drift` in pre_merge_cmd.py**
 
+Per caspar Loop 2 iter 4 CRITICAL fix: reuse the existing
+``errors.MAGIGateError`` instead of introducing a new ``PreMergeError``
+class. Semantically appropriate — pre-merge gate failures already raise
+``MAGIGateError`` elsewhere in ``pre_merge_cmd.py``. The existing error
+hierarchy in ``errors.py`` is unchanged
+(``SBTDDError + ValidationError + StateFileError + DriftError +
+DependencyError + PreconditionError + MAGIGateError``); no new exception
+class is added by v1.0.0.
+
 ```python
 import sys
 import spec_snapshot
-from errors import PreMergeError
+from errors import MAGIGateError
 
 
 def _check_spec_snapshot_drift(
@@ -2280,8 +2289,9 @@ def _check_spec_snapshot_drift(
     """Verify spec scenarios have not drifted since plan approval.
 
     Raises:
-        PreMergeError: when persisted snapshot differs from current spec
-            (added, removed, or modified scenarios).
+        MAGIGateError: when persisted snapshot differs from current spec
+            (added, removed, or modified scenarios). Reuses the existing
+            pre-merge gate exception class (caspar iter 4 CRITICAL fix).
 
     Backward compat: missing ``snapshot_path`` (pre-v1.0.0 plan-approval
     flows) emits a stderr breadcrumb and returns silently.
@@ -2299,7 +2309,7 @@ def _check_spec_snapshot_drift(
     curr = spec_snapshot.emit_snapshot(spec_path)
     diff = spec_snapshot.compare(prev, curr)
     if diff["added"] or diff["removed"] or diff["modified"]:
-        raise PreMergeError(
+        raise MAGIGateError(
             f"Spec scenarios changed since plan approval; re-approve plan "
             f"via /writing-plans + Checkpoint 2.\n"
             f"  added: {diff['added']}\n"

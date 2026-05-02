@@ -412,9 +412,15 @@ does not exist (pre-v1.0.0 plan-approval flows).
 > different spec snapshot S_HEAD (modified Given/When/Then).
 > **When** `pre_merge_cmd._check_spec_snapshot_drift` ejecuta at
 > pre-merge entry (wired by plan task **S1-26**).
-> **Then** raises `PreMergeError("Spec scenarios changed since plan
+> **Then** raises `MAGIGateError("Spec scenarios changed since plan
 > approval; re-approve plan via /writing-plans + Checkpoint 2")`.
-> Lists modified scenarios in error message.
+> Lists modified scenarios in error message. Per caspar Loop 2 iter 4
+> CRITICAL fix: the existing `errors.MAGIGateError` is reused (semantically
+> appropriate — pre-merge gate failures already use it) rather than
+> introducing a new `PreMergeError` class that does not exist in
+> `errors.py`. The existing error hierarchy
+> (`SBTDDError + ValidationError + StateFileError + DriftError +
+> DependencyError + PreconditionError + MAGIGateError`) is unchanged.
 
 **Escenario H2-4: snapshot persisted at planning/spec-snapshot.json**
 
