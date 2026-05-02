@@ -91,6 +91,16 @@ every post-v0.1 release.
 - W7 (Checkpoint 2 iter 4 balthasar): threading correctness in heartbeat
   + Windows reader fallback is treated as accepted-risk per the
   single-thread `auto_cmd` invariant + lock-protected singleton.
+- **C4 file-lock scope (Loop 2 WARNING #2 fix):** the `_with_file_lock`
+  helper around the three `auto-run.json` writers
+  (`_update_progress`, `_write_auto_run_audit`,
+  `_drain_heartbeat_queue_and_persist`) provides **intra-process**
+  writer serialisation. External readers (`status --watch`, operator
+  `cat`, OS backup tools) bypass the lock and rely on the atomic-rename
+  semantics of `os.replace` (POSIX + Windows) to never observe a torn
+  JSON document. Earlier docstrings called the lock "cross-process",
+  which overclaimed: no external process today acquires this exact
+  lock, and atomic rename is what actually protects readers.
 
 ### Deferred (rolled to v0.5.1)
 

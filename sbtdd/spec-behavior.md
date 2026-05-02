@@ -554,6 +554,19 @@ misma 50ms temporal window** del read loop. Implementation:
     `auto_per_stream_timeout_seconds >= 600` (absolute timeout floor —
     incluso con clause 1, interval=15 permite timeout=75s que matar
     caspar opus legitimate runs). 600s = 10min cubre observed worst-case.
+
+  **Validation order PINNED (post Loop 2 v0.5.0 WARNING #1/#7)**: clauses
+  son verificadas en orden `4 → 2 → 3 → 1` en `config.py:load_plugin_local`.
+  Razon: cheapest single-field absolute-bound checks (clauses 4, 2, 3)
+  fire first; the two-field ratio (clause 1) checks last. Bajo este
+  ordering una fixture que viola SOLO clause 1 no puede existir porque
+  clauses 2 + 4 mathematicamente subsumen clause 1: cualquier
+  `timeout >= 600` AND `interval <= 60` implica
+  `5 * interval ≤ 300 ≤ 600 ≤ timeout`, satisfaciendo clause 1. Clause 1
+  permanece en code como **defense-in-depth** contra futuro weakening de
+  clauses 2 o 4. Ver `docs/v0.5.0-config-matrix.md` `### W1` para la
+  prueba completa.
+
   Violation raises `ValidationError` con exit 1. Razon: si timeout fires
   antes del primer heartbeat tick, el operador nunca ve signal de vida y
   el subprocess es killed en silencio. Las 4 clauses combinan: timeout

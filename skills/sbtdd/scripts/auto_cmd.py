@@ -203,13 +203,26 @@ _lock_holders_mutex = threading.Lock()
 
 
 def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
-    """C4 fold-in: cross-process advisory lock around ``fn``.
+    """C4 fold-in: intra-process advisory lock around ``fn``.
 
     POSIX uses ``fcntl.flock(LOCK_EX)``; Windows uses
     ``msvcrt.locking(LK_LOCK)``. Lock is held on a sibling sentinel file
     (``<path>.lock``) so the lock survives ``os.replace`` of the target.
+
+    **Scope (Loop 2 WARNING #2 fix):** the lock serialises the three
+    in-process auto-run.json writers (``_update_progress``,
+    ``_write_auto_run_audit``, ``_drain_heartbeat_queue_and_persist``)
+    against each other. **External readers** (e.g. ``status --watch``,
+    operator ``cat``, OS backup tools) read ``auto-run.json`` directly
+    without acquiring this lock; they rely on the atomic-rename semantics
+    of ``os.replace`` (POSIX + Windows) to never observe a torn JSON
+    document. The "cross-process" framing used in earlier docstrings
+    was an overclaim: the only way an external process could conflict
+    with these writers is by also using this exact lock helper, which
+    no external tool does today.
+
     Best-effort: any OSError during lock acquisition logs a stderr
-    breadcrumb and proceeds without locking (cross-process contention is
+    breadcrumb and proceeds without locking (intra-process contention is
     rare; locking-related failures must not kill the auto run).
 
     **Reentrant on the same thread (Loop 2 CRITICAL #1 fix).** Nested
@@ -252,7 +265,7 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
     except OSError as exc:
         sys.stderr.write(
             f"[sbtdd] warning: could not open lock file {lock_path}: "
-            f"{exc!s}; proceeding without cross-process lock\n"
+            f"{exc!s}; proceeding without intra-process lock\n"
         )
         sys.stderr.flush()
         fn()
@@ -279,7 +292,8 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
                 msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
             except (OSError, ImportError) as exc:
                 sys.stderr.write(
-                    f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; proceeding without lock\n"
+                    f"[sbtdd] warning: msvcrt.locking failed: {exc!s}; "
+                    f"proceeding without intra-process lock\n"
                 )
                 sys.stderr.flush()
                 fn()
@@ -291,7 +305,8 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
                 fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             except (OSError, ImportError) as exc:
                 sys.stderr.write(
-                    f"[sbtdd] warning: fcntl.flock failed: {exc!s}; proceeding without lock\n"
+                    f"[sbtdd] warning: fcntl.flock failed: {exc!s}; "
+                    f"proceeding without intra-process lock\n"
                 )
                 sys.stderr.flush()
                 fn()
@@ -410,9 +425,11 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
     """Drain :data:`_heartbeat_failures_q` and persist max() counter.
 
     Implements the sec.3 single-writer rule: only the main thread reads
-    the queue and writes to ``auto-run.json``. The C4 fold-in adds a
-    cross-process advisory lock so concurrent writers (e.g. future
-    ``status --watch``) cannot corrupt the JSON.
+    the queue and writes to ``auto-run.json``. The C4 fold-in adds an
+    intra-process advisory lock so concurrent in-process writers (the
+    other two ``auto-run.json`` writers) cannot corrupt the JSON. External
+    readers (e.g. ``status --watch``) rely on atomic-rename semantics
+    rather than the lock.
 
     Queue values >= ``_HEARTBEAT_ZOMBIE_SENTINEL_OFFSET`` are interpreted
     as zombie sentinels (per C3 fold-in) and persisted in a distinct
@@ -735,11 +752,13 @@ def _update_progress(
 
     Loop 1 fix (v0.5.0 CRITICAL #3): the full read-modify-write cycle
     is now wrapped in :func:`_with_file_lock`. Pre-fix only
-    :func:`_drain_heartbeat_queue_and_persist` held the cross-process
+    :func:`_drain_heartbeat_queue_and_persist` held the intra-process
     advisory lock; this writer plus :func:`_write_auto_run_audit`
     performed RMW unprotected, so the C4 contract was incomplete. The
     fix routes both writers through the same lock helper so all three
-    writers serialise correctly.
+    in-process writers serialise correctly. External readers
+    (``status --watch``) bypass the lock and rely on atomic-rename
+    semantics for consistency (Loop 2 WARNING #2 scope clarification).
     """
 
     def _do_write() -> None:
@@ -765,7 +784,7 @@ def _do_update_progress(
     """Inner RMW for ``_update_progress`` -- runs UNDER ``_with_file_lock``.
 
     The original ``_update_progress`` body, factored out so the public
-    entry point can wrap the full RMW cycle in the cross-process advisory
+    entry point can wrap the full RMW cycle in the intra-process advisory
     lock without duplicating the read / merge / atomic-replace logic.
     """
     tmp: Path | None = None
@@ -2251,10 +2270,15 @@ def _write_auto_run_audit(path: Path, payload: AutoRunAudit) -> None:
 
     # Loop 1 fix (v0.5.0 CRITICAL #3): wrap the full RMW cycle in
     # ``_with_file_lock`` so this writer serialises with the other two
-    # ``auto-run.json`` writers (``_update_progress`` and
+    # in-process ``auto-run.json`` writers (``_update_progress`` and
     # ``_drain_heartbeat_queue_and_persist``). The C4 claim in CHANGELOG
     # `[0.5.0]` previously held only for the drain helper; this fix
     # extends it to all three writers.
+    #
+    # Loop 2 WARNING #2: the lock is **intra-process**, not cross-process.
+    # External readers (``status --watch``, operator ``cat``) bypass the
+    # lock; they rely on the atomic-rename semantics of ``os.replace``
+    # (POSIX + Windows) to never observe a torn JSON document.
     propagated_error: list[BaseException] = []
 
     def _do_write() -> None:
