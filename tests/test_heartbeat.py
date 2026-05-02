@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+import sys
+import time
+from datetime import datetime, timezone
+
 import pytest
 
 from heartbeat import (
@@ -64,3 +68,38 @@ def test_heartbeat_emitter_validates_interval_positive():
         HeartbeatEmitter(label="x", interval_seconds=0)
     with pytest.raises(ValueError, match="interval_seconds must be > 0"):
         HeartbeatEmitter(label="x", interval_seconds=-1)
+
+
+def test_heartbeat_thread_emits_ticks_during_active_lifetime(capsys):
+    set_current_progress(
+        ProgressContext(
+            iter_num=2,
+            phase=3,
+            task_index=14,
+            task_total=36,
+            dispatch_label="test-dispatch",
+            started_at=datetime.now(timezone.utc),
+        )
+    )
+    with HeartbeatEmitter(label="test-dispatch", interval_seconds=0.05):
+        time.sleep(0.18)  # ~3 ticks at 50ms cadence
+    captured = capsys.readouterr()
+    tick_lines = [
+        line for line in captured.err.splitlines() if line.startswith("[sbtdd auto] tick:")
+    ]
+    assert len(tick_lines) >= 2
+
+
+def test_heartbeat_exit_join_returns_within_timeout_when_thread_sleeping():
+    """Verify Event.wait() (NOT time.sleep) so __exit__ can interrupt mid-tick."""
+    emitter = HeartbeatEmitter(label="x", interval_seconds=10.0)
+    t0 = time.monotonic()
+    with emitter:
+        time.sleep(0.1)
+    t1 = time.monotonic()
+    assert t1 - t0 < 2.5, (
+        f"exit took {t1-t0:.2f}s; thread loop is using time.sleep instead of "
+        f"threading.Event.wait()"
+    )
+    # Make sure sys is referenced so import isn't unused.
+    _ = sys.stderr

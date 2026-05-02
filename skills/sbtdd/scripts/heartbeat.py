@@ -22,6 +22,7 @@ model implementation details that the lock approach avoids.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 from typing import Any
 
@@ -83,7 +84,49 @@ class HeartbeatEmitter:
         self._thread: threading.Thread | None = None
 
     def __enter__(self) -> "HeartbeatEmitter":
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._tick_loop,
+            name=f"heartbeat-{self.label}",
+            daemon=True,
+        )
+        self._thread.start()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         return None
+
+    def _tick_loop(self) -> None:
+        """Emit a stderr tick every interval until ``_stop_event`` is set.
+
+        Per Checkpoint 2 iter 1 caspar fix: check ``_stop_event.is_set()``
+        BEFORE each ``_emit_tick`` to avoid the
+        daemon-thread-outlives-context-manager race where the thread is
+        between ``wait()`` returning (stop signaled) and the next iteration
+        starting. Combined with ``Event.wait(timeout)`` (which returns
+        immediately when set), this guarantees the thread terminates within
+        ``max(interval, time-since-last-emit)`` of ``__exit__`` signal.
+        """
+        assert self._stop_event is not None
+        while not self._stop_event.is_set():
+            self._emit_tick()
+            if self._stop_event.wait(timeout=self.interval_seconds):
+                break
+
+    def _emit_tick(self) -> None:
+        """Format + write a single tick to stderr (best-effort)."""
+        ctx = get_current_progress()
+        line = self._format_tick(ctx)
+        try:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
+        except OSError:
+            self._failed_writes += 1
+
+    def _format_tick(self, ctx: ProgressContext) -> str:
+        """Stub format; full impl in S1-5."""
+        return f"[sbtdd auto] tick: phase {ctx.phase}"
