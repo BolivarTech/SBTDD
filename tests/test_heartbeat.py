@@ -166,3 +166,125 @@ def test_heartbeat_first_failure_emits_breadcrumb_then_silent(monkeypatch):
 def test_heartbeat_failed_writes_counter_starts_zero():
     emitter = HeartbeatEmitter(label="x", interval_seconds=15)
     assert emitter._failed_writes == 0
+
+
+def test_heartbeat_reports_failure_counter_via_queue_every_n10(monkeypatch):
+    import queue as _q
+
+    def always_fail(s):
+        raise OSError("broken pipe")
+
+    monkeypatch.setattr(sys.stderr, "write", always_fail)
+    q: "_q.Queue[int]" = _q.Queue()
+    emitter = HeartbeatEmitter(
+        label="x", interval_seconds=0.01, failures_queue=q,
+    )
+    with emitter:
+        deadline = time.monotonic() + 2.0
+        while emitter._failed_writes < 10 and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert emitter._failed_writes >= 10
+    drained: list[int] = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert any(c >= 10 for c in drained), (
+        f"expected counter >= 10 in queue, got {drained}"
+    )
+
+
+def test_heartbeat_exit_pushes_final_counter_to_queue():
+    import queue as _q
+
+    q: "_q.Queue[int]" = _q.Queue()
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=q)
+    with emitter:
+        emitter._failed_writes = 7
+    drained: list[int] = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    assert drained[-1] == 7
+
+
+def test_heartbeat_no_queue_means_no_persistence():
+    emitter = HeartbeatEmitter(label="x", interval_seconds=15.0, failures_queue=None)
+    with emitter:
+        emitter._failed_writes = 5
+    # No assertion failure expected; just exercise the no-queue path.
+
+
+def test_zombie_thread_count_persists_across_emitter_lifecycles():
+    """C3 fold-in: class-level zombie counter persists across instances."""
+    from heartbeat import HeartbeatEmitter as HE
+
+    initial = HE._zombie_thread_count
+    # Smoke: instances do not reset class-level counter.
+    HeartbeatEmitter(label="a", interval_seconds=1.0)
+    HeartbeatEmitter(label="b", interval_seconds=1.0)
+    assert HE._zombie_thread_count == initial
+
+
+def test_zombie_thread_threshold_raises_runtime_error_after_max(monkeypatch):
+    """C3 fold-in: hard zombie threshold (5 default) raises RuntimeError.
+
+    We simulate the zombie-detection path by setting the class counter
+    just below threshold then forcing one __exit__ that registers a zombie.
+    The actual zombie detection (thread.is_alive() after join timeout)
+    requires real subprocess work; we mock the thread-join behavior.
+    """
+    from heartbeat import HeartbeatEmitter as HE
+
+    # Save original counter.
+    original = HE._zombie_thread_count
+    try:
+        # Set to threshold - 1 so that one more zombie pushes over.
+        HE._zombie_thread_count = HE._max_zombie_threads - 1
+        emitter = HeartbeatEmitter(label="z", interval_seconds=10.0)
+        # Manually simulate __enter__ path then force a "blocked" thread.
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        emitter._stop_event = __import__("threading").Event()
+        emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="zombie"):
+            emitter.__exit__(None, None, None)
+    finally:
+        HE._zombie_thread_count = original
+
+
+def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
+    """C3 fold-in: zombie counter persisted via failures queue with +1000 sentinel."""
+    import queue as _q
+
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        HE._zombie_thread_count = 0
+        q: "_q.Queue[int]" = _q.Queue()
+        emitter = HeartbeatEmitter(label="z", interval_seconds=10.0, failures_queue=q)
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        emitter._stop_event = __import__("threading").Event()
+        emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
+        emitter.__exit__(None, None, None)
+        # Drain queue and look for sentinel.
+        drained: list[int] = []
+        while not q.empty():
+            drained.append(q.get_nowait())
+        # Sentinel: any value >= 1000 indicates zombie alert.
+        assert any(v >= 1000 for v in drained), (
+            f"expected zombie sentinel (>=1000) in queue, got {drained}"
+        )
+    finally:
+        HE._zombie_thread_count = original

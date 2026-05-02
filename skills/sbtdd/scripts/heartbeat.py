@@ -51,6 +51,16 @@ def reset_current_progress() -> None:
     set_current_progress(ProgressContext())
 
 
+def _reset_zombie_count_for_tests() -> None:
+    """Reset the class-level zombie counter. Test-only helper.
+
+    Per sec.13.3 INFO (melchior): the zombie counter is process-global
+    mutable state -- tests that exercise the C3 path must reset it to
+    avoid order-dependent failures.
+    """
+    HeartbeatEmitter._zombie_thread_count = 0
+
+
 class HeartbeatEmitter:
     """Context manager that emits stderr ticks every ``interval_seconds``.
 
@@ -66,6 +76,17 @@ class HeartbeatEmitter:
     # Class-level zombie counter (Checkpoint 2 iter 3 caspar CRITICAL fix):
     # tracks heartbeat threads that survived ``__exit__``'s 2s join timeout.
     _zombie_thread_count: int = 0
+
+    # C3 (Checkpoint 2 iter 4) hard threshold: when total zombies across the
+    # process lifetime reach this value, ``__exit__`` raises ``RuntimeError``
+    # after a best-effort fd=2 breadcrumb -- process exit becomes the bound.
+    _max_zombie_threads: int = 5
+
+    # C3 sentinel offset persisted via the failures queue: any queued value
+    # >= ``_ZOMBIE_SENTINEL_OFFSET`` indicates "zombie alert" rather than a
+    # plain failed-write counter. Single channel to main thread per
+    # single-writer rule sec.3.
+    _ZOMBIE_SENTINEL_OFFSET: int = 1000
 
     def __init__(
         self,
@@ -97,8 +118,95 @@ class HeartbeatEmitter:
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         if self._stop_event is not None:
             self._stop_event.set()
+        zombie_alert = False
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+            # Per Checkpoint 2 iter 2/3 caspar CRITICAL fix: a thread still
+            # alive after the 2s join is blocked on a stderr write (broken
+            # pipe + the write call itself blocks). EXPLICIT accounting:
+            # increment a class-level ``_zombie_thread_count`` and emit a
+            # structured warning to alternate channel (best-effort fd=2
+            # write, swallow OSError). The thread is daemonized so process
+            # exit collects it; we cannot safely interrupt a blocked syscall
+            # without unsafe primitives.
+            if self._thread.is_alive():
+                HeartbeatEmitter._zombie_thread_count += 1
+                zombie_alert = True
+                try:
+                    import os as _os
+
+                    _os.write(
+                        2,
+                        (
+                            f"[sbtdd auto] WARNING: heartbeat thread blocked at "
+                            f"__exit__ for label={self.label!r} (zombie count="
+                            f"{HeartbeatEmitter._zombie_thread_count}); "
+                            f"daemon=True will GC at process end\n"
+                        ).encode(),
+                    )
+                except OSError:
+                    pass
+                # C3 fold-in: if zombie count reaches the hard threshold,
+                # persist the sentinel via the failures queue (single
+                # writer to main thread) AND raise RuntimeError so the
+                # operator notices the runaway state. The sentinel is
+                # ``_ZOMBIE_SENTINEL_OFFSET + zombie_count`` (>= 1000).
+                if (
+                    HeartbeatEmitter._zombie_thread_count
+                    >= HeartbeatEmitter._max_zombie_threads
+                ):
+                    if self._failures_queue is not None:
+                        try:
+                            self._failures_queue.put_nowait(
+                                HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET
+                                + HeartbeatEmitter._zombie_thread_count
+                            )
+                        except queue.Full:
+                            pass
+                    try:
+                        import os as _os
+
+                        _os.write(
+                            2,
+                            (
+                                f"[sbtdd auto] FATAL: heartbeat zombie threshold "
+                                f"reached ({HeartbeatEmitter._zombie_thread_count}"
+                                f" >= {HeartbeatEmitter._max_zombie_threads})\n"
+                            ).encode(),
+                        )
+                    except OSError:
+                        pass
+                    raise RuntimeError(
+                        f"heartbeat zombie threshold exceeded: "
+                        f"{HeartbeatEmitter._zombie_thread_count} blocked "
+                        f"threads (max={HeartbeatEmitter._max_zombie_threads})"
+                    )
+        # Persist a zombie-alert sentinel to the failures queue even before
+        # the hard threshold so main-thread monitoring (drain helper) sees
+        # the state. Offset keeps it distinguishable from plain counters.
+        if zombie_alert and self._failures_queue is not None:
+            try:
+                self._failures_queue.put_nowait(
+                    HeartbeatEmitter._ZOMBIE_SENTINEL_OFFSET
+                    + HeartbeatEmitter._zombie_thread_count
+                )
+            except queue.Full:
+                pass
+        # Final flush of failed-writes counter (single-writer rule preserved
+        # -- main thread sees the put via queue API).
+        if self._failures_queue is not None and self._failed_writes > 0:
+            try:
+                self._failures_queue.put_nowait(self._failed_writes)
+            except queue.Full:
+                pass
+            try:
+                sys.stderr.write(
+                    f"[sbtdd auto] heartbeat completed with "
+                    f"{self._failed_writes} silent write failures\n"
+                )
+                sys.stderr.flush()
+            except OSError:
+                pass
         return None
 
     def _tick_loop(self) -> None:
@@ -132,6 +240,16 @@ class HeartbeatEmitter:
             sys.stderr.flush()
         except OSError as exc:
             self._failed_writes += 1
+            # Periodic queue report every N=10 increments (incremental
+            # persistence to main thread per sec.3 single-writer rule).
+            if (
+                self._failures_queue is not None
+                and self._failed_writes % 10 == 0
+            ):
+                try:
+                    self._failures_queue.put_nowait(self._failed_writes)
+                except queue.Full:
+                    pass
             if self._failed_writes == 1:
                 try:
                     sys.stderr.write(
