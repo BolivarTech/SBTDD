@@ -1,598 +1,304 @@
-# BDD overlay — sbtdd-workflow v0.4.0
+# BDD overlay — MAGI gate alignment + canonical template
 
-> Generado por `/brainstorming` el 2026-04-25 a partir de
-> `sbtdd/spec-behavior-base.md` (v1.0.0 raw input post-v0.3.0).
-> v0.4.0 cubre el sub-set Feature F + J subset (J4, J5, J6, J8) per
-> directiva usuario sesion 2026-04-25 ("split (b)" + "balanced J
-> subset (2)").
+> Generado por `/brainstorming` el 2026-05-01. Este spec NO corresponde a una
+> version bump de SBTDD (v0.4.0 ya shipped, v0.5.0 brainstorming pausado en
+> design-presented). Este es un side-track de **docs alignment cross-project**:
+> sincroniza bidireccionalmente §6 de SBTDD's `CLAUDE.local.md` con §2 de
+> MAGI plugin's `CLAUDE.local.md`, y extrae la version canonica como template
+> copy-paste para futuros proyectos.
 >
-> v1.0.0 cubre los items remaining (G cross-check, H Group B re-eval
-> + INV-31 default, I schema_version, J remaining: D5, J2 ResolvedModels,
-> J3 per-stream timeout, J7 origin ambiguity).
+> Pure docs scope. Cero codigo, cero tests automatizados, cero version bump,
+> cero CHANGELOG entry obligatoria. Verification = manual review + grep.
 >
-> Este BDD overlay materializa los criterios sec.S.12 del spec-base
-> en escenarios Given/When/Then testables. INV-27 compliant: cero
-> matches uppercase placeholder (verificable con grep).
+> Despues de aplicar este spec, retomar v0.5.0 brainstorming en task #2
+> (design ya aprobado: split observability cycle, scope locked en 4
+> deliverables + hotfixes, 2 parallel subagents disjoint).
+>
+> INV-27 compliant: cero matches uppercase placeholder en este archivo
+> (los placeholders del template estan documentados como `{name}`-style
+> identifiers en sus secciones designadas, NO como `TODO`/`TODOS`/`TBD`).
 
 ---
 
 ## 1. Resumen ejecutivo
 
-**Objetivo v0.4.0**: ship dos surfaces 100% disjoint en ciclo
-lightweight con 2 subagents paralelos (a diferencia de v0.3.0
-sequential):
-- **Feature F** — MAGI dispatch hardening + tolerant agent JSON
-  parsing + auto manual-synthesis recovery.
-- **J subset** — 4 v0.3.0 streaming follow-through items (J4
-  OSError handling, J5 SKILL.md docs hotfix, J6 _write_auto_run_audit
-  progress preservation, J8 pre-merge stream_prefix wiring).
+**Objetivo:** sincronizar conocimiento sobre MAGI quality gate entre dos
+proyectos siblings (SBTDD y MAGI plugin) cuyos `CLAUDE.local.md` evolucionaron
+en paralelo y aprendieron deltas distintos sobre el mismo concepto. Producir
+adicionalmente un canonical template parameterizable que cualquier proyecto
+nuevo pueda adoptar via copy-paste sin tener que reconstruir el aprendizaje.
 
-Bumpa 0.3.0 -> 0.4.0 (MINOR, non-BREAKING -- aditivo).
+**Out-of-scope** v0.5.0+ semantic features (esos siguen su propio brainstorm
+una vez este side-track cierre).
 
-**Out-of-scope v0.4.0** (deferred a v1.0.0):
-- Feature G (MAGI -> /requesting-code-review cross-check).
-- Feature H (Group B re-eval + INV-31 default-on opt-in re-eval).
-- Feature I (schema_version: 2 + migration tool).
-- D5 `/sbtdd status --watch` companion subcommand.
-- J2 INFO #10 ResolvedModels dataclass.
-- J3 INFO #11 per-stream timeout.
-- J7 caspar #1 two-pump origin ambiguity.
-
-**Criterio de exito**: 0.3.0 -> 0.4.0 sin regresion (789 tests
-baseline preservados + ~30-40 nuevos), MAGI Loop 2 reliability
-recuperada empiricamente (NF16 target: tolerant parser + auto
-manual-synthesis recovery rescate degraded synthesis runs sin
-operator intervention), y v0.3.0 streaming surface closure (no INFO
-findings de v0.3.0 iter 1+2 sangrando a v1.0.0 noise).
-
-**Recursive payoff**: v0.4.0 ships F itself, asi que su propio final
-review loop puede dogfoodearlo en vivo. Iter 1 podria fallar igual
-que v0.3.0 (parser fragility), pero post-F-commit el orchestrator
-puede invocar `_manual_synthesis_recovery` sobre los `.raw.json`
-files para rescatar el iter sin intervencion manual.
+**Criterio de exito:**
+- Tres archivos producidos / actualizados (1 nuevo template, 1 edit local,
+  1 nuevo patch artifact).
+- Template self-contained: un proyecto nuevo dropping la seccion + filling
+  placeholders deberia obtener un MAGI gate operacional sin tener que leer
+  ni §2 (MAGI) ni §6 (SBTDD) originales.
+- Both `CLAUDE.local.md` llegan al mismo flujo operacional al final del
+  alignment (modulo deltas project-specific genuinos).
+- Cero contradicciones entre los tres docs.
 
 ---
 
-## 2. Feature F -- MAGI dispatch hardening + tolerant parsing
+## 2. Deliverable 1 — `docs/magi-gate-template.md` (canonical template)
 
-### 2.1 Scope (4 deliverables)
+### 2.1 Scope
 
-- **F43**. `magi_dispatch._discover_verdict_marker(output_dir)` --
-  marker-based discovery via `MAGI_VERDICT_MARKER.json` enumeration.
-- **F44**. `MAGIVerdict.retried_agents: tuple[str, ...]` field con
-  parser tolerance.
-- **F45**. `magi_dispatch._tolerant_agent_parse(raw_json_path)` --
-  preamble-tolerant agent JSON extraction.
-- **F46**. `magi_dispatch._manual_synthesis_recovery(run_dir)` --
-  auto-recovery cuando run_magi.py synthesizer crashes pero
-  >= 1 agent succeeded.
+Single markdown file at `docs/magi-gate-template.md`, committed al repo
+(public artifact). Contiene UNA section principal `## MAGI Quality Gate`
+(sin numero — el adopter elige donde encaja en su CLAUDE.local.md), mas
+sub-sections cubriendo el superset de ambos proyectos.
 
-### 2.2 Escenarios Given/When/Then
+### 2.2 Content layout (10 sub-sections)
 
-**Escenario F43.1: marker-based discovery picks most recent by mtime**
+| # | Sub-section | Source proveniente | Rol |
+|---|-------------|--------------------|-----|
+| 1 | Trigger criteria + skip rules | §2 §2.1+§2.2 | Cuando aplicar el gate (manual / hotfix / ad-hoc); plan-based work tiene su propio gate via SBTDD-style INV-29 |
+| 2 | Two-loop sequencing | SBTDD §6 | Loop 1 `/requesting-code-review` clean-to-go ANTES de Loop 2 MAGI; rationale contaminacion de verdicts |
+| 3 | Pass threshold + verdict action table | SBTDD §6 (tabla) + §2 §2.3 (high-impact keywords) | `GO_WITH_CAVEATS` full no-degraded; tabla con accion por cada veredicto + fork low-risk vs structural en GO_WITH_CAVEATS |
+| 4 | Degraded MAGI handling | SBTDD §6 | STRONG_NO_GO degraded abort inmediato; otros consume iter + re-invoca esperando full 3-agent |
+| 5 | Iteration cap + escalation | merge §2 §2.4 step 6 + SBTDD §6 root causes | Cap 3 iter, prompt al usuario; spec replan trigger entre las posibles causas |
+| 6 | Triage via /receiving-code-review + mini-cycle TDD | SBTDD §6 (mini-ciclo) + §2 §2.4 step 4 (categorias) | fold-in / defer / reject; prefijos `test:` → `fix:` → `refactor:` |
+| 7 | Carry-forward format | §2 §2.4.1 verbatim | Block prescriptivo con tabla iter/severity/title/decision/rationale + 4 reglas para agents |
+| 8 | Review summary artifact | §2 §2.4 step 7 | `<feature>-review-summary.md` con tabla iter/severity/title/fix-commit; commit `docs(review):` |
+| 9 | Cost awareness | §2 §2.5 verbatim | Opus default; smaller models truncan Caspar especificamente |
+| 10 | Per-project setup placeholders | §2 §2.6 + extension | Lista checklist al final |
 
-> **Given** un `output_dir` con dos `MAGI_VERDICT_MARKER.json` files
-> (e.g., from a re-run scenario): `marker_old.json` con mtime
-> 2026-04-25T10:00:00Z, `marker_new.json` con mtime
-> 2026-04-25T11:00:00Z.
-> **When** `magi_dispatch._discover_verdict_marker(output_dir)` ejecuta.
-> **Then** retorna path a `marker_new.json` (max by mtime).
+### 2.3 Placeholders documentados
 
-**Escenario F43.2: marker-based discovery falla gracefully cuando no markers**
+Lista al final del template como checklist explicito:
+- `{magi-script-path}` o `/magi:magi` slash — template documenta AMBAS opciones (subprocess directo y slash command); el adopter elige.
+- `{review-summary-dir}` — e.g., `docs/reviews/`, `Docs/code-reviews/`, `.review/`.
+- `{ErrorType}` o tipo de error del proyecto.
+- `{test_command}` — `pytest`, `cargo test`, etc.
+- `{language_specific_verification}` — comandos de §0.1 equivalentes.
+- Lista de **domain risk surfaces** que el proyecto enumera (ejemplos por dominio: embedded, backend, frontend, distributed).
+- Lista de **high-impact terms adicionales** (project-defined keywords que bloquean MAGI gate ademas del baseline).
 
-> **Given** un `output_dir` empty o sin markers (only `.raw.json`
-> files presentes from agents).
-> **When** `_discover_verdict_marker(output_dir)` ejecuta.
-> **Then** raises `ValidationError("No MAGI_VERDICT_MARKER.json found
-> in output_dir")` con detail listing files actually present
-> (debugability).
+### 2.4 Convencion de uso
 
-**Escenario F43.3: marker discovery defensive sobre layout changes**
+Un proyecto que adopta el template:
+1. Copy-paste la seccion entera a su `CLAUDE.local.md` con numero apropiado (e.g., `## 6. MAGI Quality Gate`).
+2. Reemplaza placeholders con valores del proyecto.
+3. Agrega cualquier delta propio (escapes, exceptions, integraciones particulares) en sub-sections nuevas debajo.
 
-> **Given** MAGI 2.2.x cambia el path donde escribe markers (e.g.,
-> de `output_dir/marker.json` a `output_dir/run-XYZ/marker.json` —
-> hipotetical future change).
-> **When** SBTDD corre `_discover_verdict_marker(output_dir)` con
-> recursive enumeration via `Path.rglob("MAGI_VERDICT_MARKER.json")`.
-> **Then** picks marker from sub-dir; legacy flat-layout markers
-> tambien funcionan. Robust contra layout drift.
+### 2.5 Escenarios Given/When/Then
 
-**Escenario F44.1: retried_agents field parsed cuando present**
+**Escenario T1: nuevo proyecto adopta el template clean**
 
-> **Given** un `MAGI_VERDICT_MARKER.json` con MAGI 2.2.1+ schema
-> incluyendo `"retried_agents": ["caspar"]` campo.
-> **When** `MAGIVerdict.from_marker(marker_path)` parsea.
-> **Then** `verdict.retried_agents == ("caspar",)` (tuple coerced
-> from list for immutability).
+> **Given** un proyecto nuevo sin seccion MAGI en su `CLAUDE.local.md`.
+> **When** el desarrollador copia el contenido entero de `docs/magi-gate-template.md` a su `CLAUDE.local.md` como `## N. MAGI Quality Gate` y reemplaza los placeholders documentados.
+> **Then** el flujo operacional MAGI queda definido sin necesidad de consultar `§2` o `§6` originales; tiene Loop 1/Loop 2 sequencing, threshold, degraded handling, carry-forward, summary artifact, y cost awareness.
 
-**Escenario F44.2: retried_agents defaults a tuple vacio cuando absent**
+**Escenario T2: placeholder leakage detection**
 
-> **Given** un MAGI 2.1.x marker sin `retried_agents` field.
-> **When** `MAGIVerdict.from_marker(marker_path)` parsea.
-> **Then** `verdict.retried_agents == ()`. Backward compat MAGI
-> 2.1.x preservado.
+> **Given** el template terminado.
+> **When** se hace `grep -E '\{[a-z_]+\}' docs/magi-gate-template.md`.
+> **Then** SOLO aparecen los placeholders documentados en seccion 2.3 — ningun `{ErrorType}` huerfano de §2 fuera de su contexto, ningun otro `{name}` no-listado.
 
-**Escenario F44.3: retried_agents propagado a auto-run.json**
+**Escenario T3: internal consistency (no contradictions)**
 
-> **Given** mid-`auto` run, MAGI iter 2 retorna verdict con
-> `retried_agents=("balthasar",)`.
-> **When** `auto_cmd._update_progress` o `_write_auto_run_audit`
-> fires post-MAGI dispatch.
-> **Then** `auto-run.json` contiene `magi_iter2_retried_agents:
-> ["balthasar"]` (or similar audit field) para escalation_prompt
-> visibility.
+> **Given** las 10 sub-sections del template.
+> **When** se verifica cross-reference entre ellas.
+> **Then** no hay reglas contradictorias (e.g., si sub-section 2 dice "Loop 1 first siempre", sub-section 5 escalation no dice "skip Loop 1 sometimes").
 
-**Escenario F45.1: tolerant parse extracts JSON from preamble-wrapped result**
+**Escenario T4: template equivalence with SBTDD §6**
 
-> **Given** un `agent.raw.json` con `result` field:
-> ```
-> "Based on my review of the iter-2 fixes, the streaming wiring is correctly threaded...\n\n{\"agent\": \"melchior\", \"verdict\": \"GO\", ...}"
-> ```
-> **When** `magi_dispatch._tolerant_agent_parse(raw_json_path)` ejecuta.
-> **Then** retorna parsed agent verdict dict
-> `{"agent": "melchior", "verdict": "GO", ...}` extracted via
-> balanced-brace regex sobre el `result` string. Strict v0.3.0
-> parser hubiera fallado.
+> **Given** SBTDD's §6 actualizada con sus deltas (deliverable 2).
+> **When** se compara mentalmente contra el template (modulo project-specific deltas).
+> **Then** el flujo operacional descrito en §6 = flujo operacional descrito en template.
 
-**Escenario F45.2: tolerant parse pure-JSON result still works**
+**Escenario T5: template equivalence with MAGI §2 patched**
 
-> **Given** un `agent.raw.json` con `result` field que es JSON puro
-> (caspar v0.3.0 iter 2 caso): `result` empieza directamente con `{`.
-> **When** `_tolerant_agent_parse(raw_json_path)` ejecuta.
-> **Then** retorna parsed verdict dict identico al strict-parser
-> output. Backward compat: tolerant parser superset of strict.
+> **Given** MAGI's §2 patched (deliverable 3 aplicado).
+> **When** se compara mentalmente contra el template (modulo project-specific deltas).
+> **Then** el flujo operacional descrito en §2 = flujo operacional descrito en template.
 
-**Escenario F45.3: tolerant parse falla cuando zero recoverable JSON**
+### 2.6 Acceptance criteria
 
-> **Given** un `agent.raw.json` con `result` field que es solo
-> narrative (e.g., agent crashed mid-output con error message but
-> no JSON).
-> **When** `_tolerant_agent_parse(raw_json_path)` ejecuta.
-> **Then** raises `ValidationError("No JSON object recoverable from
-> {raw_json_path}")` con preview de result content (first 200
-> chars) for debugging.
-
-**Escenario F45.4: tolerant parse extrae primer balanced JSON object**
-
-> **Given** un `agent.raw.json` con `result` que tiene multiple
-> `{...}` snippets (e.g., embedded code examples in narrative
-> antes del verdict JSON).
-> **When** `_tolerant_agent_parse(raw_json_path)` ejecuta el regex.
-> **Then** extrae el primer balanced `{...}` que parsea como verdict
-> JSON con `agent` field present (validation: must contain agent
-> name from {melchior, balthasar, caspar}). Skips `{"key": "val"}`
-> code-example snippets.
-
-**Escenario F46.1: manual synthesis recovery cuando 1+ agent succeeded**
-
-> **Given** un `run_dir` post-MAGI invocation donde
-> run_magi.py synthesizer aborto con `RuntimeError: Only 1 agent(s)
-> succeeded` pero 2 de 3 agents tienen `.raw.json` files con valid
-> verdicts (preamble-wrapped).
-> **When** `magi_dispatch._manual_synthesis_recovery(run_dir)` ejecuta.
-> **Then** reads `*.raw.json`, applies F45 tolerant parser to each,
-> synthesizes manually using same VERDICT_RANK weights as
-> run_magi.py, emits `manual-synthesis.json` con flag
-> `recovered: true` y `recovery_reason: "synthesizer-failure"`.
-> Returns synthesized verdict.
-
-**Escenario F46.2: manual recovery preserves agent dissent**
-
-> **Given** raw.json files: melchior REJECT, balthasar APPROVE,
-> caspar APPROVE.
-> **When** `_manual_synthesis_recovery(run_dir)` ejecuta.
-> **Then** synthesized verdict reflects 2-1 majority approve, but
-> dissenting opinion from melchior preserved en verdict's findings
-> + dissent fields. Same rank logic que run_magi.py synthesize.py.
-
-**Escenario F46.3: manual recovery falla cuando zero recoverable**
-
-> **Given** un `run_dir` donde todos los agents fallaron (every
-> raw.json file has non-recoverable result fields per F45.3).
-> **When** `_manual_synthesis_recovery(run_dir)` ejecuta.
-> **Then** raises `MAGIGateError("No recoverable agent verdicts in
-> run_dir; manual synthesis impossible")`. Operator must investigate
-> raw.json files manually OR retry MAGI iter.
-
-**Escenario F46.4: manual recovery fires automaticamente en MAGI dispatch**
-
-> **Given** SBTDD invoca `magi_dispatch.dispatch_magi(...)` que
-> internamente runs `run_magi.py`. Synthesis crashes con RuntimeError.
-> **When** dispatch wrapper detects exit code != 0 + error pattern
-> matches "Only N agent(s) succeeded" + N >= 1.
-> **Then** automaticamente invokes `_manual_synthesis_recovery(run_dir)`,
-> emits stderr breadcrumb `[sbtdd magi] synthesizer failed; manual
-> synthesis recovery applied (N/3 agents)`, returns recovered
-> verdict to caller. Default ON; suppress via `--no-magi-recovery`
-> flag (when operator wants strict run_magi.py-only).
-
-**Escenario F46.5: --no-magi-recovery flag respected**
-
-> **Given** SBTDD invocation con `--no-magi-recovery`. Synthesizer
-> crashes.
-> **When** dispatch wrapper detects synthesizer crash.
-> **Then** raises `MAGIGateError` con synthesizer original message;
-> NO auto-recovery invoked. Strict behavior preserved per operator
-> choice.
-
-### 2.3 Acceptance criteria mapping (sec.S.12 v0.4.0)
-
-| Criterion | Escenario | Test fixture |
-|-----------|-----------|--------------|
-| **F43**: marker-based discovery | F43.1, F43.2, F43.3 | `tests/test_magi_hardening.py` |
-| **F44**: retried_agents field | F44.1, F44.2, F44.3 | `tests/test_magi_hardening.py` |
-| **F45**: tolerant agent JSON parsing | F45.1, F45.2, F45.3, F45.4 | `tests/test_magi_hardening.py` |
-| **F46**: manual synthesis recovery | F46.1, F46.2, F46.3, F46.4, F46.5 | `tests/test_manual_synthesis_recovery.py` |
-
-### 2.4 Invariantes Feature F
-
-- INV-28 (degraded MAGI no-exit) preservado: manual recovery NO
-  contradice degraded handling — recovery fires solo on synthesizer
-  crash with >= 1 agent succeeded; degraded verdict (< 3 agents
-  with valid output) sigue consumiendo iter sin exit signal.
-- INV-29 (/receiving-code-review gate) preservado sin cambio.
-- Recovery NO es backdoor para skip MAGI: tolerant parser requires
-  balanced JSON object AND parsable AND verdict in
-  VERDICT_RANK known set AND agent field in {melchior, balthasar,
-  caspar}.
-- Marker file format: JSON con `verdict`, `iteration`, `agents`,
-  `retried_agents`, `timestamp`, `synthesizer_status`. Schema fixed
-  in `models.py`.
-- Backward compat: MAGI 2.1.x (sin retried_agents, sin marker
-  files) sigue funcionando via path-based discovery fallback +
-  retried_agents default `()`.
+- **T1**: walkthrough mental valida self-completeness.
+- **T2**: grep produce solo placeholders documentados.
+- **T3**: revision manual confirma cero contradicciones.
+- **T4**, **T5**: cross-doc consistency verified manualmente.
 
 ---
 
-## 3. J subset -- v0.3.0 streaming follow-through
+## 3. Deliverable 2 — SBTDD `CLAUDE.local.md` updates
 
-### 3.1 Scope (4 deliverables)
+### 3.1 Scope
 
-- **J4**. INFO #12 `_update_progress` OSError handling.
-- **J5**. balthasar #1 SKILL.md exit code docs hotfix (line 78).
-- **J6**. balthasar #2 `_write_auto_run_audit` preserves `progress`
-  field.
-- **J8**. caspar #3 pre-merge stream_prefix wiring.
+Edit local del archivo gitignored `CLAUDE.local.md` en raiz del proyecto SBTDD.
+NO se commitea (per project policy `.gitignore` covers `CLAUDE.local.md`).
+Cambios se aplican via Edit tool directamente.
 
-### 3.2 Escenarios Given/When/Then
+### 3.2 5 nuevas sub-sections agregadas a §6
 
-**Escenario J4.1: _update_progress wraps OSError gracefully**
+Agregadas al final de §6 "Code review", antes de §7 "Finalizacion":
 
-> **Given** mid-`auto` run con disk full (simulated via mock
-> raising `OSError(28, "No space left")` from `tmp.write_text`).
-> **When** `auto_cmd._update_progress(auto_run_path, ...)` fires.
-> **Then** OSError caught, stderr breadcrumb emitted `[sbtdd]
-> warning: progress write failed: OSError(28, ...). Auto run continues
-> (observability degraded).` Auto run proceeds NOT killed.
+- **§6.X Carry-forward format** (proveniente §2 §2.4.1 verbatim) — block prescriptivo con tabla iter/severity/title/decision/rationale + 4 reglas para agents (re-raise allowed, escalation permitted, match-by-exact-title, no retroactive blame). Customizado a SBTDD terminology: verdicts en `STRONG_NO_GO`-style (no `STRONG NO-GO`).
+- **§6.X Review summary artifact** (proveniente §2 §2.4 step 7) — convencion `docs/reviews/<feature>-review-summary.md`, commit prefix `docs(review):`. Auto generado por `pre_merge_cmd`/`auto_cmd` en futuro (referenciado como follow-up backlog item; este spec NO implementa generacion automatica). Por ahora el operador lo escribe manualmente al cierre del MAGI gate.
+- **§6.X Cost awareness** (proveniente §2 §2.5 verbatim) — opus default; smaller models truncan Caspar (adversarial verbose) → bias toward false-positive approval. Cross-reference con per-skill model selection (Feature E shipped en v0.3.0 — `auto_skill_models` en plugin.local.md).
+- **§6.X Trigger criteria + skip rules para non-plan-based contexts** — para hotfixes, exploration, ad-hoc changes fuera del flow plan-based. Plan-based work sigue going through gate automaticamente (sin trigger criteria — INV-29 governs). Esta sub-section aplica a cuando NO existe `planning/claude-plan-tdd.md` aprobado (el "Flujo manual" de §3).
+- **§6.X Domain-specific risk surfaces + high-impact terms** — slot extensible. Para SBTDD initial enumeration: subprocess kill-tree safety (Windows taskkill order), state-file corruption recovery patterns, INV-0 violation patterns en mensajes de commit (menciones a IA o Co-Authored-By).
 
-**Escenario J4.2: _update_progress preserves auto-run.json on os.replace failure**
+### 3.3 Escenarios Given/When/Then
 
-> **Given** atomic rename fails (OSError on Windows during
-> concurrent reader holding file open + retry exhaustion at 20
-> attempts).
-> **When** `_update_progress` exhausts retry loop.
-> **Then** original `auto-run.json` preserved (tmp file removed
-> via try/finally), warning emitted, auto continues. No silent
-> data loss.
+**Escenario S1: SBTDD §6 absorbe carry-forward format**
 
-**Escenario J5.1: SKILL.md line 78 documents exit 1 not exit 2**
+> **Given** SBTDD's `CLAUDE.local.md` §6 actual (sin sub-section "Carry-forward format").
+> **When** spec se aplica.
+> **Then** §6 contiene la sub-section verbatim adaptada al SBTDD verdict naming, ubicada despues de "Cuando se recibe feedback de code review" y antes de §7.
 
-> **Given** `skills/sbtdd/SKILL.md` v0.4.0 ship.
-> **When** se lee la seccion `### v0.3 flags` describing
-> `--model-override` invalid skill name behavior.
-> **Then** texto exacto contiene `"exit 1 (USER_ERROR)"` (no `exit
-> 2 (PRECONDITION_FAILED)`). Matches `auto_cmd._parse_model_overrides`
-> raises `ValidationError` -> exit 1 actual implementation per
-> errors.EXIT_CODES.
+**Escenario S2: SBTDD §6 absorbe trigger criteria sin contradecir flow plan-based**
 
-**Escenario J6.1: _write_auto_run_audit preserves existing progress field**
+> **Given** SBTDD §6 invariant: "plan-based work atraviesa MAGI gate automaticamente" (INV-29).
+> **When** se agrega sub-section "Trigger criteria + skip rules para non-plan-based".
+> **Then** la nueva sub-section explicit-aplica SOLO a "Flujo manual" sin plan, no contradice INV-29. Cross-reference explicit a §3 "Flujo manual (fallback sin plan aprobado)".
 
-> **Given** `.claude/auto-run.json` existing con
-> `{"progress": {"phase": 2, "task_index": 14, ...}, "started_at":
-> "..."}`.
-> **When** `auto_cmd._write_auto_run_audit(audit)` ejecuta para
-> serializar `AutoRunAudit.to_dict()` (que normalmente NO contiene
-> progress field).
-> **Then** post-write, `auto-run.json` contiene tanto el audit
-> snapshot fields AS WELL AS el progress field preservado del
-> previous state. No transient drop.
+**Escenario S3: SBTDD §6 mantiene su flow Loop 1 → Loop 2 unchanged**
 
-**Escenario J6.2: _write_auto_run_audit cuando progress field absent**
+> **Given** SBTDD §6 actual con sequencing Loop 1 → Loop 2 (INV-9).
+> **When** sub-sections nuevas se agregan.
+> **Then** sequencing actual preservado sin cambios; nuevas sub-sections complementan, no reemplazan.
 
-> **Given** auto-run.json sin progress field (e.g., very early in
-> auto run, before phase 1).
-> **When** `_write_auto_run_audit(audit)` ejecuta.
-> **Then** post-write, auto-run.json contiene audit fields. progress
-> field permanece absent (D4.3 absent-tolerant downstream).
+### 3.4 Acceptance criteria
 
-**Escenario J8.1: pre-merge MAGI dispatch threads stream_prefix**
-
-> **Given** `pre_merge_cmd._loop2(...)` invoking `magi_dispatch.invoke_magi`
-> for Loop 2 iter N.
-> **When** dispatch fires.
-> **Then** argv passed a `magi_dispatch.invoke_magi` includes
-> `stream_prefix="[sbtdd pre-merge magi-loop2]"`. Subprocess output
-> streams a operator stderr en tiempo real durante MAGI invocation
-> (5-10 min for opus-based agents).
-
-**Escenario J8.2: pre-merge code-review dispatch threads stream_prefix**
-
-> **Given** `pre_merge_cmd._loop1(...)` invoking
-> `superpowers_dispatch.invoke_skill("requesting-code-review", ...)`.
-> **When** dispatch fires.
-> **Then** argv includes `stream_prefix="[sbtdd pre-merge loop1
-> iter-N]"` per iteration.
-
-**Escenario J8.3: pre-merge mini-cycle TDD dispatches thread stream_prefix**
-
-> **Given** `pre_merge_cmd._apply_finding_via_mini_cycle(finding)` invocando
-> implementer subagent for Red phase.
-> **When** dispatch fires.
-> **Then** argv includes
-> `stream_prefix="[sbtdd pre-merge fix-finding-N red]"` para cada
-> phase del mini-cycle (red/green/refactor).
-
-### 3.3 Acceptance criteria mapping
-
-| Criterion | Escenario | Test fixture |
-|-----------|-----------|--------------|
-| **J4**: OSError handling | J4.1, J4.2 | `tests/test_auto_progress.py` (extended) |
-| **J5**: SKILL.md docs hotfix | J5.1 | `tests/test_skill_md.py` (extended) |
-| **J6**: audit preserves progress | J6.1, J6.2 | `tests/test_auto_progress.py` (extended) |
-| **J8**: pre-merge stream_prefix | J8.1, J8.2, J8.3 | `tests/test_pre_merge_streaming.py` (new) |
-
-### 3.4 Invariantes J subset
-
-- INV-22 (sequential auto) preservado.
-- INV-26 (audit trail) extendido: audit writes preserve progress
-  field rather than drop.
-- v0.3.0 contract preservado: D4.3 absent-progress-tolerant
-  parser sigue funcionando; nueva preservation no rompe nada.
+- **S1**, **S2**, **S3**: post-edit verification — re-leer §6 entera y confirmar fluidez sin contradicciones.
 
 ---
 
-## 4. Final review loop (post-implementation)
+## 4. Deliverable 3 — MAGI patch artifact
 
 ### 4.1 Scope
 
-Identico a v0.3.0: MAGI -> /receiving-code-review loop hasta exit
-criterion (verdict `GO_WITH_CAVEATS` full + 0 CRITICAL + 0 WARNING
-+ 0 Conditions for Approval), cap 5 iter.
+Archivo nuevo `docs/cross-project/2026-05-01-magi-claude-local-patch.md`,
+committed al repo SBTDD (audit trail del cross-project sync). Contiene
+instrucciones explicitas para que el usuario aplique en proyecto MAGI session
+siguiente. SBTDD repo NO modifica MAGI repo directamente (cross-project edits
+no son automaticos).
 
-### 4.2 Special v0.4.0 dogfood pattern
+### 4.2 Format del patch
 
-**Recursive payoff oportunity**: este ciclo ships F itself. Si
-iter 1 final review hits MAGI synthesizer crash (mismo failure mode
-como v0.3.0 iter 2), el orchestrator puede invocar el recien
-shipado `_manual_synthesis_recovery` para rescatar el iter sin
-intervencion manual. Empirical validation de F durante su propio
-ship cycle.
+Cada item del patch documenta:
+- **Insert location**: e.g., "Insert NEW sub-section after MAGI §2.3 'Pass threshold' and before §2.4 'Procedure'".
+- **Verbatim text to insert**: el contenido completo de la sub-section, listo para copy-paste.
+- **Rationale**: una linea que explica por que este content viene de SBTDD's empirical learning.
 
-**Escenario R2.1: F dogfood en iter 2+ rescues crashed synthesis**
+### 4.3 5 sub-sections para insertar en MAGI's §2
 
-> **Given** v0.4.0 final review iter 2. F shipped en commit C
-> earlier in this cycle. MAGI synthesizer crashes igual que v0.3.0
-> (preamble-wrapped agent JSON).
-> **When** `magi_dispatch.dispatch_magi(...)` wrapper detecta
-> crash + ≥1 agent succeeded.
-> **Then** auto-invokes `_manual_synthesis_recovery(run_dir)`,
-> reads .raw.json files, parses tolerantly, emits
-> `manual-synthesis.json`, returns rescued verdict to orchestrator.
-> Iter completes WITHOUT manual intervention. F empirically
-> validated.
+- **Two-loop sequencing** — agregar `/requesting-code-review` Loop 1 clean-to-go antes de MAGI invocation. Rationale: filtra mechanical findings que contaminan verdicts MAGI individuales (Melchior/Balthasar/Caspar).
+- **Degraded MAGI handling explicit** — STRONG_NO_GO degraded abort inmediato; otros consume iter + re-invoca esperando full 3-agent. Rationale: aceptar 2-agent verdict rompe el contrato "consenso 3 perspectivas".
+- **Mini-ciclo TDD prefixes** — al aplicar findings categorizados como "fold in", seguir `test:` (reproduce) → `fix:` (resolve) → `refactor:` (polish) en commits separados. Rationale: atomic commits + audit trail uniforme.
+- **Spec replan trigger** — al exhaust 3-iter cap, posibles root causes incluyen "spec defectuosa upstream del plan", no solo "implementacion divergio". Rationale: a veces el problema esta upstream y hay que volver a `/brainstorming`.
+- **Tabla de veredictos completa** — accion explicit por cada uno de los 6 verdicts (STRONG_GO / GO / GO_WITH_CAVEATS / HOLD / HOLD_TIE / STRONG_NO_GO) con fork low-risk vs structural en GO_WITH_CAVEATS. Rationale: §2 §2.3 actualmente solo dice threshold; tabla enumera el pasaje exacto por cada veredicto.
 
-**Escenario R2.2: F dogfood en iter 1 (pre-F-commit) requires manual recovery**
+### 4.4 Escenarios Given/When/Then
 
-> **Given** v0.4.0 final review iter 1, F NOT YET committed (still
-> in subagent #1's working tree). MAGI crashes.
-> **When** orchestrator detects crash.
-> **Then** orchestrator manually applies v0.3.0 playbook (read
-> raw.json, manual synthesize, document). NORMAL behavior; subagent
-> #1's F commits land BEFORE final review starts (orchestrator
-> coordinates).
+**Escenario M1: patch artifact es self-contained**
 
-### 4.3 Other escenarios (R1.x identical to v0.3.0 spec)
+> **Given** un usuario abriendo proyecto MAGI session.
+> **When** lee `docs/cross-project/2026-05-01-magi-claude-local-patch.md`.
+> **Then** puede aplicar las 5 inserciones sin necesidad de cross-reference a SBTDD's §6 — el patch contiene todo el verbatim text + rationale + insertion location.
 
-R1.1-R1.7 from v0.3.0 spec apply identically:
-- R1.1 exit on GO_WITH_CAVEATS clean.
-- R1.2 continue on CRITICAL findings.
-- R1.3 continue on WARNING findings or Conditions.
-- R1.4 continue on degraded MAGI (INV-28).
-- R1.5 cap 5 iter -> escalation_prompt.
-- R1.6 rejected findings feed iter+1 context.
-- R1.7 Loop 1 surrogate via make verify.
+**Escenario M2: patch insertions no rompen MAGI's existing flow**
 
-### 4.4 Invariantes final review
+> **Given** MAGI's actual `CLAUDE.local.md` §2 (212 lineas).
+> **When** las 5 inserciones se aplican en sus locations indicadas.
+> **Then** la seccion §2 resultante es internally consistent: no hay sub-section que contradiga otra; el flow operacional resultante = template's flow operacional (modulo deltas project-specific MAGI).
 
-- INV-9, INV-11, INV-28, INV-29 preservados sin cambio.
-- F's auto-recovery operates within INV-28 scope (degraded =
-  recovered manual synthesis still counts as iteration consumed,
-  not exit signal).
+### 4.5 Acceptance criteria
+
+- **M1**: revision manual del patch confirma self-containment.
+- **M2**: walkthrough mental aplica cada insertion sobre MAGI's §2 actual y confirma consistency.
 
 ---
 
-## 5. Subagent layout + execution timeline
+## 5. Workflow / execution timeline
 
-### 5.1 Layout (parallel — surfaces 100% disjoint)
+### 5.1 Layout (single agent, single session)
 
-| Phase | Duracion proyectada | Subagents | Output |
-|-------|--------------------|-----------|--------|
-| 0. Spec + brainstorming + spec-behavior.md | DONE | -- | esta seccion |
-| 1. Subagent #1 (F) | ~2.5h | parallel | 4-6 atomic commits |
-| 1. Subagent #2 (J subset) | ~2-2.5h | parallel | 4-5 atomic commits |
-| 2. `make verify` post-merge | ~5min | -- | 4 checks clean |
-| 3. Final review loop MAGI -> /receiving-code-review | 1-2h | -- | 1-3 iter expected (lower than v0.3.0 because F itself rescues) |
-| 4. Version bump + tag + push | ~10min | -- | 0.3.0 -> 0.4.0 |
-| **Total wall time** | **~4-5h** | -- | -- |
+| Phase | Duracion estimada | Output |
+|-------|-------------------|--------|
+| 0. Spec written + self-review + user approval | DONE post-this-spec | esta seccion |
+| 1. Write template (`docs/magi-gate-template.md`) | ~30-40min | source-of-truth canonico |
+| 2. Diff template vs SBTDD §6 → apply edits to `CLAUDE.local.md` | ~15-20min | local edit applied |
+| 3. Diff template vs MAGI §2 (cached at `/tmp/magi-claude-local.md`) → write patch artifact | ~20-30min | `docs/cross-project/2026-05-01-magi-claude-local-patch.md` |
+| 4. Self-review (placeholder leakage, contradictions, completeness) | ~10-15min | inline fixes |
+| 5. Commit (template + patch artifact) | ~5min | 2 atomic commits, mensajes en ingles per `~/.claude/CLAUDE.md` |
+| 6. Push (con autorizacion explicita user) | optional | origin/main |
+| **Total wall time** | **~1.5-2h** | -- |
 
-### 5.2 Subagent dispatch contracts
+### 5.2 Why single agent (no parallelism)
 
-**Subagent #1 (F)**:
-- Input: spec-behavior.md sec.2 (Feature F escenarios F43.1-F46.5).
-- Files tocados: `skills/sbtdd/scripts/magi_dispatch.py`,
-  `skills/sbtdd/scripts/models.py`, new
-  `tests/test_magi_hardening.py`, new
-  `tests/test_manual_synthesis_recovery.py`.
-- TDD-Guard: ON.
-- Forbidden: any J-subset file.
-- Done: 4 deliverables F43-F46 implemented + tests passing +
-  `make verify` clean.
+Deliverables son interdependientes (template = source of truth para los otros dos). Splitting genera mas overhead de coordinacion que ganancia de wall time. Lightweight pattern.
 
-**Subagent #2 (J subset)**:
-- Input: spec-behavior.md sec.3 (J4, J5, J6, J8 escenarios).
-- Files tocados: `skills/sbtdd/scripts/auto_cmd.py` (J4 OSError
-  wrap + J6 audit progress preservation), `skills/sbtdd/SKILL.md`
-  (J5 docs hotfix), `skills/sbtdd/scripts/pre_merge_cmd.py` (J8
-  stream_prefix wiring), tests/test_auto_progress.py (extended for
-  J4/J6), tests/test_skill_md.py (extended for J5), new
-  tests/test_pre_merge_streaming.py (J8).
-- TDD-Guard: ON.
-- Forbidden: `skills/sbtdd/scripts/magi_dispatch.py`,
-  `skills/sbtdd/scripts/models.py`.
-- Done: 4 deliverables implemented + tests passing + `make verify`
-  clean.
+### 5.3 No final review loop
 
-### 5.3 Coordination
+Pure docs scope. NO MAGI gate, NO `/requesting-code-review`, NO Loop 1/Loop 2.
+Razon: el MAGI gate template ES el deliverable; correrlo sobre si mismo es
+overhead sin senal. Verification es manual review (placeholder grep, internal
+consistency, cross-doc walkthrough).
 
-**Surfaces 100% disjoint**: F touches `magi_dispatch.py` + `models.py`
-(no auto_cmd, no pre_merge); J touches `auto_cmd.py` + `pre_merge_cmd.py`
-+ `SKILL.md` (no magi_dispatch, no models). Zero risk de auto_cmd.py
-merge conflict como v0.3.0.
-
-Both subagents commit to `main` (lightweight pattern, no feature
-branch). Orchestrator coordina dispatch parallel, espera DONE de
-ambos, then drives final review.
-
-### 5.4 Final review loop dispatch (orchestrator)
-
-Mismo pattern v0.3.0:
-1. `make verify` clean (Loop 1 surrogate).
-2. Compute diff range (HEAD_pre_v040..HEAD).
-3. Iter 1: invoke `/magi:magi` con prompt referencing spec + plan +
-   diff. Si synthesizer crashes AND F shipped en working tree -> use
-   F's `_manual_synthesis_recovery` (escenario R2.1). Si no -> v0.3.0
-   playbook manual.
-4. Parse verdict + findings. Eval exit criterion.
-5. Si NO exit: route findings via /receiving-code-review (INV-29) +
-   mini-cycle TDD per accepted finding. Re-invoke MAGI iter+1.
-6. Cap 5 iter; exhausted -> escalation_prompt.
+INV-29 NO aplica (no hay diff de codigo). INV-9 NO aplica (no hay pre-merge).
+INV-22 NO aplica (no es auto run).
 
 ---
 
-## 6. Version + distribution
+## 6. Acceptance criteria final
 
-### 6.1 Bump
+Spec ship-ready cuando:
 
-`plugin.json` + `marketplace.json`: 0.3.0 -> 0.4.0 (MINOR).
+### 6.1 Functional
 
-Justificacion MINOR (no MAJOR): aditivo puro. F adds new helpers
-(no public-API breakage, dispatch wrapper backward-compat). J subset
-extends existing surfaces (no behavior flip). retried_agents field
-optional (default `()`). marker-based discovery has fallback to
-path-based. Tolerant parser is superset of strict parser.
+- [ ] **Deliverable 1**: `docs/magi-gate-template.md` contiene 10 sub-sections per layout sec.2.2 + checklist de placeholders sec.2.3.
+- [ ] **Deliverable 2**: SBTDD's `CLAUDE.local.md` §6 contiene las 5 nuevas sub-sections per sec.3.2.
+- [ ] **Deliverable 3**: `docs/cross-project/2026-05-01-magi-claude-local-patch.md` contiene 5 patch entries per sec.4.3.
 
-### 6.2 CHANGELOG.md `[0.4.0]` sections
+### 6.2 Quality
 
-- **Added** -- F (4 deliverables: marker discovery, retried_agents
-  field, tolerant parser, manual synthesis recovery) + J subset
-  (4 deliverables: OSError handling, SKILL.md docs hotfix, audit
-  progress preservation, pre-merge streaming).
-- **Changed** -- (vacio o minor: pre-merge dispatch sites now thread
-  stream_prefix when invoked via auto path).
-- **Process notes** -- F's recursive payoff: shipped F empirically
-  validated during own final review loop via R2.1 dogfood. Loop 1
-  surrogate via `make verify` per lightweight pattern.
-- **Deferred (rolled to v1.0.0)** -- G cross-check, H Group B
-  re-eval + INV-31 default, I schema_version, J1 D5 status --watch,
-  J2 ResolvedModels, J3 per-stream timeout, J7 origin ambiguity.
+- [ ] **Template self-completeness** (T1): mental walkthrough valida que un proyecto nuevo + filling placeholders obtiene MAGI gate operacional.
+- [ ] **Placeholder leakage** (T2): `grep -E '\{[a-z_]+\}' docs/magi-gate-template.md` produce solo placeholders en sec.2.3.
+- [ ] **Internal consistency** (T3): cero contradicciones entre las 10 sub-sections del template.
+- [ ] **SBTDD §6 absorbed** (S1, S2, S3): re-leer §6 confirma fluidez sin contradicciones; INV-29 / INV-9 preservados.
+- [ ] **MAGI patch self-contained** (M1, M2): walkthrough mental confirma que el patch aplica clean sobre MAGI's §2 actual.
 
-### 6.3 README + SKILL.md
+### 6.3 Process
 
-- README: v0.4.0 docs section if user-facing changes (mostly
-  internal infra; possibly add a "MAGI reliability" mini-section
-  documenting Feature F user-facing benefit).
-- SKILL.md: J5 docs hotfix (line 78 exit code correction). Possibly
-  add `### v0.4 notes` section documenting F's auto-recovery.
-- CLAUDE.md (proyecto): update con v0.4.0 release notes pointer.
+- [ ] Commits atomicos siguiendo `~/.claude/CLAUDE.md` Git rules (English, no AI refs, no Co-Authored-By): commit 1 para template + patch artifact, o commits separados (atomicidad por archivo es tambien aceptable).
+- [ ] CHANGELOG.md NO requiere entry (este es side-track docs; v0.4.0 sigue siendo last shipped version).
+- [ ] `make verify` NO requiere correr (pure docs change; no Python files modified).
+- [ ] Push a `origin/main` requiere autorizacion explicita user (per `~/.claude/CLAUDE.md` Git rules).
 
 ---
 
-## 7. Risk register v0.4.0
+## 7. Risk register
 
-- **R1**. Tolerant agent JSON parsing introduces false-positive
-  recovery -- mitigation: regex requires balanced `{...}` AND valid
-  JSON-parse AND `agent` field in known set AND `verdict` in
-  VERDICT_RANK; manual synthesis report flags recovery clearly with
-  `recovered: true` flag.
-- **R2**. Marker-based MAGI discovery breaks if MAGI changes marker
-  schema -- mitigation: SBTDD tolera ausencia de campos opcionales en
-  marker; mantener test contra MAGI versions cacheadas; fallback a
-  path-based discovery preserved as compat.
-- **R3**. Auto-recovery silently masks legit MAGI failures --
-  mitigation: stderr breadcrumb prominent + `recovered: true` flag
-  + `--no-magi-recovery` opt-out for strict mode.
-- **R4**. Subagent #1 + #2 parallel timing variance: if subagent #1
-  finishes much later than #2, the dogfood pattern (R2.1) for final
-  review is delayed -- mitigation: orchestrator waits for both DONE
-  before final review starts; F lands BEFORE iter 1 review.
-- **R5**. Iter 1 final review fails because F not yet "in production"
-  during subagent #1 work -- mitigation: orchestrator coordina dispatch;
-  subagents both DONE before final review; F's commits LANDED before
-  iter 1 invocation.
+- **R1**. **Template content leakage**: el template podria copiar inadvertidamente parrafo project-specific (e.g., menciones a `auto_cmd.py` o `INV-29`) que no aplica a otros proyectos. Mitigation: explicit grep + review pass para identificar terms project-specific antes de commit.
+- **R2**. **Bidirectional sync drift**: si MAGI plugin actualiza su §2 antes de que el patch artifact se aplique, el patch puede quedar stale. Mitigation: aplicar el patch en proyecto MAGI lo antes posible (en proxima MAGI session). Audit trail del patch documenta el state de §2 al momento de generacion (cached en `/tmp/magi-claude-local.md`).
+- **R3**. **`STRONG_NO_GO` vs `STRONG NO-GO` naming**: §2 usa space-separated; SBTDD usa underscore-separated (per `models.VERDICT_RANK`). Template y SBTDD's §6 deben usar SBTDD-style (verdict identifiers code-grade); MAGI's CLAUDE.local.md historicamente usa space-separated (human-readable). Mitigation: template documenta que ambas formas refieren al mismo verdict; cada proyecto preserva su convention.
+- **R4**. **Carry-forward block syntax overhead**: §2.4.1 prescribe un block formal verbatim — agregar a SBTDD's §6 incrementa peso de la doc por ~80 lineas. Mitigation: aceptable cost — el formato es valioso (reduce loops esteriles MAGI), y SBTDD's §6 ya es larga (sec.6 + sec.7 son las mas grandes).
+- **R5**. **Review summary artifact NO genera automaticamente**: spec dice "operador escribe manualmente al cierre del MAGI gate" para v0.5.0+. Risk: si no se genera consistentemente, el audit trail queda parcial. Mitigation: documenta como follow-up backlog item en CHANGELOG Future / v0.5.0+ scope. Adicionalmente, `auto-run.json` ya cubre la dimension machine-readable del audit; el summary artifact es the human-readable complement.
 
 ---
 
-## 8. Acceptance criteria final v0.4.0
+## 8. Referencias
 
-v0.4.0 ship-ready cuando:
-
-- [ ] Feature F 4 deliverables implementados + escenarios F43-F46
-      pass.
-- [ ] J subset 4 deliverables implementados + escenarios J4, J5, J6,
-      J8 pass.
-- [ ] Final review loop alcanzado exit en <= 5 iter con MAGI verdict
-      `GO_WITH_CAVEATS` full + 0 CRITICAL + 0 WARNING + 0 Conditions
-      pendientes.
-- [ ] `make verify` clean (pytest + ruff + mypy --strict, runtime
-      <= 90s).
-- [ ] Tests baseline 789 preservados + ~30-40 nuevos = 819-829.
-- [ ] CHANGELOG `[0.4.0]` entry escrita.
-- [ ] Version bump 0.3.0 -> 0.4.0 sync `plugin.json` +
-      `marketplace.json`.
-- [ ] Tag `v0.4.0` creado + push origin/main + push tag (con
-      authorization explicita user).
-- [ ] README + SKILL.md (J5 hotfix mandatory, otros opcionales).
-- [ ] Memory `project_v040_shipped.md` written + MEMORY.md index
-      updated.
-- [ ] R2.1 dogfood empirically validated (or documented why not
-      observed in this cycle's iter sequence).
+- `CLAUDE.local.md` SBTDD §6 "Code review" — source para Loop 1/2 sequencing, degraded handling, mini-ciclo TDD, verdict table, spec replan trigger.
+- `CLAUDE.local.md` MAGI plugin §2 (cached at `/tmp/magi-claude-local.md`) — source para trigger criteria, skip rules, threshold high-impact keywords, procedure, carry-forward format §2.4.1, cost awareness §2.5, per-project setup §2.6, review summary artifact.
+- `~/.claude/CLAUDE.md` global — top authority per INV-0; commit rules (English, no AI refs, no Co-Authored-By) governing commits del este spec.
+- v0.4.0 ship record (`memory/project_v040_shipped.md`) — empirical confirmation de Caspar fragility cronica que justifica cost awareness warning para smaller models.
+- v0.5.0 brainstorming state (paused) — task #2 in TaskList; resume despues de este side-track.
 
 ---
 
-## 9. Referencias
+## 9. Nota sobre siguiente paso
 
-- Spec base post-v0.3.0: `sbtdd/spec-behavior-base.md` (v1.0.0
-  raw input; v0.4.0 cubre F + J subset).
-- Contrato autoritativo v0.1+v0.2+v0.3 frozen:
-  `sbtdd/sbtdd-workflow-plugin-spec-base.md`.
-- Brainstorming session decisions log v0.4.0:
-  - (b) Split: v0.4.0 = F + small J, v1.0.0 = G + H + I + remaining.
-  - (2) Balanced J subset: J4 + J5 + J6 + J8.
-  - Lightweight + 2 parallel subagents (surfaces disjoint).
-  - Final review = MAGI -> /receiving-code-review loop con dogfood
-    rescue option (escenario R2.1).
-- v0.3.0 ship + empirical findings:
-  - `project_v030_shipped.md` (v0.3.0 ship record).
-  - `.claude/magi-runs/v030-iter1/magi-report.json` (iter 1 findings).
-  - `.claude/magi-runs/v030-iter2/{melchior,balthasar,caspar}.raw.json`
-    (synthesizer crash, manual recovery rationale).
-- Historical precedent:
-  - v0.2.1 lightweight pattern (~3h, 4 LOCKED items).
-  - v0.3.0 lightweight + sequential 2 subagents + 2-iter MAGI
-    Loop 2 (~5h, 10 deliverables).
-- v1.0.0 deferred items roadmap:
-  - `project_v100_magi_cross_check.md` (Feature G).
-  - Group B options re-evaluation (Feature H).
-  - schema_version + migration tool (Feature I).
-- Branch: trabajo en `main` directamente (lightweight pattern, no
-  feature branch).
+Spec listo. Next step:
+1. User review de este spec.
+2. Si aprueba: skip `/writing-plans` (pure docs scope no requiere plan TDD multi-agente; workflow sec.5.1 es directo). Proceder directamente a phases 1-5 de sec.5.1.
+3. Si quiere `/writing-plans` formal: invocar el skill, pero dado el scope trivial el plan resultante sera basicamente lineal sin TDD cycles.
+
+Mi recomendacion: skip `/writing-plans`, proceder a implementacion directa por simplicidad (4 phases secuenciales claras, single agent).
