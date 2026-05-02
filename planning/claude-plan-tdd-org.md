@@ -2640,6 +2640,37 @@ def test_h2_1_hash_deterministic_for_same_content(tmp_path):
     snap1 = emit_snapshot(spec1)
     snap2 = emit_snapshot(spec2)
     assert snap1 == snap2
+
+
+def test_emit_snapshot_raises_when_no_escenarios_section(tmp_path):
+    """WARNING melchior zero-match guard: missing §4 section raises ValueError."""
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec.md"
+    spec.write_text("# spec without scenarios section", encoding="utf-8")
+    with pytest.raises(ValueError, match="No §4 Escenarios section"):
+        emit_snapshot(spec)
+
+
+def test_emit_snapshot_raises_when_section_empty(tmp_path):
+    """WARNING melchior zero-match guard: empty §4 section raises ValueError.
+
+    Silent {} would compare equal to another empty {} from a similarly
+    broken spec, masking real drift.
+    """
+    from spec_snapshot import emit_snapshot
+
+    spec = tmp_path / "spec.md"
+    spec.write_text("""# spec
+
+## §4 Escenarios BDD
+
+(no scenario blocks)
+
+## §5 next section
+""", encoding="utf-8")
+    with pytest.raises(ValueError, match="zero scenarios"):
+        emit_snapshot(spec)
 ```
 
 - [ ] **Step 2: Run + verify fail**
@@ -2688,15 +2719,40 @@ def emit_snapshot(spec_path: Path) -> dict[str, str]:
     Returns:
         Dict mapping scenario title (without ``**Escenario ... **`` prefix)
         to SHA-256 hex hash of normalized scenario body.
+
+    Raises:
+        ValueError: when no §4 Escenarios section is found OR the section
+            contains zero scenario blocks. Per WARNING melchior zero-match
+            guard: silently returning ``{}`` would later compare equal to
+            another empty snapshot from a similarly broken spec, masking
+            real drift.
     """
     text = spec_path.read_text(encoding="utf-8")
+    # Constrain matching to the §4 Escenarios section so unrelated bold
+    # text earlier/later in the spec doesn't accidentally match the
+    # `**Escenario` regex.
+    section_match = re.search(
+        r"##\s*§?4[^\n]*Escenarios[\s\S]*?(?=^##\s|\Z)",
+        text, re.MULTILINE,
+    )
+    if not section_match:
+        raise ValueError(
+            f"No §4 Escenarios section found in {spec_path}; "
+            f"spec-snapshot drift detection requires the section header."
+        )
+    section_text = section_match.group(0)
     snapshot: dict[str, str] = {}
-    for match in _SCENARIO_RE.finditer(text):
+    for match in _SCENARIO_RE.finditer(section_text):
         title = match.group(1).strip()
         body = match.group(2).strip()
         normalized = _normalize(body)
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         snapshot[title] = digest
+    if not snapshot:
+        raise ValueError(
+            f"§4 Escenarios section in {spec_path} contains zero scenarios; "
+            f"refusing to emit empty snapshot (would mask drift)."
+        )
     return snapshot
 ```
 
