@@ -436,22 +436,30 @@ behind `auto_origin_disambiguation: bool = True` (default ON para visibility
 gain). Operator que pipea output a parser regex puede setear `false` en
 `plugin.local.md` para preservar bytes raw.
 
-**"Same iteration" semantica PINNED (post-iter 2 melchior+caspar findings):**
-platform-dependent primitives (`select.select` Unix, `selectors.DefaultSelector`
-Windows) tienen polling granularity que varia. Para spec deterministic,
-"same iteration" se define como **ambos streams emiten chunks dentro de la
-misma 50ms temporal window** del read loop. Implementation:
+**"Same iteration" semantica PINNED (post-iter 2 melchior+caspar findings;
+default raised 50ms → 100ms post Loop 1 v0.5.0 W3 fix per Checkpoint 2
+iter 4 melchior + balthasar findings about Windows CI scheduling
+jitter):** platform-dependent primitives (`select.select` Unix,
+`selectors.DefaultSelector` Windows) tienen polling granularity que
+varia. Para spec deterministic, "same iteration" se define como
+**ambos streams emiten chunks dentro de la misma 100ms temporal
+window** del read loop (default; configurable via
+`origin_window_seconds` parameter on `run_streamed_with_timeout` and
+via `auto_origin_disambiguation` config flag). Implementation:
 - Pump records `last_chunk_at[stream]` per chunk emitted via `time.monotonic()`.
 - Cuando se emiten chunks de stream A, check si
-  `time.monotonic() - last_chunk_at[other_stream] < 0.050` — si si,
+  `time.monotonic() - last_chunk_at[other_stream] < 0.100` — si si,
   prefijar AMBOS chunks (current + recent other-stream).
-- Cross-platform behavioral test (`tests/test_subprocess_utils.py::test_origin_disambig_temporal_window`)
+- Cross-platform behavioral test (`tests/test_subprocess_utils.py::test_o2_dual_stream_within_production_100ms_window_prefixes`)
   spawns subprocess que emite 1 chunk a stdout + 1 chunk a stderr con
-  `time.sleep(0.005)` between (well within 50ms window) y verifica
-  prefix appears en ambos. Test passes en Unix + Windows uniformly.
-- Window 50ms chosen como balance: short enough que sequential single-stream
+  `time.sleep(0.005)` between (well within 100ms window) y verifica
+  prefix appears en al menos uno. Test passes en Unix + Windows uniformly.
+- Window 100ms chosen como balance: short enough que sequential single-stream
   output (e.g., logs scrolling 1+ second apart) NO triggers prefix; large
-  enough que platform polling jitter no reverte el detection.
+  enough que Windows CI scheduler jitter no reverta el detection en loaded
+  systems. Loop 1 v0.5.0 W3 raised the iter-1 baseline of 50ms because
+  Windows CI runs occasionally exceeded that window even with 5ms inter-chunk
+  sleeps; 100ms tolerates ~10x scheduler-jitter margin.
 
 **Escenario O1: solo stdout activo no prefija (feature ON)**
 
@@ -535,7 +543,7 @@ misma 50ms temporal window** del read loop. Implementation:
 | **Heartbeat emitter** | H1-H6 | `tests/test_heartbeat.py` (NEW) |
 | **status --watch** | W1-W6 | `tests/test_status_watch.py` (NEW) |
 | **Per-stream timeout** | T1-T8 (incl. INV-34 + allowlist + closed-stream + kill-tree order) | `tests/test_subprocess_utils.py`, `tests/test_config.py` (extended) |
-| **Origin disambiguation** | O1-O4 (incl. config gate + 50ms temporal window) | `tests/test_subprocess_utils.py` (extended) |
+| **Origin disambiguation** | O1-O4 (incl. config gate + 100ms temporal window default; configurable per call) | `tests/test_subprocess_utils.py` (extended) |
 | **Mechanical smoke fixtures** | R2.3 | `tests/test_heartbeat_smoke.py` (NEW) |
 | **v0.4.1 hotfixes** | HF1-HF3 | `tests/test_changelog.py`, `tests/test_skill_md.py` (extended) |
 
@@ -1052,8 +1060,9 @@ v0.5.0 ship-ready cuando:
   exempt para `magi-*` + closed-stream EOF tracking exemption + Windows
   kill-tree R3-1 order preservation).
 - **F4**. Origin disambiguation (J7) — O1-O4 escenarios pass (incl.
-  `auto_origin_disambiguation` config gate + 50ms temporal window
-  cross-platform behavioral test).
+  `auto_origin_disambiguation` config gate + 100ms temporal window
+  default cross-platform behavioral test; configurable via
+  `origin_window_seconds` parameter).
 - **F5**. ProgressContext dataclass + auto-run.json contract — backward
   compat con v0.4.0 files preserved; `heartbeat_failed_writes_total`
   field registrado per INV-32.
@@ -1179,8 +1188,9 @@ diferidas a v0.5.x patches (excepto donde explicitly indicado).
 **W2 / W6: 50ms temporal window CI flakiness (melchior + balthasar)**
 - Issue: 50ms window risks platform-jitter false positives en Windows CI.
 - Resolution path: Subagent #2 implements origin disambig test with
-  fixture-injectable window override (default 50ms wall-clock; tests
-  override to monkey-patched clock or larger window).
+  fixture-injectable window override (default 100ms wall-clock post Loop 1
+  v0.5.0 W3 fix raising the iter-1 baseline of 50ms; tests override to
+  monkey-patched clock or larger window).
 
 **W3: `_failed_writes` queue drain semantics (melchior)**
 - Issue: queue.Queue drain pattern not specified — max? sum? latest?
