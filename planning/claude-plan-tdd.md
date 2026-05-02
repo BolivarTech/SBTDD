@@ -3524,7 +3524,7 @@ git commit -m "feat: add migrate_plugin_local.py skeleton with v1->v2 no-op (Fea
 - Create: `skills/sbtdd/scripts/spec_snapshot.py`
 - Create: `tests/test_spec_snapshot.py`
 
-- [ ] **Step 1: Write failing test for emit_snapshot (H2-1)**
+- [x] **Step 1: Write failing test for emit_snapshot (H2-1)**
 
 Create `tests/test_spec_snapshot.py`:
 
@@ -3624,9 +3624,9 @@ def test_emit_snapshot_raises_when_section_empty(tmp_path):
         emit_snapshot(spec)
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Create spec_snapshot.py with emit_snapshot**
+- [x] **Step 3: Create spec_snapshot.py with emit_snapshot**
 
 Create `skills/sbtdd/scripts/spec_snapshot.py`:
 
@@ -3707,7 +3707,7 @@ def emit_snapshot(spec_path: Path) -> dict[str, str]:
     return snapshot
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_spec_snapshot.py -v
