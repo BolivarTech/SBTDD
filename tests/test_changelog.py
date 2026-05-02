@@ -75,3 +75,19 @@ def test_hf3_f45_verdict_set_delta_documented():
     assert "VERDICT_RANK" in changelog
     assert "ValidationError" in changelog
     assert "tolerant parser" in changelog.lower()
+
+
+def test_changelog_v0_5_0_entry_complete():
+    """S2-14: [0.5.0] section enumerates all v0.5.0 deliverables + deferred items."""
+    changelog = _read("CHANGELOG.md")
+    assert "## [0.5.0]" in changelog
+    section = changelog.split("## [0.5.0]")[1].split("## [0.4")[0]
+    assert "### Added" in section
+    assert "Heartbeat" in section
+    assert "status --watch" in section
+    assert "Per-stream timeout" in section
+    assert "Origin disambiguation" in section
+    assert "ProgressContext" in section
+    assert "INV-32" in section or "INV-34" in section
+    assert "### Deferred" in section
+    assert "Feature G" in section

@@ -8,6 +8,93 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [0.5.0] - 2026-05-02
+
+### Added
+
+- **Heartbeat in-band emitter** (`scripts/heartbeat.py`) -- context manager
+  wrapping long subprocess dispatches; daemon thread emits stderr breadcrumb
+  every 15s (configurable) with iter / phase / task / dispatch / elapsed.
+  Lock-protected singleton + Event-interruptible tick loop. INV-32 enforces
+  resilience: heartbeat thread NEVER blocks/kills the auto run; first-failure
+  stderr breadcrumb + queue-reported counter to main thread for incremental
+  `auto-run.json` persistence.
+- **`/sbtdd status --watch`** companion subcommand (sec.2.2 W1-W6) for
+  out-of-band monitoring; default TTY rewrite-line render, `--json` flag for
+  piping, `--interval N` override (validated >= 0.1s). 5x retry with
+  exponential backoff on JSON parse contention; slow-poll fallback after 3
+  consecutive parse failures (idle auto-runs do NOT trigger slow-poll).
+- **Per-stream timeout (J3)** -- `subprocess_utils.run_streamed_with_timeout`
+  kills subprocess if all open streams silent for
+  `auto_per_stream_timeout_seconds` (default 900s).
+  `auto_no_timeout_dispatch_labels` allowlist exempts MAGI dispatches by
+  default (`["magi-*"]`). Bare `*` rejected at config load.
+- **Origin disambiguation (J7)** -- pump prefixes `[stdout]` / `[stderr]`
+  when both streams emit chunks within a temporal window (W3 default 100ms,
+  raised from iter-1 50ms baseline for OS scheduling jitter tolerance).
+  Forward-only semantics (no retroactive prefix). Gated behind
+  `auto_origin_disambiguation` (default ON).
+- **C1 + C2 streaming pump fold-ins** (Checkpoint 2 iter 4): binary-mode
+  pipes + `os.read` + incremental UTF-8 decoder (POSIX) and
+  `threading.Thread` + `queue.Queue` reader fallback (Windows). Multi-byte
+  UTF-8 sequences split across chunk boundaries are reassembled cleanly;
+  `selectors.DefaultSelector` is bypassed on Windows where it does not
+  support pipe FDs.
+- **ProgressContext dataclass** (frozen) in `models.py`; lock-protected
+  singleton in `scripts/heartbeat.py` with `get_current_progress()` /
+  `set_current_progress()`. Serialised to `auto-run.json` under `progress`
+  key with ISO 8601 UTC datetimes (`Z` suffix).
+- **5 new PluginConfig fields** (sec.4.3):
+  `auto_per_stream_timeout_seconds`, `auto_heartbeat_interval_seconds`,
+  `status_watch_default_interval_seconds`, `auto_origin_disambiguation`,
+  `auto_no_timeout_dispatch_labels`.
+- **3 new invariants**: INV-32 (heartbeat resilience + queue-based
+  incremental persistence), INV-33 (per-stream timeout last-resort kill --
+  heartbeat 1st-line, watch 2nd-line, timeout 3rd-line, operator
+  intervention 4th), INV-34 (timeout-vs-interval ratio + floor + ceiling
+  validation -- 4 clauses with distinct error messages, validated at
+  config load with the ratio check leading per fixture contract).
+
+### Changed
+
+- `auto-run.json` schema gains `progress` key (ProgressContext snapshot,
+  ISO 8601 UTC datetimes) and `heartbeat_failed_writes_total` counter.
+  Backward-compat: v0.4.0 files without these fields parse cleanly.
+
+### Hotfixes folded
+
+- HF1: recovery breadcrumb wording aligned across spec / CHANGELOG / impl
+  (single-line canonical text, whitespace-normalised cross-artifact test
+  in `tests/test_changelog.py`).
+- HF2: marker file schema docs (`verdict`, `iteration`, `agents`,
+  `timestamp`) match the actual emission fields documented in the
+  `magi_dispatch._MARKER_FILENAME` docstring.
+- HF3: F45 verdict-set delta documented (validates `verdict in
+  VERDICT_RANK ∪ agent-aliases`; unknown values raise `ValidationError`).
+
+### Process notes
+
+- Bundle accepted via INV-0 override after MAGI Loop 2 4-iter convergence
+  pattern (verdict stable `GO_WITH_CAVEATS (3-0)` full no-degraded).
+  Known Limitations from iter 4 documented in spec sec.11; resolution in
+  this implementation phase via sec.13 fold-in tasks.
+- True parallel 2-subagent dispatch repeated (Heartbeat track vs
+  Streaming/Watch/Docs track), surfaces 100% disjoint, ~6-8h wall time.
+- W1 (Checkpoint 2 iter 4 melchior + caspar): INV-34 clause 1 is
+  mathematically subsumed by clauses 2 + 4 in the default range; preserved
+  explicitly as defense-in-depth. See `docs/v0.5.0-config-matrix.md`.
+- W7 (Checkpoint 2 iter 4 balthasar): threading correctness in heartbeat
+  + Windows reader fallback is treated as accepted-risk per the
+  single-thread `auto_cmd` invariant + lock-protected singleton.
+
+### Deferred (rolled to v1.0.0)
+
+- Feature G: MAGI -> /requesting-code-review cross-check meta-reviewer.
+- F44.3: `retried_agents` propagation to `auto-run.json` audit field.
+- J2: ResolvedModels preflight dataclass.
+- Feature I: `schema_version` + migration tool.
+- Feature H: Group B re-eval + INV-31 default-on opt-in re-evaluation.
+
 ## Unreleased (Deferred — tracked for v1.0.0)
 
 v0.3.0 shipped Track D (auto progress visibility) and Track E (per-skill
