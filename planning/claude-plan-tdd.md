@@ -3306,7 +3306,7 @@ git commit -m "feat: add PluginConfig.magi_cross_check field defaulting to False
 - Modify: `skills/sbtdd/scripts/config.py`
 - Modify: `tests/test_config.py`
 
-- [ ] **Step 1: Write failing tests for I1, I2**
+- [x] **Step 1: Write failing tests for I1, I2**
 
 Append to `tests/test_config.py`:
 
@@ -3373,9 +3373,9 @@ schema_version: 2
     assert cfg.schema_version == 2
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Add schema_version field**
+- [x] **Step 3: Add schema_version field**
 
 In `config.py`:
 
@@ -3394,7 +3394,7 @@ In `load_plugin_local`:
 data.setdefault("schema_version", 1)
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_config.py -k "schema_version" -v
