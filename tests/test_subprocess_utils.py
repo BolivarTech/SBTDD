@@ -155,3 +155,73 @@ def test_streaming_pump_works_on_windows_subprocess():
     assert result.returncode == 0
     assert "win0" in result.stdout
     assert "win4" in result.stdout
+
+
+def test_t1_all_streams_silent_kills_subprocess(capsys):
+    """T1: silence on all open streams beyond timeout triggers kill."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", "import time; time.sleep(10)"]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=0.5, dispatch_label="test-hang",
+    )
+    assert result.returncode != 0
+    captured = capsys.readouterr()
+    assert "all open streams silent" in captured.err
+    assert "auto_no_timeout_dispatch_labels" in captured.err
+
+
+def test_t5_allowlist_exempts_dispatch_label():
+    """T5: dispatch_label matching allowlist -> no kill, full output captured."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", "import time; time.sleep(1.0)"]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=0.3, dispatch_label="magi-loop2-iter1",
+        no_timeout_labels=("magi-*",),
+    )
+    assert result.returncode == 0
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.close(sys.stdout.fileno()) has Windows-specific failure modes; "
+           "T7 verified via integration on POSIX (Checkpoint 2 iter 1 caspar finding)",
+)
+def test_t7_closed_stream_excluded_from_timeout():
+    """T7: an EOF'd stream is dropped from the open set -- timeout uses
+    only the still-open streams."""
+    from subprocess_utils import run_streamed_with_timeout
+    cmd = [sys.executable, "-c", (
+        "import sys, os, time\n"
+        "os.close(sys.stdout.fileno())\n"
+        "for i in range(3):\n"
+        "    sys.stderr.write(f'err{i}\\n')\n"
+        "    sys.stderr.flush()\n"
+        "    time.sleep(0.1)\n"
+    )]
+    result = run_streamed_with_timeout(
+        cmd, per_stream_timeout_seconds=0.3, dispatch_label="test-closed",
+    )
+    assert result.returncode == 0
+    assert "err0" in result.stderr
+
+
+def test_t8_kill_tree_order_preserved_on_windows(monkeypatch):
+    """T8: R3-1 invariant -- taskkill /F /T /PID BEFORE proc.kill()."""
+    if sys.platform != "win32":
+        pytest.skip("Windows-only invariant")
+    from unittest.mock import MagicMock
+
+    from subprocess_utils import _kill_subprocess_tree
+    call_order: list[str] = []
+
+    def fake_run(*args, **kwargs):
+        call_order.append("taskkill")
+        from subprocess import CompletedProcess
+        return CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr("subprocess_utils.subprocess.run", fake_run)
+    proc = MagicMock()
+    proc.pid = 12345
+    proc.kill = lambda: call_order.append("proc.kill")
+    _kill_subprocess_tree(proc)
+    assert call_order == ["taskkill", "proc.kill"]
