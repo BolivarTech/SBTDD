@@ -640,3 +640,69 @@ magi_cross_check: true
 
     cfg = load_plugin_local(config_path)
     assert cfg.magi_cross_check is True
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 Feature I — schema_version field + INV-36 (sec.3.1; S2-3)
+# ---------------------------------------------------------------------------
+
+
+def test_i1_v0_5_0_files_load_as_schema_version_1(tmp_path):
+    """I1: plugin.local.md without schema_version field defaults to 1 (NF21 backward compat)."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.schema_version == 1
+
+
+def test_i2_v1_0_0_files_declare_schema_version_2(tmp_path):
+    """I2: plugin.local.md with schema_version: 2 parses correctly."""
+    base = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+schema_version: 2
+---
+"""
+    config_path = tmp_path / "p.md"
+    config_path.write_text(base, encoding="utf-8")
+    from config import load_plugin_local
+
+    cfg = load_plugin_local(config_path)
+    assert cfg.schema_version == 2
