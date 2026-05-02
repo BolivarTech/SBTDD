@@ -3128,7 +3128,7 @@ Verify all S1-1 through S1-24 commits landed cleanly. Report `DONE: Subagent #1`
 - Modify: `skills/sbtdd/scripts/models.py`
 - Modify: `tests/test_models.py`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `tests/test_models.py`:
 
@@ -3157,9 +3157,9 @@ def test_resolved_models_is_frozen():
         rm.implementer = "z"  # type: ignore[misc]
 ```
 
-- [ ] **Step 2: Run + verify fail**
+- [x] **Step 2: Run + verify fail**
 
-- [ ] **Step 3: Add ResolvedModels to models.py**
+- [x] **Step 3: Add ResolvedModels to models.py**
 
 Append to `skills/sbtdd/scripts/models.py`:
 
@@ -3183,7 +3183,7 @@ class ResolvedModels:
     magi_dispatch: str
 ```
 
-- [ ] **Step 4: Run + verify pass + commit**
+- [x] **Step 4: Run + verify pass + commit**
 
 ```bash
 pytest tests/test_models.py -k "resolved_models" -v
