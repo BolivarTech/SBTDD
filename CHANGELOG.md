@@ -79,10 +79,29 @@ every post-v0.1 release.
 
 ### Process notes
 
-- Bundle accepted via INV-0 override after MAGI Loop 2 4-iter convergence
-  pattern (verdict stable `GO_WITH_CAVEATS (3-0)` full no-degraded).
-  Known Limitations from iter 4 documented in spec sec.11; resolution in
-  this implementation phase via sec.13 fold-in tasks.
+- Spec/plan bundle accepted via INV-0 override after MAGI Checkpoint 2
+  4-iter convergence pattern (verdict stable `GO_WITH_CAVEATS (3-0)` full
+  no-degraded; iter 4 verdict 2 APPROVE + 1 CONDITIONAL with deferrables).
+  Known Limitations from Checkpoint 2 iter 4 documented in spec sec.11;
+  resolution in this implementation phase via plan sec.13 fold-in tasks.
+- **Pre-merge MAGI Loop 2 audit trail (4 iters, 2026-05-02):**
+  - **Iter 1**: GO_WITH_CAVEATS (3-0); 1 CRITICAL (self-deadlock) + 10
+    WARNINGs. Fold-in via mini-cycle TDD (Loop 2 iter 1 fix subagent, 13
+    commits).
+  - **Iter 2**: GO_WITH_CAVEATS (3-0); 0 CRITICALs + 14 WARNINGs (mostly
+    polish). Fold-in via Groups A-G (Loop 2 iter 2 fix subagent, 16 commits).
+  - **Iter 3**: GO_WITH_CAVEATS (3-0); Caspar APPROVE 82% (first APPROVE);
+    0 CRITICALs + 8 WARNINGs (1 structural — `RLock._is_owned()` private API).
+    Fold-in via Groups A-F + G (Loop 2 iter 3 fix subagent, 9 commits).
+  - **Iter 4 (final)**: GO_WITH_CAVEATS (3-0); **2 APPROVE (Melchior 84%,
+    Balthasar 78%) + 1 CONDITIONAL (Caspar 75%)**; 0 CRITICALs + 7 WARNINGs
+    (mostly v0.5.1 deferrable). Accepted via INV-0 override 2026-05-02.
+    Caspar's iter 4 quote: "the v0.5.0 observability pillar can land safely
+    with these caveats acknowledged". Melchior: "APPROVE for ship... none
+    block merge". Balthasar: "Approve and ship v0.5.0".
+  - **Convergence pattern**: 0 CRITICALs maintained 3 consecutive iters;
+    WARNING count 14 → 8 → 7; agent verdicts trended Conditional → Approve.
+    Architecture consistently approved by all 3 agents in all 4 iters.
 - True parallel 2-subagent dispatch repeated (Heartbeat track vs
   Streaming/Watch/Docs track), surfaces 100% disjoint, ~6-8h wall time.
 - W1 (Checkpoint 2 iter 4 melchior + caspar): INV-34 clause 1 is
@@ -130,6 +149,41 @@ every post-v0.1 release.
   ship as opt-in infrastructure with zero production callers (Loop 2
   iter 3 W3 fix: explicit ship-date target documented to keep the gap
   visible).
+
+- **Loop 2 iter 4 Known Limitations** (folded as v0.5.1 backlog per INV-0
+  acceptance 2026-05-02 — verdict `GO_WITH_CAVEATS (3-0)` full no-degraded
+  with 2 APPROVE + 1 CONDITIONAL):
+  - **W4 (caspar)**: `pre_merge_cmd._wrap_with_heartbeat_if_auto` bare-except
+    neutralizes the fail-loud `_dispatch_with_heartbeat` contract introduced
+    in Loop 1 iter 1. Fix in v0.5.1: narrow except to the specific introspection
+    failures (`AttributeError`, `RuntimeError`) the wrap is guarding against;
+    let `ValueError` (the fail-loud signal) propagate.
+  - **W5 (caspar)**: `status_cmd.watch_main` poll loop has no exception guard
+    around the cycle body. Long-running UX feature should survive transient
+    errors. Fix in v0.5.1: wrap the cycle body in try/except logging unexpected
+    exceptions to stderr and continuing the poll loop.
+  - **W6 (caspar)**: tests directly mutate `auto_cmd._assert_main_thread`
+    instead of `monkeypatch.setattr`. Fix in v0.5.1: convert to monkeypatch.setattr
+    so cleanup is automatic on test failure. Coverage gap acknowledged in W5
+    rationale comments (Loop 2 iter 3 fix).
+  - **W7 (caspar)**: decode-error dedup + observability counter self-defeat
+    when persistence itself is the failing path. Fix in v0.5.1: separate
+    persistence-failure breadcrumb from drain-failure breadcrumb.
+  - **B1, B2, B3 (balthasar)**: J3/J7 zero callers (already tracked above);
+    test concurrency bypasses fragile (W6 above); threading complexity high
+    (acknowledged process risk, no concrete fix needed in v0.5.0+).
+  - **5 INFO-level items**: bytecode-deployment fragility of inspect.getsource
+    assertion; BaseException catch in _write_auto_run_audit delays SystemExit;
+    INV-34 messages omit unit suffix; autouse fixture only in test_auto_progress.py;
+    Windows kill-path race with reader chunks despite W7 drain. Fix in v0.5.1
+    housekeeping pass.
+
+- **Pre-existing Windows test flake** (noted in Loop 2 iter 3 fix subagent):
+  `test_concurrent_write_audit_writers_serialize_via_file_lock` exhibits
+  intermittent `PermissionError` on Windows during concurrent `os.replace`
+  of `.tmp.{getpid()}` files (collides between threads sharing PID). Fix
+  in v0.5.1: include thread-id in tmp filename pattern in the three writers
+  (`auto_cmd.py:644, 997, 2469`).
 
 ### Deferred (rolled to v1.0.0)
 
