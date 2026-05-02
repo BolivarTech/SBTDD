@@ -815,6 +815,96 @@ def _loop2(
     )
 
 
+def _check_spec_snapshot_drift(
+    *,
+    spec_path: Path,
+    snapshot_path: Path,
+    state_file_path: Path,
+) -> None:
+    """Verify spec scenarios have not drifted since plan approval (CRITICAL #2).
+
+    Per spec sec.3.2 H2-3 + H2-5: pre-merge fails when scenarios drifted
+    between plan approval and merge.
+
+    Two distinct drift surfaces guarded:
+
+    - **H2-3** (file present but content drifted): persisted snapshot at
+      ``snapshot_path`` no longer matches the current spec; raises
+      :class:`MAGIGateError` listing added/removed/modified scenarios.
+    - **H2-5** (file deleted bypass): state-file watermark
+      (``spec_snapshot_emitted_at``) says a snapshot WAS emitted but the
+      file is missing -- bypass-by-deletion attempt detected, raises
+      :class:`MAGIGateError`.
+
+    Backward compat: pre-v1.0.0 plan-approval flows neither emitted a
+    snapshot nor wrote the watermark; a stderr breadcrumb fires and the
+    gate proceeds.
+
+    Per caspar Loop 2 iter 4 CRITICAL fix: reuses the existing
+    :class:`MAGIGateError` (no new exception class added by v1.0.0).
+
+    Args:
+        spec_path: Path to ``sbtdd/spec-behavior.md``.
+        snapshot_path: Path to ``planning/spec-snapshot.json`` (the
+            previously persisted snapshot).
+        state_file_path: Path to ``.claude/session-state.json`` (read
+            for the H2-5 watermark check).
+
+    Raises:
+        MAGIGateError: scenarios drifted (H2-3) or bypass-by-deletion
+            detected via watermark (H2-5).
+    """
+    # Read state-file watermark (caspar iter 4 W2): canon-of-the-present
+    # record of whether a snapshot was emitted.
+    watermark: str | None = None
+    if state_file_path.exists():
+        try:
+            state = json.loads(state_file_path.read_text(encoding="utf-8"))
+            watermark = state.get("spec_snapshot_emitted_at")
+        except json.JSONDecodeError:
+            sys.stderr.write(
+                f"[sbtdd pre-merge] state file corrupt at "
+                f"{state_file_path}; spec-snapshot watermark check "
+                f"skipped (drift gate degrades to file-only check).\n"
+            )
+
+    if not snapshot_path.exists():
+        if watermark:
+            # H2-5: watermark says snapshot WAS emitted, but file is gone.
+            raise MAGIGateError(
+                f"Spec snapshot file deleted; re-emit via /sbtdd "
+                f"close-task or re-approve plan. State file watermark "
+                f"shows snapshot was emitted at {watermark} but "
+                f"{snapshot_path} no longer exists. The drift gate "
+                f"cannot be bypassed by deleting the snapshot."
+            )
+        # H2-3 backward-compat path: pre-v1.0.0 plan approval (no file,
+        # no watermark) is non-blocking with a breadcrumb.
+        sys.stderr.write(
+            f"[sbtdd pre-merge] no spec-snapshot.json at {snapshot_path}; "
+            f"drift check skipped (pre-v1.0.0 plan-approval flow). "
+            f"Re-approve plan to enable drift detection.\n"
+        )
+        sys.stderr.flush()
+        return
+
+    # Deferred import: spec_snapshot is owned by Subagent #2; deferring
+    # the import follows the cross-subagent Mitigation A pattern.
+    import spec_snapshot
+
+    prev = spec_snapshot.load_snapshot(snapshot_path)
+    curr = spec_snapshot.emit_snapshot(spec_path)
+    diff = spec_snapshot.compare(prev, curr)
+    if diff["added"] or diff["removed"] or diff["modified"]:
+        raise MAGIGateError(
+            f"Spec scenarios changed since plan approval; re-approve plan "
+            f"via /writing-plans + Checkpoint 2.\n"
+            f"  added: {diff['added']}\n"
+            f"  removed: {diff['removed']}\n"
+            f"  modified: {diff['modified']}"
+        )
+
+
 def _persist_retried_agents_to_audit(
     root: Path,
     iteration: int,

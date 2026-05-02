@@ -1502,6 +1502,86 @@ def test_w8_atomic_replace_tmp_filename_includes_thread_id(tmp_path, monkeypatch
         )
 
 
+def test_s1_27_plan_approval_emits_spec_snapshot(tmp_path, monkeypatch):
+    """CRITICAL #2 / S1-27: when plan_approved_at is set, spec-snapshot.json written."""
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    captured = {}
+
+    def fake_emit(p):
+        captured["spec_path"] = p
+        return {"S1: x": "hash1"}
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", fake_emit)
+
+    auto_cmd._mark_plan_approved_with_snapshot(root=tmp_path)
+
+    snapshot_path = tmp_path / "planning" / "spec-snapshot.json"
+    assert snapshot_path.exists()
+    data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert data == {"S1: x": "hash1"}
+    assert captured["spec_path"] == spec
+
+
+def test_s1_27_plan_approval_writes_state_file_watermark(tmp_path, monkeypatch):
+    """H2-4 + caspar iter 4 W2: plan-approval handler writes
+    spec_snapshot_emitted_at watermark to .claude/session-state.json so
+    pre-merge can detect bypass-by-deletion (H2-5).
+    """
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", lambda _p: {"S1: x": "hash1"})
+
+    auto_cmd._mark_plan_approved_with_snapshot(root=tmp_path)
+
+    state_file_path = tmp_path / ".claude" / "session-state.json"
+    assert state_file_path.exists()
+    state = json.loads(state_file_path.read_text(encoding="utf-8"))
+    assert "spec_snapshot_emitted_at" in state
+    assert state["spec_snapshot_emitted_at"].endswith("Z")
+    assert "T" in state["spec_snapshot_emitted_at"]
+
+
+def test_s1_27_plan_approval_preserves_existing_state_file_fields(tmp_path, monkeypatch):
+    """Watermark write does NOT clobber pre-existing state file fields."""
+    (tmp_path / "sbtdd").mkdir()
+    (tmp_path / "planning").mkdir()
+    (tmp_path / ".claude").mkdir()
+    spec = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    state_file_path = tmp_path / ".claude" / "session-state.json"
+    state_file_path.write_text(
+        json.dumps(
+            {
+                "current_task_id": "3",
+                "current_phase": "red",
+                "plan_approved_at": "2026-05-01T10:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("spec_snapshot.emit_snapshot", lambda _p: {"S1: x": "hash1"})
+
+    auto_cmd._mark_plan_approved_with_snapshot(root=tmp_path)
+
+    state = json.loads(state_file_path.read_text(encoding="utf-8"))
+    # Existing fields preserved.
+    assert state["current_task_id"] == "3"
+    assert state["current_phase"] == "red"
+    assert state["plan_approved_at"] == "2026-05-01T10:00:00Z"
+    # New watermark added.
+    assert "spec_snapshot_emitted_at" in state
+
+
 def test_i_hk1_systemexit_propagates_through_write_audit(tmp_path, monkeypatch):
     """I-Hk1 (caspar iter 4 INFO): SystemExit MUST propagate through
     ``_write_auto_run_audit`` rather than be captured by a too-broad

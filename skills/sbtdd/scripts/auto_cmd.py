@@ -2505,6 +2505,75 @@ def _record_magi_retried_agents(
     _with_file_lock(auto_run_path, _do_record)
 
 
+def _mark_plan_approved_with_snapshot(*, root: Path) -> None:
+    """Persist spec-snapshot at plan-approval time (CRITICAL #2 / S1-27).
+
+    Wired into the plan-approval transition: when the state file gets
+    ``plan_approved_at`` set (template sec.5 "Excepcion bajo plan
+    aprobado" trigger), this helper:
+
+    1. Emits the current spec scenarios snapshot via
+       :func:`spec_snapshot.emit_snapshot` and persists it to
+       ``planning/spec-snapshot.json`` via
+       :func:`spec_snapshot.persist_snapshot`. The pre-merge gate
+       (S1-26 ``_check_spec_snapshot_drift``) consumes this snapshot.
+    2. Writes a watermark field
+       ``spec_snapshot_emitted_at: <ISO 8601>`` to
+       ``.claude/session-state.json``. The watermark is the canon-of-
+       the-present record (CLAUDE.local.md §2.1) that a snapshot was
+       emitted. Pre-merge S1-26 compares the file's existence against
+       this watermark: if the watermark says snapshot was emitted but
+       the file is missing, drift detected (H2-5 escenario / W2 fix).
+
+    Idempotent: re-approving the plan re-emits the snapshot
+    (``persist_snapshot`` overwrites) and refreshes the watermark.
+
+    Per caspar Loop 2 iter 4 W2 fix: closes the bypass-by-deletion
+    gap that would otherwise let an operator silently bypass the drift
+    gate by deleting ``planning/spec-snapshot.json``.
+
+    Args:
+        root: Project root directory. Spec read from
+            ``root/sbtdd/spec-behavior.md``; snapshot persisted to
+            ``root/planning/spec-snapshot.json``; watermark written to
+            ``root/.claude/session-state.json``.
+    """
+    import spec_snapshot  # deferred per cross-subagent Mitigation A
+
+    spec_path = root / "sbtdd" / "spec-behavior.md"
+    snapshot_path = root / "planning" / "spec-snapshot.json"
+    snapshot = spec_snapshot.emit_snapshot(spec_path)
+    spec_snapshot.persist_snapshot(snapshot_path, snapshot)
+
+    # Watermark in state file (caspar iter 4 W2): canon-of-the-present
+    # record that snapshot WAS emitted. Pre-merge S1-26 compares against
+    # this to detect bypass-by-deletion.
+    state_file_path = root / ".claude" / "session-state.json"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state_data: dict[str, Any] = {}
+    if state_file_path.exists():
+        try:
+            state_data = json.loads(state_file_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # Corrupt state file: leave it alone, the recovery protocol
+            # (CLAUDE.local.md §2.1) handles regeneration. Do not silently
+            # overwrite with a partial dict.
+            sys.stderr.write(
+                f"[sbtdd plan-approval] state file corrupt at "
+                f"{state_file_path}; spec_snapshot_emitted_at NOT "
+                f"persisted. Resolve corruption first.\n"
+            )
+            return
+    state_data["spec_snapshot_emitted_at"] = timestamp
+    # Atomic rename via tmp file with PID + thread-id (S1-20 W8 pattern).
+    state_file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = state_file_path.parent / (
+        state_file_path.name + f".tmp.{os.getpid()}.{threading.get_ident()}"
+    )
+    tmp_path.write_text(json.dumps(state_data, indent=2), encoding="utf-8")
+    tmp_path.replace(state_file_path)
+
+
 def _phase4_pre_merge_audit_dir(root: Path) -> Path:
     """Return ``.claude/magi-cross-check/`` audit directory under ``root``.
 

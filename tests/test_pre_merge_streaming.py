@@ -210,3 +210,117 @@ def test_loop2_finding_dispatch_passes_phase_specific_stream_prefix(tmp_path, mo
         f"Loop 2 finding-remediation dispatch must include 'fix-finding-' tag "
         f"in stream_prefix; got {sp!r}"
     )
+
+
+# v1.0.0 S1-26 + S1-27: spec-snapshot drift check + plan-approval emit hook.
+def test_h2_3_pre_merge_raises_on_spec_snapshot_drift(tmp_path, monkeypatch):
+    """H2-3: _check_spec_snapshot_drift raises MAGIGateError when scenarios changed."""
+    import pytest
+    from errors import MAGIGateError
+
+    # Persisted snapshot at plan-approval time.
+    persisted = tmp_path / "spec-snapshot.json"
+    persisted.write_text('{"S1: parser handles empty input": "old-hash"}', encoding="utf-8")
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder; emit_snapshot is monkeypatched", encoding="utf-8")
+    state = tmp_path / "session-state.json"  # absent — file-based detection
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1: parser handles empty input": "new-hash"},
+    )
+
+    with pytest.raises(MAGIGateError) as excinfo:
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=persisted,
+            state_file_path=state,
+        )
+    msg = str(excinfo.value)
+    assert "S1: parser handles empty input" in msg
+    assert "re-approve" in msg.lower() or "re-run" in msg.lower()
+
+
+def test_h2_3_pre_merge_passes_when_no_drift(tmp_path, monkeypatch):
+    """H2-3: no drift -> _check_spec_snapshot_drift returns None silently."""
+    persisted = tmp_path / "spec-snapshot.json"
+    persisted.write_text('{"S1": "matching"}', encoding="utf-8")
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    state = tmp_path / "session-state.json"  # absent
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1": "matching"},
+    )
+
+    assert (
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=persisted,
+            state_file_path=state,
+        )
+        is None
+    )
+
+
+def test_h2_3_missing_snapshot_warns_but_does_not_block(tmp_path, monkeypatch, capsys):
+    """H2-3: missing snapshot file + missing watermark -> stderr breadcrumb, no error.
+
+    Backward compat: pre-v1.0.0 plan-approval flows did not emit a snapshot
+    AND did not write the watermark. Pre-merge logs a warning but does not
+    block.
+    """
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    snapshot_path = tmp_path / "spec-snapshot.json"  # does not exist
+    state = tmp_path / "session-state.json"  # also does not exist
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1": "anything"},
+    )
+
+    assert (
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=snapshot_path,
+            state_file_path=state,
+        )
+        is None
+    )
+    captured = capsys.readouterr()
+    assert "spec-snapshot.json" in captured.err
+
+
+def test_h2_5_missing_snapshot_with_watermark_raises(tmp_path, monkeypatch):
+    """H2-5 (caspar iter 4 W2): watermark in state file + missing snapshot
+    file = bypass-by-deletion detected, MAGIGateError raised.
+    """
+    import json as _json
+    import pytest
+    from errors import MAGIGateError
+
+    spec = tmp_path / "spec-behavior.md"
+    spec.write_text("# placeholder", encoding="utf-8")
+    snapshot_path = tmp_path / "spec-snapshot.json"  # does NOT exist
+    state = tmp_path / "session-state.json"
+    state.write_text(
+        _json.dumps({"spec_snapshot_emitted_at": "2026-05-01T12:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "spec_snapshot.emit_snapshot",
+        lambda _p: {"S1": "anything"},
+    )
+
+    with pytest.raises(MAGIGateError) as excinfo:
+        pre_merge_cmd._check_spec_snapshot_drift(
+            spec_path=spec,
+            snapshot_path=snapshot_path,
+            state_file_path=state,
+        )
+    msg = str(excinfo.value)
+    assert "deleted" in msg.lower() or "re-emit" in msg.lower()
+    assert "2026-05-01T12:00:00Z" in msg  # watermark surfaced as evidence
