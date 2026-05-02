@@ -487,9 +487,14 @@ def invoke_magi(
                     # primary diagnostic.
                     pass
                 else:
+                    # HF1 (sec.2.5): the canonical breadcrumb prefix
+                    # "[sbtdd magi] synthesizer failed; manual synthesis recovery applied"
+                    # MUST appear on a single source line so docs / spec
+                    # / impl can be cross-checked via whitespace-normalised
+                    # substring search (tests/test_changelog.py).
+                    _msg = "[sbtdd magi] synthesizer failed; manual synthesis recovery applied"
                     sys.stderr.write(
-                        f"[sbtdd magi] synthesizer failed; manual synthesis "
-                        f"recovery applied ({len(rescued.findings)} findings)\n"
+                        f"{_msg} ({len(rescued.findings)} findings)\n"
                     )
                     sys.stderr.flush()
                     return rescued
