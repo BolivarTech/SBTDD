@@ -866,8 +866,26 @@ valve still applies: after `magi_max_iterations`, escalate.
   `magi_cross_check: true` in `plugin.local.md`. Each v1.x release
   that exercises Feature G updates a running tally of (a)/(b)/(c)
   evidence in CHANGELOG so the eventual flip is auditable.
+- **v1.0.1+ telemetry aggregation backlog** (balthasar Loop 2 iter 3
+  WARNING fix): the (a)/(b)/(c) criteria above are MEASURED by hand
+  in v1.0.0 (each release reads `.claude/magi-cross-check/*.json`
+  audits manually and tallies in CHANGELOG). To reduce operator
+  friction at the eventual default-flip decision, **v1.0.1+ ships
+  `scripts/cross_check_telemetry.py`** which aggregates audit
+  artifacts across recent cycles (configurable window via
+  `--since-tag <vX.Y.Z>` flag) into a single summary report:
+  total cross-check invocations, breakdown of KEEP/DOWNGRADE/REJECT
+  decisions, dispatch-failure / json-parse-failure counts, and a
+  qualitative tally template the operator fills in for criterion
+  (c). The default-flip cycle then reads this report instead of
+  walking individual JSON files. **Out of scope for v1.0.0**:
+  manual tally is acceptable for the first one or two v1.x cycles
+  while empirical signal accumulates; tooling lands when manual
+  review burden becomes the bottleneck.
 - **Deferred (rolled to v1.x)** — INV-31 default flip dedicated cycle;
-  Group B options 1, 3, 4, 6, 7; GitHub Actions CI workflow.
+  Group B options 1, 3, 4, 6, 7; GitHub Actions CI workflow;
+  cross-check telemetry aggregation script (v1.0.1+ per balthasar
+  Loop 2 iter 3 WARNING).
 
 ### 8.3 README + SKILL.md + CLAUDE.md
 
