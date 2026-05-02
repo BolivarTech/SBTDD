@@ -223,23 +223,26 @@ def test_zombie_thread_count_persists_across_emitter_lifecycles():
     assert HE._zombie_thread_count == initial
 
 
-def test_zombie_thread_threshold_raises_runtime_error_after_max(monkeypatch):
-    """C3 fold-in: hard zombie threshold (5 default) raises RuntimeError.
+def test_zombie_thread_threshold_never_raises_per_inv_32(monkeypatch):
+    """INV-32: heartbeat thread NEVER blocks/kills auto run.
 
-    We simulate the zombie-detection path by setting the class counter
-    just below threshold then forcing one __exit__ that registers a zombie.
-    The actual zombie detection (thread.is_alive() after join timeout)
-    requires real subprocess work; we mock the thread-join behavior.
+    Even at zombie threshold, ``__exit__`` must NOT raise -- the class-level
+    counter + queue sentinel (+1000) + fd=2 breadcrumb already give operator
+    visibility. If escalation is needed, it should happen post-dispatch from
+    main thread, NOT from ``__exit__``.
+
+    Pre-fix: __exit__ raised ``RuntimeError`` at threshold; this swallowed
+    any pending real ``exc`` from inside the ``with`` block AND violated
+    INV-32. Post-fix: __exit__ returns None, persists the +1000 sentinel
+    via the failures queue, emits the FATAL breadcrumb, but never raises.
     """
     from heartbeat import HeartbeatEmitter as HE
 
-    # Save original counter.
     original = HE._zombie_thread_count
     try:
-        # Set to threshold - 1 so that one more zombie pushes over.
+        # Force the counter to (and beyond) the threshold so the C3 path fires.
         HE._zombie_thread_count = HE._max_zombie_threads - 1
         emitter = HeartbeatEmitter(label="z", interval_seconds=10.0)
-        # Manually simulate __enter__ path then force a "blocked" thread.
 
         class FakeBlockedThread:
             def is_alive(self) -> bool:
@@ -250,8 +253,44 @@ def test_zombie_thread_threshold_raises_runtime_error_after_max(monkeypatch):
 
         emitter._stop_event = __import__("threading").Event()
         emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
-        with pytest.raises(RuntimeError, match="zombie"):
-            emitter.__exit__(None, None, None)
+        # MUST NOT RAISE per INV-32:
+        result = emitter.__exit__(None, None, None)
+        assert result is None
+        # Counter advanced as expected:
+        assert HE._zombie_thread_count >= HE._max_zombie_threads
+    finally:
+        HE._zombie_thread_count = original
+
+
+def test_zombie_thread_threshold_does_not_swallow_pending_exception(monkeypatch):
+    """INV-32: __exit__ must not raise even when (zombie + pending exc).
+
+    Pre-fix: raising RuntimeError from __exit__ at zombie threshold swallowed
+    any exc the user code raised inside the ``with`` block. Post-fix:
+    __exit__ returns None, the user's exc propagates normally because Python
+    only swallows when __exit__ returns truthy.
+    """
+    from heartbeat import HeartbeatEmitter as HE
+
+    original = HE._zombie_thread_count
+    try:
+        HE._zombie_thread_count = HE._max_zombie_threads - 1
+        emitter = HeartbeatEmitter(label="z", interval_seconds=10.0)
+
+        class FakeBlockedThread:
+            def is_alive(self) -> bool:
+                return True
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        emitter._stop_event = __import__("threading").Event()
+        emitter._thread = FakeBlockedThread()  # type: ignore[assignment]
+        # Simulate calling __exit__ with a pending exception (the user's
+        # work raised inside the with-block). __exit__ must not raise its
+        # own RuntimeError; it returns None so the original exc propagates.
+        result = emitter.__exit__(ValueError, ValueError("user error"), None)
+        assert result is None
     finally:
         HE._zombie_thread_count = original
 
