@@ -8,6 +8,100 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [1.0.0] - DRAFT (in flight, MAGI Checkpoint 2 iter 5 accepted via INV-0 override)
+
+> **Status**: Spec + plan accepted; parallel subagent dispatch pending.
+> This entry is a DRAFT — finalize at ship.
+
+### Added
+
+- **Feature G — MAGI cross-check meta-reviewer** (`pre_merge_cmd._loop2_with_cross_check`).
+  Annotation-only sub-phase between MAGI verdict and INV-29 triage. INV-35.
+  Audit artifact `.claude/magi-cross-check/iter{N}-{timestamp}.json` per iter.
+  Default OFF (`magi_cross_check: false`); operator opt-in via plugin.local.md.
+  Operator-visibility stderr breadcrumb fires once per Loop 2 entry when OFF.
+- **F44.3 retried_agents propagation** to `auto-run.json` audit per MAGI iter.
+- **J2 ResolvedModels preflight** (`models.ResolvedModels` frozen dataclass).
+  Cuts CLAUDE.md reads from ~70-150 per 36-task run to 1. INV-0 cascade global
+  FIRST per maxima precedencia (regression guard for caspar iter 3 CRITICAL).
+- **Feature I `schema_version: int = 1`** field in PluginConfig (default 1 =
+  v0.5.0 backward compat). INV-36. Migration tool skeleton at
+  `scripts/migrate_plugin_local.py` with versioned ladder (no-op v1 → v2).
+- **Feature H Group B option 2 — spec-snapshot diff check**
+  (`scripts/spec_snapshot.py`). Pre-merge gates against silently-edited spec
+  scenarios. State-file watermark `spec_snapshot_emitted_at` closes
+  bypass-by-deletion gap (caspar iter 4 W2).
+- **Feature H Group B option 5 — auto-gen scenario stubs** in
+  `superpowers_dispatch.invoke_writing_plans` prompt extension.
+
+### Changed
+
+- `auto-run.json` schema gains `magi_iter{N}_retried_agents: list[str]`
+  field per MAGI iter (backward-compat: absent = []).
+
+### Production wiring (v0.5.1 fold-in)
+
+- 33 `run_with_timeout` callers in `auto_cmd.py` + `pre_merge_cmd.py` routed
+  through `run_streamed_with_timeout`. Heartbeat fires in production for all
+  long subagent dispatches. AST sweep + textual grep fallback assert zero
+  alias bypasses post-S1-15 (R11).
+
+### Bug fixes (v0.5.1 fold-in)
+
+- **W4** `pre_merge_cmd._wrap_with_heartbeat_if_auto` bare-except narrowed to
+  `(AttributeError, RuntimeError)`; `ValueError` from missing dispatch_label
+  propagates loud per fail-loud contract.
+- **W5** `status_cmd.watch_main` wraps cycle body in try/except so transient
+  errors log + continue rather than killing the watch.
+- **W6** Concurrent writer tests migrated to `monkeypatch.setattr` for
+  `_assert_main_thread` bypass (automatic cleanup on test failure).
+- **W7** Persistence-failure breadcrumb separated from drain-failure
+  breadcrumb (independent dedup flags).
+- **W8** Windows tmp filename PID collision flake fixed via
+  `path.parent / (path.name + ".tmp.{getpid()}.{threading.get_ident()}")`
+  pattern in three writers.
+
+### Process notes
+
+- **Bundle accepted via INV-0 override at MAGI Checkpoint 2 iter 5**
+  (3-0 GO_WITH_CAVEATS, all CONDITIONAL, 0 CRITICAL). 2nd consecutive override
+  in v0.5.0+ era. Iter sequence 5C+16W → 1C+11W → 1C+9W → 1C+14W → 0C+14W.
+  Iter 4→5 fixes resolved every CRITICAL across cycle; remaining 14 WARNINGs
+  are operational/process risk + 2 mechanical impl fixes folded into S1/S2
+  task notes.
+- **G1 (BINDING for v1.1.0+)**: cap=3 is HARD with NO INV-0 path regardless
+  of pattern. v1.1.0 iter 4 = mandatory scope-trim. The v0.5.0 + v1.0.0
+  override precedent is CLOSED — v1.1.0 does not inherit it. Recorded in
+  spec sec.7.1.3.
+- **G2 Loop 2 iter 3 explicit decision point**: orchestrator MUST either
+  invoke option-A scope-trim OR require user authorization with the EXACT
+  phrase "overriding scope-trim default per CHANGELOG [0.5.0] knowing this
+  is the 3rd consecutive override". Friction is intentional.
+- **G3 Loop 2 iter 1 cross-check audit manual diff**: before iter 2 runs,
+  operator manually diffs the iter 1 cross-check audit JSON against the G6
+  schema fields (spec sec.2.1) and records explicit sign-off in cycle's
+  memory handoff or this CHANGELOG. Catches schema regression early.
+- **Pre-dispatch escape-valve commitment (option A scope-trim)**: documented
+  as path of least resistance in spec sec.7.1.1 if Loop 2 doesn't converge
+  in 3 iters. Defers Pillar 2 to v1.0.1; ships v1.0.0 = Pillar 1 + fold-in
+  only.
+- **v1.x default-flip criteria for `magi_cross_check`**: documented in spec
+  sec.8.2; default flips to `true` only after non-self-referential dogfood +
+  measurable filter rate + zero false-negative annotations.
+- **v0.6.0 retrospective item**: cap=3 override pattern. If v1.1.0 also
+  overrides, the rule must be re-ratified or replaced — but G1 closes the
+  INV-0 path so this is a process review, not an operational override.
+
+### Deferred (rolled to v1.x)
+
+- INV-31 default flip dedicated cycle (separate field-data doc).
+- Group B options 1, 3, 4, 6, 7 (opt-in flags only; not core deliverable).
+- GitHub Actions CI workflow.
+- Cross-check telemetry aggregation script (`scripts/cross_check_telemetry.py`)
+  — v1.0.1+ per balthasar Loop 2 iter 3 WARNING.
+- H5-2 spec_lint enforcement at Checkpoint 2 — v1.0.1+ per caspar iter 3
+  WARNING (collect empirical data on H5-1 stub-gen quality first).
+
 ## [0.5.0] - 2026-05-02
 
 ### Added
