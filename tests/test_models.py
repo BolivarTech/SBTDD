@@ -172,9 +172,7 @@ def test_resolved_models_is_frozen():
 
     from models import ResolvedModels
 
-    rm = ResolvedModels(
-        implementer="a", spec_reviewer="b", code_review="c", magi_dispatch="d"
-    )
+    rm = ResolvedModels(implementer="a", spec_reviewer="b", code_review="c", magi_dispatch="d")
     with pytest.raises(FrozenInstanceError):
         rm.implementer = "z"  # type: ignore[misc]
 
