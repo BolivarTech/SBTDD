@@ -521,3 +521,183 @@ def test_w4_normalize_strips_cross_check_annotation_fields():
     assert "cross_check_recommended_severity" not in f
     assert "_dispatch_failure" not in f
     assert "_failure_reason" not in f
+
+
+# ---------------------------------------------------------------------------
+# v1.0.0 O-2 Loop 1 review CRITICAL #1 (C1): Wire Feature G cross-check into
+# the production _loop2 path. Spec sec.2.1 G1-G6 + INV-35 unenforceable
+# without these tests because _loop2_cross_check is unit-tested but never
+# invoked from _loop2 itself.
+# ---------------------------------------------------------------------------
+
+
+def _make_pluginconfig_for_loop2(*, magi_cross_check: bool, root):
+    """Return a duck-typed PluginConfig stub suitable for _loop2.
+
+    _loop2 reads ``magi_threshold``, ``magi_max_iterations``, ``plan_path``,
+    and (post-C1 wiring) ``magi_cross_check``.
+    """
+    cfg = MagicMock()
+    cfg.magi_threshold = "GO_WITH_CAVEATS"
+    cfg.magi_max_iterations = 3
+    cfg.plan_path = "planning/claude-plan-tdd.md"
+    cfg.magi_cross_check = magi_cross_check
+    return cfg
+
+
+def _make_magi_verdict_with_findings(verdict_str, findings_tuple):
+    """Return a real MAGIVerdict so dataclasses.replace works in the wiring."""
+    from magi_dispatch import MAGIVerdict
+
+    return MAGIVerdict(
+        verdict=verdict_str,
+        degraded=False,
+        conditions=(),
+        findings=findings_tuple,
+        raw_output=f'{{"verdict": "{verdict_str}"}}',
+    )
+
+
+def _make_magi_verdict_with_findings_degraded(verdict_str, findings_tuple, degraded):
+    """Variant for tests that need a specific degraded flag."""
+    from magi_dispatch import MAGIVerdict
+
+    return MAGIVerdict(
+        verdict=verdict_str,
+        degraded=degraded,
+        conditions=(),
+        findings=findings_tuple,
+        raw_output=f'{{"verdict": "{verdict_str}"}}',
+    )
+
+
+def test_c1_loop2_invokes_cross_check_when_magi_cross_check_true(tmp_path, monkeypatch):
+    """C1: _loop2 routes verdict.findings through _loop2_cross_check when enabled.
+
+    The wiring must call _loop2_cross_check exactly once per MAGI iter when
+    magi_cross_check=True, with the iter's verdict + findings + the
+    .claude/magi-cross-check/ audit_dir.
+    """
+    import magi_dispatch
+    import pre_merge_cmd
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text("# plan\n", encoding="utf-8")
+
+    pre_merge_cmd._reset_cross_check_breadcrumb_for_tests()
+
+    findings_t = (
+        {"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "caspar"},
+    )
+    fake_verdict = _make_magi_verdict_with_findings("GO", findings_t)
+
+    monkeypatch.setattr(
+        magi_dispatch, "invoke_magi", lambda **_kw: fake_verdict
+    )
+
+    spy = {"calls": 0, "kwargs": None}
+
+    def fake_cross_check(*, diff, verdict, findings, iter_n, config, audit_dir):
+        spy["calls"] += 1
+        spy["kwargs"] = {
+            "diff": diff,
+            "verdict": verdict,
+            "findings": findings,
+            "iter_n": iter_n,
+            "config": config,
+            "audit_dir": audit_dir,
+        }
+        # Annotate findings to simulate KEEP.
+        return [{**f, "cross_check_decision": "KEEP"} for f in findings]
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2_cross_check", fake_cross_check)
+    # Skip the F44.3 retried_agents persistence (no auto-run.json present).
+    monkeypatch.setattr(
+        pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None
+    )
+
+    cfg = _make_pluginconfig_for_loop2(magi_cross_check=True, root=tmp_path)
+    result = pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
+
+    assert spy["calls"] == 1
+    assert spy["kwargs"]["verdict"] == "GO"
+    # findings list contains the same dict shape as MAGIVerdict.findings
+    assert spy["kwargs"]["findings"] == [dict(findings_t[0])]
+    assert spy["kwargs"]["iter_n"] == 1
+    assert spy["kwargs"]["config"] is cfg
+    assert spy["kwargs"]["audit_dir"] == tmp_path / ".claude" / "magi-cross-check"
+    # Verdict object is reconstructed with annotated findings via
+    # dataclasses.replace; downstream consumers (e.g. write_magi_findings_file)
+    # see annotated_findings.
+    assert result.findings[0]["cross_check_decision"] == "KEEP"
+
+
+def test_c1_loop2_skips_cross_check_when_magi_cross_check_false(tmp_path, monkeypatch, capsys):
+    """C1: _loop2 does NOT invoke _loop2_cross_check when opted-out."""
+    import magi_dispatch
+    import pre_merge_cmd
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text("# plan\n", encoding="utf-8")
+
+    pre_merge_cmd._reset_cross_check_breadcrumb_for_tests()
+
+    findings_t = ({"severity": "WARNING", "title": "x", "detail": "y", "agent": "balthasar"},)
+    fake_verdict = _make_magi_verdict_with_findings("GO", findings_t)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", lambda **_kw: fake_verdict)
+
+    spy = {"calls": 0}
+
+    def fake_cross_check(**_kw):
+        spy["calls"] += 1
+        raise AssertionError("cross-check must not run when magi_cross_check=False")
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2_cross_check", fake_cross_check)
+    monkeypatch.setattr(
+        pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None
+    )
+
+    cfg = _make_pluginconfig_for_loop2(magi_cross_check=False, root=tmp_path)
+    result = pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
+
+    assert spy["calls"] == 0
+    # OFF breadcrumb fires (G4 stderr breadcrumb).
+    captured = capsys.readouterr()
+    assert "cross-check is OFF" in captured.err
+    # Findings flow through unchanged (no annotation fields attached).
+    assert "cross_check_decision" not in result.findings[0]
+
+
+def test_c1_loop2_emits_off_breadcrumb_once_per_invocation(tmp_path, monkeypatch, capsys):
+    """C1: G4 breadcrumb is dedup'd even when _loop2 runs multiple iters."""
+    import magi_dispatch
+    import pre_merge_cmd
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text("# plan\n", encoding="utf-8")
+
+    pre_merge_cmd._reset_cross_check_breadcrumb_for_tests()
+
+    # Force two iters: degraded -> non-degraded.
+    sequence = iter(
+        [
+            _make_magi_verdict_with_findings_degraded("GO", (), True),
+            _make_magi_verdict_with_findings("GO", ()),
+        ]
+    )
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", lambda **_kw: next(sequence))
+    monkeypatch.setattr(
+        pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None
+    )
+
+    cfg = _make_pluginconfig_for_loop2(magi_cross_check=False, root=tmp_path)
+    pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
+
+    captured = capsys.readouterr()
+    # Single occurrence (count of "cross-check is OFF" lines == 1).
+    assert captured.err.count("cross-check is OFF") == 1
