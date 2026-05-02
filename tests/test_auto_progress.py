@@ -1211,3 +1211,38 @@ def test_with_file_lock_uses_no_private_api():
         "_with_file_lock must not depend on threading.RLock private API "
         "(_is_owned). Use a public threading.local depth counter instead."
     )
+
+
+def test_module_state_is_clean_at_test_entry():
+    """Loop 2 iter 3 W2: autouse fixture resets module state per test.
+
+    Pre-fix (Loop 2 iter 2): tests in this file directly mutated module-
+    level state -- ``_heartbeat_failures_q`` queue items,
+    ``_drain_state.last_drain_at`` counter, ``_drain_decode_error_emitted``
+    flag, and ``_assert_main_thread`` attribute swap -- without proper
+    teardown. If a test failed mid-run OR if test ordering changed, the
+    leaked state could contaminate subsequent tests with hard-to-diagnose
+    flakes.
+
+    Post-fix: ``conftest.py`` (or a module-scope autouse fixture) resets
+    these knobs before AND after each test in this file. This test runs
+    immediately after the fixture's setup phase and verifies the queue
+    is empty + the drain decode flag is reset, demonstrating the fixture
+    fired cleanly.
+
+    Pollute the queue here, then rely on the autouse fixture's teardown
+    to drain it before the next test starts. If the fixture breaks, the
+    next test in collection order (alphabetically nearby) will observe
+    the pollution and fail.
+    """
+    # Verify clean state at entry: fixture must have drained any prior leak.
+    assert auto_cmd._heartbeat_failures_q.empty(), (
+        "Loop 2 iter 3 W2 regression: heartbeat queue is not empty at test "
+        "entry. The autouse module-state fixture failed to drain."
+    )
+    assert not auto_cmd._drain_decode_error_emitted, (
+        "Loop 2 iter 3 W2 regression: _drain_decode_error_emitted is True "
+        "at test entry. The autouse fixture failed to reset the flag."
+    )
+    # Pollute -- the fixture's teardown must drain.
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 999))
