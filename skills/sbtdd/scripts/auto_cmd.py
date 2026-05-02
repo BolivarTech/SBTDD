@@ -42,6 +42,7 @@ is "in resume; auto never needs it".
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import queue
@@ -453,6 +454,22 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
                 depth_dict.pop(key, None)
             else:
                 depth_dict[key] = new_depth
+
+
+# Loop 2 iter 3 caspar R1 fold-in: cheap insurance against accidental
+# re-introduction of the threading.RLock private-API call. Inspect the
+# helper's source at module-import time and assert the forbidden token
+# is absent. Catches copy-paste regressions from older Loop 2 iter 2
+# docs/tests before the unit-test suite even runs. The token is split
+# at concatenation so this very line cannot trigger a self-match.
+_FORBIDDEN_PRIVATE_API_TOKEN = "_is" + "_owned"
+_with_file_lock_source = inspect.getsource(_with_file_lock)
+assert _FORBIDDEN_PRIVATE_API_TOKEN not in _with_file_lock_source, (
+    "_with_file_lock must not depend on threading.RLock private API "
+    "(Loop 2 iter 3 W1+W4+W6 + caspar R1)."
+)
+del _with_file_lock_source
+del _FORBIDDEN_PRIVATE_API_TOKEN
 
 
 _PROGRESS_DRAIN_INTERVAL_SECONDS: int = 30
