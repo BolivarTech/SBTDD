@@ -95,6 +95,47 @@ has the SAME LENGTH as ``original_findings``; INV-29 is the only filter.
 - **INV-35** (Feature G): Loop 2 MAGI findings DEBEN pasar por cross-check via `/requesting-code-review` antes de routear via INV-29 gate, salvo opt-out via `magi_cross_check: false`.
 - **INV-36** (Feature I): PluginConfig has `schema_version: int = 1` field defaulting to 1 cuando absent (backward compat con v0.5.0 files); migrations tracked in `scripts/migrate_plugin_local.py` ladder.
 
+### Cross-subagent contracts (S1 ↔ S2 dependency contract)
+
+The four shared shapes below are pinned in spec sec.5 + this pre-flight
+section. Both subagents implement against the contract; neither subagent
+needs to wait for the other at code-write time. Runtime convergence
+verified at `make verify` post-merge (when both subagents' commits are
+on the integration branch).
+
+Per WARNING caspar (Loop 2 iter 1): even though the pinned shapes are
+identical between subagents, S1-8 (`auto_cmd._resolve_all_models_once`)
+imports `models.ResolvedModels` which exists ONLY after S2-1 lands. Two
+mitigations available, neither requires re-ordering the parallel
+dispatch:
+
+- **Mitigation A (preferred — pattern matches v0.5.0 ProgressContext)**:
+  `auto_cmd._resolve_all_models_once` uses a deferred import (inside the
+  function body) instead of a module-level import. Tests for S1-8 (J2-1)
+  monkeypatch the helper or the constructor so import-time is irrelevant.
+  Cross-subagent integration is verified at `make verify` only — when
+  both subagents' commits coexist on the integration branch and the real
+  import succeeds. Same pattern that worked for `ProgressContext` in
+  v0.5.0.
+
+- **Mitigation B (fallback)**: orchestrator dispatches Subagent #2 task
+  S2-1 first, awaits DONE, then dispatches Subagent #1 in parallel with
+  the rest of Subagent #2 tasks. Used only if Mitigation A discovers
+  unexpected runtime coupling.
+
+The same pattern applies to:
+- `config.PluginConfig.magi_cross_check` (S2-2) consumed by S1-1 (and
+  the entire Feature G test suite).
+- `config.PluginConfig.schema_version` (S2-3) — no S1 consumer in
+  v1.0.0.
+- `spec_snapshot.emit_snapshot` / `compare` / `persist_snapshot` /
+  `load_snapshot` (S2-5 + S2-6) consumed by S1-26 + S1-27.
+
+For each consumer site in Subagent #1, prefer deferred imports inside
+the consuming function body OR test-time `monkeypatch.setattr` of the
+consumer surface so Subagent #1 tests pass standalone before S2 commits
+land.
+
 ### Forbidden cross-subagent surfaces (recap)
 
 | Subagent | OWNS | FORBIDDEN |
@@ -1057,17 +1098,23 @@ def test_j2_resolve_all_models_once_caches_lookups(tmp_path, monkeypatch):
 In `auto_cmd.py`:
 
 ```python
-from models import ResolvedModels
-
-
-def _resolve_all_models_once(config: Any) -> ResolvedModels:
+def _resolve_all_models_once(config: Any) -> Any:
     """Preflight: resolve per-skill model IDs ONCE per auto run (J2).
 
     Per spec sec.2.3: replaces ~70-150 CLAUDE.md disk reads per 36-task
     run with a single read at task-loop entry. INV-0 cascade applies:
     CLAUDE.md model pin (per `models.INV_0_PINNED_MODEL_RE`) overrides
     plugin.local.md fields silently.
+
+    Note: ``ResolvedModels`` is defined in ``models.py`` by Subagent #2
+    task S2-1. Cross-subagent Mitigation A (per pre-flight Cross-subagent
+    contracts section): deferred import inside this function body avoids
+    module-load-time coupling, so Subagent #1 tests can monkeypatch this
+    function and pass standalone before S2-1 lands. Runtime convergence
+    verified at ``make verify`` post-merge.
     """
+    import models  # deferred — S2-1 dependency
+    from models import ResolvedModels  # noqa: PLC0415 - deferred per pre-flight Mitigation A
     # Read CLAUDE.md once (or use existing helper if available)
     claude_md_path = Path.home() / ".claude" / "CLAUDE.md"
     try:
