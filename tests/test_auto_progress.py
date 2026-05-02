@@ -934,3 +934,88 @@ def test_update_progress_with_nonempty_queue_does_not_deadlock(tmp_path):
         # Any error is acceptable -- the test guards specifically against
         # deadlock. But surface unexpected errors so they are not silenced.
         raise error_holder[0]
+
+
+def test_with_file_lock_uses_threading_rlock_not_custom_bookkeeping(tmp_path):
+    """Loop 2 W1+W3+W6+W9: ``_with_file_lock`` uses ``threading.RLock``.
+
+    Pre-fix: ``_with_file_lock`` used a custom dict-based reentrancy
+    counter (``_lock_holders: dict[(path, thread_id), int]``) with
+    multiple subtle bugs:
+
+    - W1: race between ``existing_depth`` check and ``_lock_holders[key] = 1``
+      assignment when the OS lock is acquired (two threads could both
+      see depth=0 and both try to acquire the OS lock).
+    - W3: counter leak on early return paths (when ``open(lock_path)`` or
+      ``msvcrt.locking`` fails the holder entry was set then cleaned up,
+      but if cleanup itself failed the counter would persist).
+    - W6: brittleness vs. the stdlib primitive that solves the same
+      problem in 5 lines.
+    - W9: key generation via ``str(path.resolve() if path.exists() else
+      path)`` is fragile -- the same logical path can yield different
+      keys depending on filesystem state mid-call.
+
+    Post-fix: ``threading.RLock`` keyed by path string handles reentrancy
+    natively (per-thread depth tracked by the RLock itself), so the
+    custom bookkeeping is gone. This test asserts the public symbol
+    ``_get_file_lock`` returns a ``threading.RLock`` instance for the
+    given path and that the same path yields the same lock object
+    (lock identity is stable, otherwise concurrent writers wouldn't
+    serialize).
+    """
+    p = tmp_path / "auto-run.json"
+    lock1 = auto_cmd._get_file_lock(p)
+    lock2 = auto_cmd._get_file_lock(p)
+    # Same path -> same lock instance (otherwise serialization is broken).
+    assert lock1 is lock2, "two _get_file_lock calls on same path must return same RLock"
+    # Must be an RLock (the stdlib type is _thread.RLock; the public
+    # constructor returns instances of that type).
+    rlock_type = type(threading.RLock())
+    assert isinstance(lock1, rlock_type), (
+        f"_get_file_lock must return threading.RLock, got {type(lock1).__name__}"
+    )
+
+
+def test_concurrent_writers_with_threading_rlock_serialize(tmp_path):
+    """Loop 2 W1+W6: 20 concurrent writers serialize via stdlib RLock.
+
+    Strengthened version of
+    ``test_concurrent_update_progress_writers_serialize_via_file_lock``
+    (which used 10 threads). Bumps to 20 to exercise the lock harder
+    and asserts the final on-disk JSON is well-formed (no torn document)
+    AND that all writers reached completion (no thread hangs because
+    of bookkeeping leak).
+    """
+    auto_run = tmp_path / "auto-run.json"
+    auto_run.write_text("{}", encoding="utf-8")
+
+    errors: list[BaseException] = []
+
+    def writer(label: str) -> None:
+        try:
+            auto_cmd._update_progress(
+                auto_run,
+                phase=2,
+                task_index=1,
+                task_total=20,
+                sub_phase=label,
+            )
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer, args=(f"label-{i}",)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15.0)
+        assert not t.is_alive(), (
+            f"writer thread {t.name} hung past 15s -- bookkeeping leak suspected"
+        )
+
+    if errors:
+        raise errors[0]
+
+    data = json.loads(auto_run.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    assert "progress" in data
+    assert data["progress"]["sub_phase"].startswith("label-")
