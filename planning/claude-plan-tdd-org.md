@@ -2492,7 +2492,22 @@ unwired ``run_with_timeout``.
 
 - [ ] **Step 1: Append sweep test to test_dispatch_heartbeat_wiring.py**
 
+**Tripwire ordering note (caspar Loop 2 iter 4 W):** S1-28 sweep tests
+are mechanical AST walks that fail as long as ANY of the 33
+``run_with_timeout`` callers in S1-10..S1-15 remain unwired. During the
+mid-cycle window between S1-1 and S1-15 close, ALL 33 callers still
+exist; if the sweep ran on every ``make verify`` it would mask local
+green signals across S1-1..S1-14. Mark BOTH sweep tests with
+``@pytest.mark.slow`` so the default ``make verify`` skips them; the
+pre-merge orchestrator runs them explicitly via ``pytest -m slow`` AFTER
+S1-15 closes. Subagent #1 honors the macro phase ordering pinned in
+pre-flight: S1-15 is the last per-cluster site migration, so the sweep
+flips green only after S1-15 commit lands. This avoids both an
+``SBTDD_S1_15_COMPLETE=true`` env-var convention (operator footgun) and
+spurious red signals during S1-10..S1-14 development.
+
 ```python
+@pytest.mark.slow
 def test_w1_sweep_no_remaining_run_with_timeout_in_production():
     """W1 sweep (CRITICAL #5): ALL 33 callers must route through run_streamed_with_timeout.
 
@@ -2501,6 +2516,13 @@ def test_w1_sweep_no_remaining_run_with_timeout_in_production():
     itself in subprocess_utils.py is excluded (not in the scanned set).
     Test files excluded by virtue of not being in the production path
     list. Failure message lists file:line of unwired sites for triage.
+
+    Per caspar Loop 2 iter 4 W: marked ``@pytest.mark.slow`` because it
+    is a tripwire that fails until S1-15 closes (last per-cluster
+    migration). Default ``make verify`` skips it via ``pytest -m "not
+    slow"`` in the runtime budget escape valve; the pre-merge
+    orchestrator runs ``pytest -m slow`` explicitly post-S1-15 to flip
+    the sweep to green.
     """
     import ast
     from pathlib import Path
@@ -2531,6 +2553,7 @@ def test_w1_sweep_no_remaining_run_with_timeout_in_production():
     )
 
 
+@pytest.mark.slow
 def test_w1_run_streamed_with_timeout_callers_have_dispatch_label():
     """W1 sweep extension (balthasar Loop 2 iter 2 WARNING):
     every `run_streamed_with_timeout` callsite in production code MUST
@@ -2544,6 +2567,10 @@ def test_w1_run_streamed_with_timeout_callers_have_dispatch_label():
     walks every `run_streamed_with_timeout` Call node and verifies
     `dispatch_label` is present and falls into the documented label
     space.
+
+    Per caspar Loop 2 iter 4 W: marked ``@pytest.mark.slow`` for the
+    same tripwire-ordering reason as the sister sweep test above —
+    flips green only post-S1-15.
     """
     import ast
     from pathlib import Path
@@ -2633,17 +2660,23 @@ def test_w1_run_streamed_with_timeout_callers_have_dispatch_label():
     )
 ```
 
-- [ ] **Step 2: Run + verify pass**
+- [ ] **Step 2: Run + verify pass (post-S1-15 only — sweep is `@pytest.mark.slow`)**
 
-Pre-S1-10..S1-15: this test FAILS by listing all 33 unwired sites.
-Post-S1-10..S1-15: the test PASSES because every callsite has been
-migrated. The test acts as a coverage backstop for the per-cluster
-tests, catching any cluster missed by the manual partition in
-S1-10..S1-15.
+Per caspar iter 4 W fix: the sweep tests are marked
+``@pytest.mark.slow`` so default ``make verify`` (which uses ``pytest
+-m "not slow"`` per CI escape valve) skips them. They flip green only
+after S1-15 closes. To exercise the sweep explicitly post-S1-15:
 
 ```bash
-pytest tests/test_dispatch_heartbeat_wiring.py::test_w1_sweep_no_remaining_run_with_timeout_in_production -v
+# After S1-15 lands, run the sweep tests explicitly:
+pytest -m slow tests/test_dispatch_heartbeat_wiring.py::test_w1_sweep_no_remaining_run_with_timeout_in_production -v
+pytest -m slow tests/test_dispatch_heartbeat_wiring.py::test_w1_run_streamed_with_timeout_callers_have_dispatch_label -v
 ```
+
+Pre-S1-15 they would list all unwired sites (deliberate failing
+tripwire); post-S1-15 they pass because every callsite has been
+migrated. The pre-merge orchestrator runs ``pytest -m slow`` once at
+gate entry to flip the tripwire to green.
 
 - [ ] **Step 3: Commit**
 
