@@ -816,6 +816,31 @@ valve still applies: after `magi_max_iterations`, escalate.
   override needed if MAGI Checkpoint 2 converges in 3 iters per process
   commitment). True parallel 2-subagent dispatch pattern continued from
   v0.4.0 + v0.5.0.
+- **v1.x default-flip criteria for `magi_cross_check`** (balthasar Loop 2
+  iter 2 WARNING): v1.0.0 ships `magi_cross_check: false` as the
+  default (opt-in initially, per balthasar Loop 2 iter 1 recursive
+  dogfood circular-risk concern). The default flips to `true` in a
+  future v1.x release ONLY when ALL of the following hold:
+  - **(a) Non-self-referential dogfood**: cross-check has been
+    exercised in at least 2 ship cycles where Feature G code itself
+    is NOT under review (i.e., cycles whose diffs touch surfaces
+    other than `pre_merge_cmd._loop2_cross_check` and friends), so
+    the meta-review is genuinely reviewing third-party code rather
+    than itself.
+  - **(b) Measurable false-positive filter rate**: cross-check audit
+    artifacts (`.claude/magi-cross-check/iter*-*.json`) across those
+    cycles show a strictly positive count of `DOWNGRADE` or `REJECT`
+    decisions that operator review at INV-29 ratified. Zero useful
+    filtering = no flip.
+  - **(c) Zero false-negative annotations**: zero G2 (KEEP)
+    decisions are observed to have been incorrectly downgraded by a
+    later operator pass — i.e., the meta-reviewer never "rubber
+    stamps" a CRITICAL that operator review later finds was indeed
+    a false positive that should have been REJECT/DOWNGRADE.
+  Until those criteria are met, operator opts in per project via
+  `magi_cross_check: true` in `plugin.local.md`. Each v1.x release
+  that exercises Feature G updates a running tally of (a)/(b)/(c)
+  evidence in CHANGELOG so the eventual flip is auditable.
 - **Deferred (rolled to v1.x)** — INV-31 default flip dedicated cycle;
   Group B options 1, 3, 4, 6, 7; GitHub Actions CI workflow.
 
