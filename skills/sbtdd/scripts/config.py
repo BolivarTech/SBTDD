@@ -224,21 +224,21 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
     if timeout < 600:
         raise ValidationError(
             f"INV-34 clause 4: auto_per_stream_timeout_seconds must be >= 600s "
-            f"(caspar opus runs observed empirically up to 10min); got {timeout}"
+            f"(caspar opus runs observed empirically up to 10min); got {timeout}s"
         )
     # Clause 2 (interval ceiling) -- single-field bound, prevents loss
     # of operator awareness on intervals exceeding 1 minute.
     if interval > 60:
         raise ValidationError(
             f"INV-34 clause 2: auto_heartbeat_interval_seconds must be <= 60s "
-            f"to keep operator awareness within 1-minute granularity; got {interval}"
+            f"to keep operator awareness within 1-minute granularity; got {interval}s"
         )
     # Clause 3 (interval floor) -- single-field bound, prevents stderr
     # spam at sub-5s cadences without observable value.
     if interval < 5:
         raise ValidationError(
             f"INV-34 clause 3: auto_heartbeat_interval_seconds must be >= 5s "
-            f"to avoid stderr spam without value; got {interval}"
+            f"to avoid stderr spam without value; got {interval}s"
         )
     # Clause 1 (ratio multiplier) -- two-field invariant, defense-in-depth
     # against future weakening of clauses 2 + 4 that would make clause 1
@@ -247,7 +247,7 @@ def load_plugin_local(path: Path | str) -> PluginConfig:
         raise ValidationError(
             f"INV-34 clause 1: auto_per_stream_timeout_seconds ({timeout}) "
             f"must be >= 5 * auto_heartbeat_interval_seconds ({interval}) "
-            f"= {5 * interval}; got {timeout}"
+            f"= {5 * interval}; got {timeout}s"
         )
     # W11 (sec.11.1) + Loop 2 W12 hardening: reject any allowlist label
     # that would defeat the timeout. The allowlist is meant for narrow

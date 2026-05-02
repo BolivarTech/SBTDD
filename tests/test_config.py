@@ -737,9 +737,7 @@ worktree_policy: optional
 def test_i_hk2_inv34_clause_4_message_appends_unit_suffix(tmp_path):
     """I-Hk2 (clause 4 timeout floor): ValidationError message includes 's' suffix."""
     base = _inv34_base() + (
-        "auto_per_stream_timeout_seconds: 50\n"
-        "auto_heartbeat_interval_seconds: 5\n"
-        "---\n"
+        "auto_per_stream_timeout_seconds: 50\nauto_heartbeat_interval_seconds: 5\n---\n"
     )
     config_path = tmp_path / "p.md"
     config_path.write_text(base, encoding="utf-8")
