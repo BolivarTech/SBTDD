@@ -208,6 +208,20 @@ guarantees:
 > invariant: `len(annotated_findings) == len(original_findings)`
 > always.
 
+**Cross-check annotation carry-forward (caspar Loop 2 iter 2 WARNING):**
+when re-invoking MAGI for iter N+1 after iter N findings were partly
+rejected by `/receiving-code-review` (INV-29), the orchestrator MUST
+include the previous iter's `cross_check_decision` +
+`cross_check_rationale` + `cross_check_recommended_severity` fields in
+the "Prior triage context" block of the next MAGI payload (per the
+v0.5.0 magi-gate carry-forward template). Rationale: this avoids
+cross-check re-running its meta-review on findings the operator already
+triaged, AND surfaces the prior reviewer's KEEP/DOWNGRADE/REJECT
+recommendation so MAGI agents can adjust their next-iter findings rather
+than re-emit the same annotated finding. The carry-forward block is
+lossless: serialize annotated_findings (full set) so MAGI agents see
+both their previous output and the meta-review on top.
+
 **Acceptance criteria mapping:**
 
 | Criterion | Escenarios | Test fixtures |
@@ -215,6 +229,7 @@ guarantees:
 | **Feature G cross-check** | G1-G6 | `tests/test_pre_merge_cross_check.py` (NEW) |
 | **INV-35 enforcement** | G1+G4 | combined |
 | **Audit artifact schema** | G6 | dedicated |
+| **Annotation carry-forward** | sec.7.4 cross-cutting | shared with MAGI dispatch tests |
 
 ### 2.2 F44.3 — retried_agents propagation to auto-run.json audit
 
@@ -737,6 +752,18 @@ Cap=5 per `auto_magi_max_iterations`. NEW: cross-check (Feature G)
 > exercise cross-check on its own diff. Output empirical signal:
 > cross-check audit artifacts written for each iter under
 > `.claude/magi-cross-check/`.
+
+**Cross-check annotation carry-forward in Loop 2 iter N+1**: per
+sec.2.1, when iter N completes and at least one finding is rejected
+or modified by INV-29 routing, iter N+1's MAGI payload reuses the
+"Prior triage context" block from the v0.5.0 magi-gate carry-forward
+template, but augmented with each finding's `cross_check_decision`,
+`cross_check_rationale`, and `cross_check_recommended_severity`
+fields from iter N's `annotated_findings`. Rationale: gives MAGI
+agents the meta-reviewer's prior call so they can refine (not
+re-emit) the same finding, and avoids redundant cross-check
+meta-review on findings already operator-triaged. INV-11 safety
+valve still applies: after `magi_max_iterations`, escalate.
 
 ### 7.4 Invariantes preserved
 
