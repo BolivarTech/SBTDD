@@ -269,6 +269,49 @@ def _with_file_lock(path: Path, fn: Callable[[], None]) -> None:
             pass
 
 
+_PROGRESS_DRAIN_INTERVAL_SECONDS: int = 30
+
+
+@dataclass
+class _DrainState:
+    """Encapsulates last-drain timestamp to avoid module-level mutable state.
+
+    Per Checkpoint 2 iter 1 caspar fix: a module-level ``_last_drain_at``
+    causes test order dependence. Encapsulating in a dataclass instance
+    allows fixture reset and parallel-test isolation.
+    """
+
+    last_drain_at: float = 0.0
+
+
+_drain_state = _DrainState()
+
+
+def _periodic_drain_if_due(
+    auto_run_path: Path,
+    *,
+    force: bool = False,
+    state: _DrainState = _drain_state,
+) -> None:
+    """Drain heartbeat queue if 30s elapsed since last drain (sec.11.1 W8).
+
+    Args:
+        auto_run_path: Path to ``.claude/auto-run.json``.
+        force: When True, drain unconditionally and reset the timestamp.
+        state: Drain-state container; default uses module singleton.
+    """
+    now = time.monotonic()
+    if not force and (now - state.last_drain_at) < _PROGRESS_DRAIN_INTERVAL_SECONDS:
+        return
+    _drain_heartbeat_queue_and_persist(auto_run_path)
+    state.last_drain_at = now
+
+
+def _reset_drain_state_for_tests() -> None:
+    """Test-only helper: reset drain state to ensure isolation."""
+    _drain_state.last_drain_at = 0.0
+
+
 def _serialize_progress() -> dict[str, Any]:
     """Serialize current ProgressContext to a JSON-friendly dict (ISO 8601 UTC).
 
@@ -1601,6 +1644,9 @@ def _phase2_task_loop(
     )
     try:
         while current.current_task_id is not None:
+            # v0.5.0 S1-13: bound heartbeat counter persistence latency
+            # to <= 30s even when no transition fires (long dispatches).
+            _periodic_drain_if_due(auto_run)
             phase_idx = (
                 _PHASE_ORDER.index(current.current_phase)
                 if current.current_phase in _PHASE_ORDER

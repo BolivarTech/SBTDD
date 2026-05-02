@@ -571,6 +571,53 @@ def test_serialize_progress_context_naive_datetime_normalized_to_utc():
     reset_current_progress()
 
 
+def test_periodic_drain_persists_counter_without_phase_transition(tmp_path):
+    """Spec sec.11.1 W8: bound persistence latency to <= 30s sin transitions."""
+    from auto_cmd import (
+        _heartbeat_failures_q,
+        _periodic_drain_if_due,
+        _reset_drain_state_for_tests,
+    )
+
+    _reset_drain_state_for_tests()
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+    _heartbeat_failures_q.put(5)
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"started_at": "2026-05-01T12:00:00Z"}', encoding="utf-8")
+    _periodic_drain_if_due(auto_run_path, force=True)
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data["heartbeat_failed_writes_total"] == 5
+
+
+def test_periodic_drain_skips_when_not_due(tmp_path):
+    """Without ``force=True`` and without 30s elapsed, helper is a no-op."""
+    from auto_cmd import (
+        _heartbeat_failures_q,
+        _periodic_drain_if_due,
+        _reset_drain_state_for_tests,
+    )
+
+    _reset_drain_state_for_tests()
+    # First call sets last_drain_at; second call within window must skip.
+    _periodic_drain_if_due(tmp_path / "first.json", force=True)
+    while not _heartbeat_failures_q.empty():
+        _heartbeat_failures_q.get_nowait()
+    _heartbeat_failures_q.put(99)
+
+    auto_run_path = tmp_path / "auto-run.json"
+    auto_run_path.write_text('{"untouched": true}', encoding="utf-8")
+    _periodic_drain_if_due(auto_run_path)  # no force; just-set timestamp
+    data = json.loads(auto_run_path.read_text(encoding="utf-8"))
+    assert data == {"untouched": True}
+    # Counter still in queue (skip preserved data).
+    drained: list[int] = []
+    while not _heartbeat_failures_q.empty():
+        drained.append(_heartbeat_failures_q.get_nowait())
+    assert 99 in drained
+
+
 def test_drain_helper_rejects_non_main_thread():
     """W8 fold-in: _assert_main_thread enforces single-writer rule mechanically."""
     import threading as _t
