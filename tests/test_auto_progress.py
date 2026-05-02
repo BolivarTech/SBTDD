@@ -1157,3 +1157,31 @@ def test_drain_separates_failed_writes_from_zombie_via_tagged_tuple(tmp_path):
     )
     # zombie field:
     assert data["heartbeat_zombie_thread_count"] == 3
+
+
+def test_with_file_lock_uses_no_private_api():
+    """Loop 2 iter 3 W1+W4+W6: no ``threading.RLock`` private API in helper.
+
+    Pre-fix (Loop 2 iter 2): ``_with_file_lock`` invoked
+    ``in_process_lock._is_owned()`` to distinguish outermost vs reentrant
+    entry. ``_is_owned`` is a CPython-internal underscore-prefixed method
+    on ``threading.RLock``. It is documented in CPython source but is not
+    part of the public stdlib contract; future Python versions may rename
+    or remove it without notice.
+
+    Post-fix (Loop 2 iter 3): the helper uses a public ``threading.local``
+    per-thread, per-path depth counter to determine outermost vs reentrant
+    entry. No private API references remain.
+
+    This test reads the source of ``_with_file_lock`` and asserts the
+    forbidden ``_is_owned`` token is absent. A regression that re-introduces
+    the private API call (e.g. via copy-paste from older Loop 2 iter 2
+    docs) trips this test immediately.
+    """
+    import inspect
+
+    source = inspect.getsource(auto_cmd._with_file_lock)
+    assert "_is_owned" not in source, (
+        "_with_file_lock must not depend on threading.RLock private API "
+        "(_is_owned). Use a public threading.local depth counter instead."
+    )
