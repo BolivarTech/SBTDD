@@ -21,7 +21,9 @@ model implementation details that the lock approach avoids.
 
 from __future__ import annotations
 
+import queue
 import threading
+from typing import Any
 
 from models import ProgressContext
 
@@ -47,7 +49,41 @@ def reset_current_progress() -> None:
     set_current_progress(ProgressContext())
 
 
-# HeartbeatEmitter scaffold; full behavior (thread loop, queue, format)
-# is built incrementally in S1-3 through S1-7.
 class HeartbeatEmitter:
-    """Placeholder; replaced in subsequent v0.5.0 tasks."""
+    """Context manager that emits stderr ticks every ``interval_seconds``.
+
+    Wraps long subprocess dispatches (MAGI Loop 2,
+    ``/requesting-code-review``, spec-reviewer) so the operator sees
+    periodic liveness signals on stderr while the dispatch's own
+    stdout/stderr is quiet.
+
+    The full behavior (daemon thread, tick format, queue-based failure
+    counter) is added incrementally in S1-4 through S1-7.
+    """
+
+    # Class-level zombie counter (Checkpoint 2 iter 3 caspar CRITICAL fix):
+    # tracks heartbeat threads that survived ``__exit__``'s 2s join timeout.
+    _zombie_thread_count: int = 0
+
+    def __init__(
+        self,
+        label: str,
+        interval_seconds: float = 15.0,
+        failures_queue: "queue.Queue[int] | None" = None,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError(
+                f"interval_seconds must be > 0, got {interval_seconds!r}"
+            )
+        self.label = label
+        self.interval_seconds = interval_seconds
+        self._failures_queue = failures_queue
+        self._failed_writes = 0
+        self._stop_event: threading.Event | None = None
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "HeartbeatEmitter":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        return None

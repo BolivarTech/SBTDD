@@ -49,3 +49,18 @@ def test_reset_returns_default_after_set():
 def test_heartbeat_emitter_class_exists():
     """Smoke check: scaffold class importable; full behavior tested in S1-3+."""
     assert HeartbeatEmitter is not None
+
+
+def test_heartbeat_emitter_context_manager_protocol():
+    emitter = HeartbeatEmitter(label="test-dispatch", interval_seconds=15)
+    assert emitter.label == "test-dispatch"
+    assert emitter.interval_seconds == 15
+    with emitter as e:
+        assert e is emitter
+
+
+def test_heartbeat_emitter_validates_interval_positive():
+    with pytest.raises(ValueError, match="interval_seconds must be > 0"):
+        HeartbeatEmitter(label="x", interval_seconds=0)
+    with pytest.raises(ValueError, match="interval_seconds must be > 0"):
+        HeartbeatEmitter(label="x", interval_seconds=-1)
