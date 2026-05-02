@@ -450,3 +450,93 @@ auto_heartbeat_interval_seconds: 15
     config_path.write_text(base + 'auto_no_timeout_dispatch_labels: ["", "magi-*"]\n---\n')
     with pytest.raises(ValidationError, match=r"bare '\*' rejected"):
         load_plugin_local(config_path)
+
+
+_W12_ALLOWLIST_BASE = """---
+stack: python
+author: Julian Bolivar
+error_type: SBTDDError
+verification_commands: [pytest]
+plan_path: planning/claude-plan-tdd.md
+plan_org_path: planning/claude-plan-tdd-org.md
+spec_base_path: sbtdd/spec-behavior-base.md
+spec_path: sbtdd/spec-behavior.md
+state_file_path: .claude/session-state.json
+magi_threshold: GO_WITH_CAVEATS
+magi_max_iterations: 3
+auto_magi_max_iterations: 5
+auto_verification_retries: 2
+tdd_guard_enabled: true
+worktree_policy: optional
+auto_per_stream_timeout_seconds: 900
+auto_heartbeat_interval_seconds: 15
+"""
+
+
+def test_allowlist_rejects_whitespace_only(tmp_path):
+    """Loop 2 W12: whitespace-only label bypasses pre-fix check.
+
+    Pre-fix: validation only blocked exact ``'*'`` and ``''`` strings. A
+    label like ``'  '`` (two spaces) would pass validation but defeat the
+    timeout entirely if downstream code stripped + globbed.
+    """
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    config_path = tmp_path / "p.md"
+    config_path.write_text(_W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["   "]\n---\n')
+    with pytest.raises(ValidationError, match=r"(whitespace|bare).*rejected"):
+        load_plugin_local(config_path)
+
+
+def test_allowlist_rejects_unicode_asterisk(tmp_path):
+    """Loop 2 W12: Unicode lookalike (fullwidth asterisk) bypasses pre-fix check.
+
+    Pre-fix: ``'*'`` (U+002A ASCII asterisk) was rejected, but
+    ``'＊'`` (U+FF0A FULLWIDTH ASTERISK) passes the equality check.
+    Post-fix: NFKC-normalize before validation so the lookalike is
+    caught.
+    """
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    config_path = tmp_path / "p.md"
+    # ＊ = fullwidth asterisk, a Unicode lookalike for '*'.
+    config_path.write_text(
+        _W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["＊"]\n---\n'
+    )
+    with pytest.raises(ValidationError, match=r"(unicode|lookalike|bare).*rejected"):
+        load_plugin_local(config_path)
+
+
+def test_allowlist_rejects_double_asterisk(tmp_path):
+    """Loop 2 W12: ``**`` and similar multi-wildcard patterns match everything.
+
+    Pre-fix: ``**``, ``*?``, ``?*`` all passed. fnmatch treats them as
+    "match anything" or near-anything — defeating the timeout. Post-fix:
+    reject any label whose stripped/NFKC form is in the wildcard-only
+    set OR consists exclusively of fnmatch wildcards ``*?[]``.
+    """
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    config_path = tmp_path / "p.md"
+    config_path.write_text(_W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["**"]\n---\n')
+    with pytest.raises(ValidationError, match=r"(wildcard-only|bare).*rejected"):
+        load_plugin_local(config_path)
+
+
+def test_allowlist_rejects_question_mark_only(tmp_path):
+    """Loop 2 W12: ``?`` wildcard-only pattern.
+
+    Single ``?`` matches one char so it's narrower than ``*`` but still
+    too permissive for the timeout-allowlist contract; reject for
+    consistency with ``**`` rejection.
+    """
+    from config import load_plugin_local
+    from errors import ValidationError
+
+    config_path = tmp_path / "p.md"
+    config_path.write_text(_W12_ALLOWLIST_BASE + 'auto_no_timeout_dispatch_labels: ["?"]\n---\n')
+    with pytest.raises(ValidationError, match=r"(wildcard-only|bare).*rejected"):
+        load_plugin_local(config_path)
