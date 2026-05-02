@@ -27,7 +27,10 @@ details of the snapshot format. ``compare`` / ``persist_snapshot`` /
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
+import threading
 from pathlib import Path
 
 #: Header recogniser for scenario blocks. Per spec sec.3.2 H2-1 impl note,
@@ -127,3 +130,91 @@ def emit_snapshot(spec_path: Path) -> dict[str, str]:
             f"refusing to emit empty snapshot (would mask drift)."
         )
     return snapshot
+
+
+def compare(prev: dict[str, str], curr: dict[str, str]) -> dict[str, list[str]]:
+    """Return ``{'added': [...], 'removed': [...], 'modified': [...]}``.
+
+    Args:
+        prev: Previous snapshot (e.g. from plan-approval time, persisted
+            under ``planning/spec-snapshot.json``).
+        curr: Current snapshot (e.g. from pre-merge time, freshly emitted
+            via :func:`emit_snapshot`).
+
+    Returns:
+        Dict with three keys:
+
+        - ``added``: titles in ``curr`` not in ``prev`` (sorted).
+        - ``removed``: titles in ``prev`` not in ``curr`` (sorted).
+        - ``modified``: titles present in both with different hash (sorted).
+    """
+    prev_titles = set(prev.keys())
+    curr_titles = set(curr.keys())
+    return {
+        "added": sorted(curr_titles - prev_titles),
+        "removed": sorted(prev_titles - curr_titles),
+        "modified": sorted(t for t in (prev_titles & curr_titles) if prev[t] != curr[t]),
+    }
+
+
+def persist_snapshot(path: Path, snapshot: dict[str, str]) -> None:
+    """Write ``snapshot`` to JSON file atomically.
+
+    Per spec sec.3.2 H2-4 impl note: the temp file lives in the same
+    parent directory under a ``<name>.tmp.<pid>.<tid>`` suffix so
+    concurrent writers on Windows (e.g. multi-thread test exercise) do
+    not collide on :func:`os.replace`. Per W8 (caspar Loop 2 iter 4),
+    threads sharing the same PID would otherwise produce the same temp
+    filename and intermittently raise ``PermissionError`` on rename;
+    appending :func:`threading.get_ident` resolves the collision.
+
+    The temp file is committed via :func:`os.replace`, guaranteeing the
+    destination either has the previous contents OR the new contents --
+    never a half-written file. Parent directory is created if it does
+    not exist (matches plan-approval emit hook contract S1-27).
+
+    Args:
+        path: Destination file path (typically
+            ``planning/spec-snapshot.json``).
+        snapshot: Mapping returned by :func:`emit_snapshot`.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+    try:
+        tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+    except BaseException:
+        # If anything goes wrong before the atomic rename completes, drop
+        # the temp file so we do not leak it into the destination dir.
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                # Best-effort cleanup; failing to remove the temp does
+                # not turn a write error into a worse error for callers.
+                pass
+        raise
+
+
+def load_snapshot(path: Path) -> dict[str, str]:
+    """Load a previously persisted snapshot.
+
+    Args:
+        path: File path written by :func:`persist_snapshot`.
+
+    Returns:
+        Snapshot dict; same shape as :func:`emit_snapshot` output.
+
+    Raises:
+        ValueError: When the file content is valid JSON but not a JSON
+            object (e.g. a list, scalar, or null). A corrupted snapshot
+            must not silently parse as a wrong-shape value -- the
+            pre-merge gate would then mistakenly conclude no drift.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"snapshot at {path} is not a JSON object (got {type(data).__name__}); "
+            f"file may be corrupted -- regenerate via plan-approval emit hook."
+        )
+    return data
