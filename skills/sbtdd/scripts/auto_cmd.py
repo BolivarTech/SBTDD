@@ -2169,6 +2169,7 @@ def _phase2_task_loop(
                         last_verification_at=_now_iso(),
                         last_verification_result="passed",
                         plan_approved_at=current.plan_approved_at,
+                        spec_snapshot_emitted_at=current.spec_snapshot_emitted_at,
                     )
                     save_state(current, state_path)
                     # Feature D3 + D4: breadcrumb + progress AFTER state
