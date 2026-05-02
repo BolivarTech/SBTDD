@@ -189,6 +189,46 @@ _heartbeat_failures_q: "queue.Queue[tuple[str, int] | int]" = queue.Queue(maxsiz
 _HEARTBEAT_ZOMBIE_SENTINEL_OFFSET: int = 1000
 
 
+# Loop 2 W14 fix: dedup flag for the drain-decode-error stderr breadcrumb.
+# Pre-fix, ``_drain_heartbeat_queue_and_persist`` emitted
+# ``[sbtdd] warning: failed to read auto-run.json...`` on every JSON decode
+# failure, spamming stderr if the file was persistently corrupt. Post-fix,
+# emit only on the first failure; subsequent failures are silent until
+# :func:`_reset_drain_decode_error_emitted_for_tests` runs (test-only).
+_drain_decode_error_emitted: bool = False
+
+
+def _reset_drain_decode_error_emitted_for_tests() -> None:
+    """Test-only helper: reset the W14 dedup flag.
+
+    The flag is module-level mutable state; tests that exercise the
+    drain decode-error path must reset it to avoid order-dependent
+    failures.
+    """
+    global _drain_decode_error_emitted
+    _drain_decode_error_emitted = False
+
+
+# Loop 2 I3 (informational): swallowed observability counter. Increments
+# whenever a best-effort observability path silently absorbs an error
+# (heartbeat write fail, drain decode error, etc.). Surfaced in
+# auto-run.json on final flush so operators can see whether observability
+# was lossy during the run, even if breadcrumbs were de-duped.
+_observability_swallowed_count: int = 0
+
+
+def _bump_observability_swallowed_count() -> None:
+    """Increment the swallowed-observability counter (best-effort)."""
+    global _observability_swallowed_count
+    _observability_swallowed_count += 1
+
+
+def _reset_observability_swallowed_count_for_tests() -> None:
+    """Test-only helper: reset the I3 swallowed-observability counter."""
+    global _observability_swallowed_count
+    _observability_swallowed_count = 0
+
+
 def _assert_main_thread() -> None:
     """W8 fold-in: enforce the single-writer rule mechanically.
 
@@ -483,15 +523,24 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
                 failed_writes_values.append(item)
 
     def _do_persist() -> None:
+        global _drain_decode_error_emitted
         try:
             data = json.loads(auto_run_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            # Silently skip: auto run continues with degraded observability.
-            sys.stderr.write(
-                f"[sbtdd] warning: failed to read auto-run.json for heartbeat "
-                f"drain: {type(exc).__name__}: {exc!s}\n"
-            )
-            sys.stderr.flush()
+            # Loop 2 W14 fix: emit the breadcrumb only on the first decode
+            # failure; subsequent failures are silent. I3: increment the
+            # observability-swallowed counter on every silent failure.
+            if not _drain_decode_error_emitted:
+                sys.stderr.write(
+                    f"[sbtdd] warning: failed to read auto-run.json for heartbeat "
+                    f"drain: {type(exc).__name__}: {exc!s} (further drain "
+                    f"decode errors silenced; see "
+                    f"heartbeat_observability_swallowed in auto-run.json)\n"
+                )
+                sys.stderr.flush()
+                _drain_decode_error_emitted = True
+            else:
+                _bump_observability_swallowed_count()
             return
         if not isinstance(data, dict):
             return
@@ -789,7 +838,13 @@ def _update_progress(
     in-process writers serialise correctly. External readers
     (``status --watch``) bypass the lock and rely on atomic-rename
     semantics for consistency (Loop 2 WARNING #2 scope clarification).
+
+    Loop 2 W13 fix: ``_assert_main_thread`` is invoked at entry so the
+    single-writer rule (sec.3) trips immediately on misuse rather than
+    after partial work inside ``_serialize_progress`` (which only runs
+    AFTER the read step has already happened).
     """
+    _assert_main_thread()
 
     def _do_write() -> None:
         _do_update_progress(

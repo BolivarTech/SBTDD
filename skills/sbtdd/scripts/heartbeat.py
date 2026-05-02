@@ -62,6 +62,20 @@ def _reset_zombie_count_for_tests() -> None:
     HeartbeatEmitter._zombie_thread_count = 0
 
 
+# Loop 2 W11 fix: dedup flag for the FATAL zombie-threshold breadcrumb.
+# Pre-fix, ``__exit__`` emitted ``[sbtdd auto] FATAL: heartbeat zombie
+# threshold reached`` on every threshold breach, spamming fd=2 if zombie
+# events accumulated past the threshold. Post-fix, emit only on the first
+# breach; subsequent breaches are silent until reset.
+_zombie_breadcrumb_emitted: bool = False
+
+
+def _reset_zombie_breadcrumb_emitted_for_tests() -> None:
+    """Test-only helper: reset the W11 zombie-FATAL dedup flag."""
+    global _zombie_breadcrumb_emitted
+    _zombie_breadcrumb_emitted = False
+
+
 class HeartbeatEmitter:
     """Context manager that emits stderr ticks every ``interval_seconds``.
 
@@ -183,19 +197,28 @@ class HeartbeatEmitter:
                             )
                         except queue.Full:
                             pass
-                    try:
-                        import os as _os
+                    # Loop 2 W11 fix: dedup the FATAL breadcrumb. Only emit
+                    # on the first threshold breach; subsequent breaches
+                    # are silent (queue sentinel still propagates the
+                    # numeric counter to main thread).
+                    global _zombie_breadcrumb_emitted
+                    if not _zombie_breadcrumb_emitted:
+                        try:
+                            import os as _os
 
-                        _os.write(
-                            2,
-                            (
-                                f"[sbtdd auto] FATAL: heartbeat zombie threshold "
-                                f"reached ({HeartbeatEmitter._zombie_thread_count}"
-                                f" >= {HeartbeatEmitter._max_zombie_threads})\n"
-                            ).encode(),
-                        )
-                    except OSError:
-                        pass
+                            _os.write(
+                                2,
+                                (
+                                    f"[sbtdd auto] FATAL: heartbeat zombie threshold "
+                                    f"reached ({HeartbeatEmitter._zombie_thread_count}"
+                                    f" >= {HeartbeatEmitter._max_zombie_threads}); "
+                                    f"further FATAL breadcrumbs suppressed (see "
+                                    f"heartbeat_zombie_thread_count in auto-run.json)\n"
+                                ).encode(),
+                            )
+                        except OSError:
+                            pass
+                        _zombie_breadcrumb_emitted = True
         # Persist a zombie-alert sentinel to the failures queue even before
         # the hard threshold so main-thread monitoring (drain helper) sees
         # the state. Loop 2 W2+W7: tagged tuple replaces +1000 sentinel.

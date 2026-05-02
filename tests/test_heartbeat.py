@@ -333,15 +333,17 @@ def test_zombie_alert_sentinel_pushed_to_failures_queue(monkeypatch):
         HE._zombie_thread_count = original
 
 
-def test_zombie_fatal_breadcrumb_is_dedup(capsys):
+def test_zombie_fatal_breadcrumb_is_dedup(capfd):
     """Loop 2 W11: zombie FATAL breadcrumb on threshold breach is de-duped.
 
     Pre-fix: every ``__exit__`` invocation that found
     ``_zombie_thread_count >= _max_zombie_threads`` emitted the FATAL
-    breadcrumb. Repeated zombie events past the threshold spammed
-    fd=2. Post-fix: emit the FATAL breadcrumb only on the first
-    threshold breach in the process lifetime; subsequent breaches are
-    silent until a test-only reset.
+    breadcrumb via ``os.write(2, ...)``. Repeated zombie events past
+    the threshold spammed fd=2. Post-fix: emit only on the first
+    breach; subsequent breaches are silent until a test-only reset.
+
+    Uses ``capfd`` (not ``capsys``) because the breadcrumb is written
+    via ``os.write(fd=2)`` which bypasses Python-level stderr capture.
     """
     from heartbeat import HeartbeatEmitter as HE
 
@@ -371,7 +373,7 @@ def test_zombie_fatal_breadcrumb_is_dedup(capsys):
         e2._thread = FakeBlockedThread()  # type: ignore[assignment]
         e2.__exit__(None, None, None)
 
-        captured = capsys.readouterr()
+        captured = capfd.readouterr()
         fatal_lines = [
             line
             for line in captured.err.splitlines()
