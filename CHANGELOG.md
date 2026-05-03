@@ -8,13 +8,14 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
-## [1.0.1] - DRAFT (in flight, MAGI Checkpoint 2 iter 2 accepted GO_WITH_CAVEATS 3-0)
+## [1.0.1] - 2026-05-03
 
-> **Status**: Spec + plan accepted; implementation pending. v1.0.0
-> Deferred items rolled forward to v1.0.2 per user directive 2026-05-03.
-> v1.0.1 pivoted to "Plugin self-hosting fix" after 3 dogfood findings of
-> v1.0.0 (Finding A claude-p Skill subprocess broken; Finding B
-> spec_snapshot regex too strict; Finding C output validation missing).
+> **Status**: Shipped. Plugin self-hosting fix per 3 dogfood findings of
+> v1.0.0 (Finding A `claude -p` Skill subprocess broken for interactive
+> skills; Finding B spec_snapshot regex too strict; Finding C output
+> validation missing). Bundle accepted via Checkpoint 2 2-iter
+> convergence (G1 cap=3 HARD, no INV-0 override) + Loop 2 1-iter
+> convergence (3-0 GO_WITH_CAVEATS, 2 APPROVE + 1 CONDITIONAL).
 
 ### Planned (4 items LOCKED + 1 pre-migration task)
 

@@ -13,6 +13,7 @@ test data driving the rejection branch.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -915,13 +916,13 @@ def test_a3_1_resume_from_magi_skips_dispatch(
     _setup_git_repo(tmp_path)
     _seed_a3_artifacts(tmp_path)
 
-    def explosive_brainstorming(*a: object, **kw: object) -> object:
+    def explosive_brainstorming(*a: object, **kw: object) -> NoReturn:
         pytest.fail("brainstorming MUST NOT be called under --resume-from-magi")
 
-    def explosive_writing_plans(*a: object, **kw: object) -> object:
+    def explosive_writing_plans(*a: object, **kw: object) -> NoReturn:
         pytest.fail("writing_plans MUST NOT be called under --resume-from-magi")
 
-    def explosive_invoke_writing_plans(**kw: object) -> object:
+    def explosive_invoke_writing_plans(**kw: object) -> NoReturn:
         pytest.fail("invoke_writing_plans MUST NOT be called under --resume-from-magi")
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", explosive_brainstorming)
@@ -1007,7 +1008,7 @@ def test_a3_4_resume_combined_with_override_checkpoint(
     _setup_git_repo(tmp_path)
     _seed_a3_artifacts(tmp_path)
 
-    def no_dispatch(*a: object, **kw: object) -> object:
+    def no_dispatch(*a: object, **kw: object) -> NoReturn:
         pytest.fail("dispatch MUST NOT run under --resume-from-magi")
 
     monkeypatch.setattr(superpowers_dispatch, "brainstorming", no_dispatch)
@@ -1082,7 +1083,7 @@ def test_a3_5_malformed_spec_rejected_by_structural_validation(
         "### Task 1: x\n- [ ] do\n", encoding="utf-8"
     )
 
-    def explosive_magi(*a: object, **kw: object) -> object:
+    def explosive_magi(*a: object, **kw: object) -> NoReturn:
         pytest.fail("MAGI MUST NOT be invoked when spec is malformed")
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", explosive_magi)
@@ -1116,7 +1117,7 @@ def test_a3_6_malformed_plan_rejected_by_structural_validation(
         "# Empty plan\n\nJust prose, no tasks.\n", encoding="utf-8"
     )
 
-    def explosive_magi(*a: object, **kw: object) -> object:
+    def explosive_magi(*a: object, **kw: object) -> NoReturn:
         pytest.fail("MAGI MUST NOT be invoked when plan is malformed")
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", explosive_magi)
@@ -1151,7 +1152,7 @@ def test_a3_7_oserror_during_emit_snapshot_caught_as_precondition(
 
     monkeypatch.setattr(spec_snapshot, "emit_snapshot", raising_emit_snapshot)
 
-    def explosive_magi(*a: object, **kw: object) -> object:
+    def explosive_magi(*a: object, **kw: object) -> NoReturn:
         pytest.fail("MAGI MUST NOT be invoked when spec read fails")
 
     monkeypatch.setattr(magi_dispatch, "invoke_magi", explosive_magi)
