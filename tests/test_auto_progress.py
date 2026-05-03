@@ -1659,3 +1659,45 @@ def test_f44_3_multiple_iters_do_not_clobber_each_other(tmp_path):
     data = json.loads(auto_run_path.read_text(encoding="utf-8"))
     assert data["magi_iter1_retried_agents"] == ["caspar"]
     assert data["magi_iter2_retried_agents"] == ["balthasar", "melchior"]
+
+
+# v1.0.0 Loop 2 iter 2->3 fix package -- R11 sweep dead-helper wiring.
+
+
+def test_drain_decode_error_breadcrumb_invoked_from_persist(monkeypatch, tmp_path):
+    """Task 1a: persistence drain path must route through the helper.
+
+    Pre-fix the persist path inlined the breadcrumb emission with global
+    state mutation, leaving ``_emit_drain_decode_error_breadcrumb``
+    actually-dead. The fix replaces the inline write with a helper call
+    so future refactors of the breadcrumb format / dedup contract have
+    one site to update, not two divergent ones.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    # Corrupt JSON forces the json.JSONDecodeError branch in _do_persist.
+    auto_run_path.write_text("{not json", encoding="utf-8")
+
+    # Reset state; seed the failure queue so drain has work to do.
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_observability_swallowed_count_for_tests()
+    # Drain anything previously enqueued so the test does not race with
+    # other tests that touched the global queue.
+    while True:
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001 - queue.Empty + fallback
+            break
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 1))
+
+    calls: list[str] = []
+
+    def _spy(reason: str) -> None:
+        calls.append(reason)
+
+    monkeypatch.setattr(auto_cmd, "_emit_drain_decode_error_breadcrumb", _spy)
+
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+
+    assert len(calls) == 1, (
+        "drain decode error path must invoke _emit_drain_decode_error_breadcrumb"
+    )
