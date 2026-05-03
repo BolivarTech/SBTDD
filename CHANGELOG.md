@@ -101,6 +101,14 @@ every post-v0.1 release.
   — v1.0.1+ per balthasar Loop 2 iter 3 WARNING.
 - H5-2 spec_lint enforcement at Checkpoint 2 — v1.0.1+ per caspar iter 3
   WARNING (collect empirical data on H5-1 stub-gen quality first).
+- **Cross-check prompt diff threading (W-NEW1, Loop 1 iter 2)**: v1.0.0
+  ships `_loop2_cross_check` with `diff=""` because no `_compute_loop2_diff`
+  helper exists in the codebase yet, and `_dispatch_requesting_code_review`
+  doesn't currently consume diff context (the prompt embeds verdict +
+  findings text only). Meta-reviewer can still triage via finding text
+  + symbol grep through skill tool access. v1.0.1+ either wires a real
+  cumulative-diff helper into the prompt or removes the misleading
+  "diff context" wording in `_build_cross_check_prompt`.
 
 ## [0.5.0] - 2026-05-02
 
