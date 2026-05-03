@@ -868,3 +868,300 @@ def test_file_signature_handles_large_file(tmp_path: Path) -> None:
     _mtime_ns, size, digest = sig
     assert size == expected_size
     assert digest == expected_h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# v1.0.1 Item A3 -- --resume-from-magi recovery flag (sec.2.4 / sec.4
+# escenarios A3-1 .. A3-7). Flag skips ``_run_spec_flow`` (the brainstorming
+# + writing_plans dispatch) but still runs INV-27 validation AND structural
+# validation of operator-produced spec/plan artifacts before MAGI dispatch.
+# ---------------------------------------------------------------------------
+
+
+def _seed_a3_artifacts(tmp_path: Path) -> tuple[Path, Path]:
+    """Pre-stage operator-produced spec-behavior.md + plan-tdd-org.md.
+
+    Both files are structurally valid (>=1 escenario in spec; >=1
+    ``### Task`` heading + ``- [ ]`` checkbox in plan).
+    """
+    (tmp_path / "sbtdd").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
+    plan_org = tmp_path / "planning" / "claude-plan-tdd-org.md"
+    spec_behavior.write_text(
+        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "**Escenario 1: hand-crafted**\n\n"
+        "> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+    plan_org.write_text(
+        "# Plan\n\n### Task 1: First task\n- [ ] do it\n", encoding="utf-8"
+    )
+    return spec_behavior, plan_org
+
+
+def test_a3_1_resume_from_magi_skips_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-1: ``--resume-from-magi`` skips brainstorming + writing_plans.
+
+    Spies pytest.fail if dispatch is invoked. MAGI dispatch still runs
+    against the operator-produced artifacts.
+    """
+    import magi_dispatch
+    import spec_cmd
+    import superpowers_dispatch
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _setup_git_repo(tmp_path)
+    _seed_a3_artifacts(tmp_path)
+
+    def explosive_brainstorming(*a: object, **kw: object) -> object:
+        pytest.fail("brainstorming MUST NOT be called under --resume-from-magi")
+
+    def explosive_writing_plans(*a: object, **kw: object) -> object:
+        pytest.fail("writing_plans MUST NOT be called under --resume-from-magi")
+
+    def explosive_invoke_writing_plans(**kw: object) -> object:
+        pytest.fail("invoke_writing_plans MUST NOT be called under --resume-from-magi")
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", explosive_brainstorming)
+    monkeypatch.setattr(superpowers_dispatch, "writing_plans", explosive_writing_plans)
+    monkeypatch.setattr(
+        superpowers_dispatch, "invoke_writing_plans", explosive_invoke_writing_plans
+    )
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("GO"),
+    )
+
+    rc = spec_cmd.main(["--project-root", str(tmp_path), "--resume-from-magi"])
+    assert rc == 0
+    assert (tmp_path / ".claude" / "session-state.json").exists()
+
+
+def test_a3_2_resume_still_validates_inv27(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-2: INV-27 hard rule fires even with ``--resume-from-magi``.
+
+    spec-behavior-base.md with uppercase placeholder is rejected before
+    any dispatch (skipped) or MAGI invocation. INV-27 is non-overridable.
+    """
+    import spec_cmd
+    from errors import PreconditionError
+
+    spec_dir = tmp_path / "sbtdd"
+    spec_dir.mkdir()
+    (spec_dir / "spec-behavior-base.md").write_text(
+        "# Feature spec\n\n- T" + "ODO: define timeout\n" + ("x " * 200),
+        encoding="utf-8",
+    )
+    # Even with the recovery flag set, INV-27 must fire.
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd.main(["--project-root", str(tmp_path), "--resume-from-magi"])
+    msg = str(ei.value)
+    assert ("T" + "ODO") in msg or "pending" in msg.lower()
+
+
+def test_a3_3_resume_aborts_when_artifacts_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-3: ``--resume-from-magi`` requires both artifacts to exist.
+
+    No spec-behavior.md present -> PreconditionError before MAGI
+    dispatch.
+    """
+    import spec_cmd
+    from errors import PreconditionError
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    # Do NOT seed sbtdd/spec-behavior.md or planning/claude-plan-tdd-org.md.
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd.main(["--project-root", str(tmp_path), "--resume-from-magi"])
+    msg = str(ei.value)
+    # Either spec or plan absent triggers a guidance error referencing
+    # /brainstorming or /writing-plans.
+    assert (
+        "spec-behavior.md" in msg
+        or "claude-plan-tdd-org.md" in msg
+        or "brainstorming" in msg.lower()
+    ), msg
+
+
+def test_a3_4_resume_combined_with_override_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-4: ``--resume-from-magi`` composes with ``--override-checkpoint``.
+
+    Operator already has artifacts + wants safety-valve override (e.g.
+    MAGI cap=3 about to fail). Both flags coexist; dispatch skipped +
+    override path active.
+    """
+    import magi_dispatch
+    import spec_cmd
+    import superpowers_dispatch
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _setup_git_repo(tmp_path)
+    _seed_a3_artifacts(tmp_path)
+
+    def no_dispatch(*a: object, **kw: object) -> object:
+        pytest.fail("dispatch MUST NOT run under --resume-from-magi")
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", no_dispatch)
+    monkeypatch.setattr(superpowers_dispatch, "writing_plans", no_dispatch)
+    monkeypatch.setattr(superpowers_dispatch, "invoke_writing_plans", no_dispatch)
+
+    # MAGI returns HOLD on every iter so the loop exhausts and the
+    # safety-valve override path is exercised.
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("HOLD"),
+    )
+
+    rc = spec_cmd.main(
+        [
+            "--project-root",
+            str(tmp_path),
+            "--resume-from-magi",
+            "--override-checkpoint",
+            "--reason",
+            "manual artifacts validated; bundle reviewed",
+        ]
+    )
+    assert rc == 0
+
+
+def test_a3_combinatorial_no_flag_full_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3 combinatorial (d): neither flag -> full dispatch happy path regression.
+
+    Sanity: removing both flags yields the v1.0.0 baseline behavior
+    (full dispatch + normal cap=3 MAGI loop).
+    """
+    import magi_dispatch
+    import spec_cmd
+
+    _seed_spec_flow_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        magi_dispatch,
+        "invoke_magi",
+        lambda context_paths, timeout=1800, cwd=None: _make_verdict("GO"),
+    )
+    rc = spec_cmd.main(["--project-root", str(tmp_path)])
+    assert rc == 0
+
+
+def test_a3_5_malformed_spec_rejected_by_structural_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-5: ``--resume-from-magi`` rejects spec with no escenarios.
+
+    spec_snapshot.emit_snapshot raises ValueError -> structural
+    validation re-raises as PreconditionError BEFORE MAGI dispatch.
+    """
+    import magi_dispatch
+    import spec_cmd
+    from errors import PreconditionError
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    (tmp_path / "sbtdd").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    # Spec with NO escenarios anywhere -> emit_snapshot raises.
+    (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
+        "# Just prose, no Escenario blocks\n\nNothing here.\n", encoding="utf-8"
+    )
+    # Plan exists but is structurally valid (irrelevant -- spec check
+    # fires first).
+    (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+        "### Task 1: x\n- [ ] do\n", encoding="utf-8"
+    )
+
+    def explosive_magi(*a: object, **kw: object) -> object:
+        pytest.fail("MAGI MUST NOT be invoked when spec is malformed")
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", explosive_magi)
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd.main(["--project-root", str(tmp_path), "--resume-from-magi"])
+    msg = str(ei.value)
+    assert "spec-behavior.md" in msg, msg
+
+
+def test_a3_6_malformed_plan_rejected_by_structural_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-6: ``--resume-from-magi`` rejects plan with no Task heading or checkbox."""
+    import magi_dispatch
+    import spec_cmd
+    from errors import PreconditionError
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    (tmp_path / "sbtdd").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    # Spec is structurally valid.
+    (tmp_path / "sbtdd" / "spec-behavior.md").write_text(
+        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "**Escenario 1: ok**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+    # Plan has NO `### Task` heading AND NO `- [ ]` checkbox.
+    (tmp_path / "planning" / "claude-plan-tdd-org.md").write_text(
+        "# Empty plan\n\nJust prose, no tasks.\n", encoding="utf-8"
+    )
+
+    def explosive_magi(*a: object, **kw: object) -> object:
+        pytest.fail("MAGI MUST NOT be invoked when plan is malformed")
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", explosive_magi)
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd.main(["--project-root", str(tmp_path), "--resume-from-magi"])
+    msg = str(ei.value)
+    assert "claude-plan-tdd-org.md" in msg, msg
+
+
+def test_a3_7_oserror_during_emit_snapshot_caught_as_precondition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3-7 (W3): OSError during ``spec_snapshot.emit_snapshot`` is caught.
+
+    Regression-guards the widened catch ``(FileNotFoundError, ValueError,
+    OSError)``: an FS-level read failure (permission denied, broken
+    symlink, etc.) must surface as ``PreconditionError`` rather than
+    leaking the raw ``OSError`` to the operator.
+    """
+    import magi_dispatch
+    import spec_cmd
+    import spec_snapshot
+    from errors import PreconditionError
+
+    _seed_valid_spec_base(tmp_path)
+    _seed_plugin_local(tmp_path)
+    _seed_a3_artifacts(tmp_path)
+
+    def raising_emit_snapshot(path: Path) -> dict[str, str]:
+        raise OSError("simulated FS read failure")
+
+    monkeypatch.setattr(spec_snapshot, "emit_snapshot", raising_emit_snapshot)
+
+    def explosive_magi(*a: object, **kw: object) -> object:
+        pytest.fail("MAGI MUST NOT be invoked when spec read fails")
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", explosive_magi)
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd.main(["--project-root", str(tmp_path), "--resume-from-magi"])
+    msg = str(ei.value)
+    assert "spec-behavior.md" in msg or "emit_snapshot" in msg, msg
+    assert "simulated FS read failure" in msg, msg
