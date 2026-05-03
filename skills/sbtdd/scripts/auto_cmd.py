@@ -666,24 +666,17 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
                 failed_writes_values.append(item)
 
     def _do_persist() -> None:
-        global _drain_decode_error_emitted
         try:
             data = json.loads(auto_run_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            # Loop 2 W14 fix: emit the breadcrumb only on the first decode
-            # failure; subsequent failures are silent. I3: increment the
-            # observability-swallowed counter on every silent failure.
-            if not _drain_decode_error_emitted:
-                sys.stderr.write(
-                    f"[sbtdd] warning: failed to read auto-run.json for heartbeat "
-                    f"drain: {type(exc).__name__}: {exc!s} (further drain "
-                    f"decode errors silenced; see "
-                    f"heartbeat_observability_swallowed in auto-run.json)\n"
-                )
-                sys.stderr.flush()
-                _drain_decode_error_emitted = True
-            else:
-                _bump_observability_swallowed_count()
+            # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through the
+            # ``_emit_drain_decode_error_breadcrumb`` helper instead of
+            # inlining the emit + dedup logic. The helper owns the W7
+            # dedup flag and the I3 observability-swallowed counter so
+            # both the heartbeat-drain path and the explicit
+            # _emit_drain_decode_error_breadcrumb test contract share a
+            # single implementation. Pre-fix the helper was actually-dead.
+            _emit_drain_decode_error_breadcrumb(f"{type(exc).__name__}: {exc!s}")
             return
         if not isinstance(data, dict):
             return

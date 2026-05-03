@@ -1094,10 +1094,13 @@ def test_drain_decode_error_breadcrumb_is_dedup(tmp_path, capsys):
     auto_cmd._heartbeat_failures_q.put(("failed_writes", 6))
     auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
     captured = capsys.readouterr()
+    # v1.0.0 Loop 2 iter 2->3 R11 sweep: the inline emit was replaced by
+    # ``_emit_drain_decode_error_breadcrumb`` whose text is
+    # ``[sbtdd auto] drain JSON decode error ...``. The dedup contract
+    # (one breadcrumb across 2+ drains with persistent corruption) is
+    # unchanged; only the surface phrase moved (single source of truth).
     breadcrumbs = [
-        line
-        for line in captured.err.splitlines()
-        if "failed to read auto-run.json for heartbeat" in line
+        line for line in captured.err.splitlines() if "[sbtdd auto] drain JSON decode error" in line
     ]
     assert len(breadcrumbs) == 1, (
         f"expected exactly 1 dedup'd breadcrumb across 2 drains with "
