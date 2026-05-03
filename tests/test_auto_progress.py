@@ -1704,3 +1704,54 @@ def test_drain_decode_error_breadcrumb_invoked_from_persist(monkeypatch, tmp_pat
     assert len(calls) == 1, (
         "drain decode error path must invoke _emit_drain_decode_error_breadcrumb"
     )
+
+
+def test_persistence_error_breadcrumb_invoked_on_write_failure(monkeypatch, tmp_path):
+    """Task 1b: persistence write-failure path must route through the helper.
+
+    Pre-fix the persist-tmp-write OSError branch inlined an
+    ``[sbtdd] warning: failed to persist heartbeat counters: ...``
+    write to stderr while ``_emit_persistence_error_breadcrumb`` (with
+    its own dedup flag and observability counter) was actually-dead.
+    The fix routes the failure through the helper so the W7 separate-
+    dedup contract is honoured by the production path.
+    """
+    auto_run_path = tmp_path / "auto-run.json"
+    # Valid JSON so we get past the read step; the failure must be on
+    # the tmp-write stage.
+    auto_run_path.write_text("{}", encoding="utf-8")
+
+    auto_cmd._reset_drain_decode_error_emitted_for_tests()
+    auto_cmd._reset_persistence_error_emitted_for_tests()
+    auto_cmd._reset_observability_swallowed_count_for_tests()
+    while True:
+        try:
+            auto_cmd._heartbeat_failures_q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
+    auto_cmd._heartbeat_failures_q.put(("failed_writes", 7))
+
+    # Force write_text to raise on the .tmp file write.
+    real_write_text = Path.write_text
+
+    def boom(self, *args, **kwargs):
+        if ".tmp." in str(self):
+            raise OSError("simulated tmp write failure")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", boom)
+
+    calls: list[str] = []
+
+    def _spy(reason: str) -> None:
+        calls.append(reason)
+
+    monkeypatch.setattr(auto_cmd, "_emit_persistence_error_breadcrumb", _spy)
+
+    auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
+
+    assert len(calls) == 1, (
+        "persistence write-failure path must invoke "
+        "_emit_persistence_error_breadcrumb"
+    )
+    assert "OSError" in calls[0] or "simulated tmp write failure" in calls[0]
