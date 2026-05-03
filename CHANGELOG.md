@@ -8,10 +8,12 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
-## [1.0.0] - DRAFT (in flight, MAGI Checkpoint 2 iter 5 accepted via INV-0 override)
+## [1.0.0] - 2026-05-02
 
-> **Status**: Spec + plan accepted; parallel subagent dispatch pending.
-> This entry is a DRAFT — finalize at ship.
+> **Status**: Shipped. Bundle accepted at-threshold per spec sec.6 Gate
+> MAGI minimum after Loop 2 3-iter convergence pattern (3C → 2C → 0C);
+> Checkpoint 2 5-iter INV-0 override #2 (last allowed per G1 binding for
+> v1.1.0+).
 
 ### Added
 
