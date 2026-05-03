@@ -91,6 +91,24 @@ every post-v0.1 release.
 - **v0.6.0 retrospective item**: cap=3 override pattern. If v1.1.0 also
   overrides, the rule must be re-ratified or replaced — but G1 closes the
   INV-0 path so this is a process review, not an operational override.
+- **2-override streak acknowledgment**: v0.5.0 + v1.0.0 = 2 consecutive INV-0
+  overrides at MAGI Checkpoint 2 (4-iter and 5-iter respectively). G1 binding
+  (spec sec.7.1.3) closes this path for v1.1.0+.
+- **Dead-code-on-ship pattern caught at Loop 1 + Loop 2**: v1.0.0 Loop 1 iter 1
+  surfaced 2 CRITICAL wiring bugs (Feature G cross-check + spec-snapshot drift
+  gate were unit-tested but never invoked in production). Loop 2 iter 1 caspar
+  CRITICAL prompted C3 invocation-site audit which surfaced 2 MORE dead
+  helpers (J2 _resolve_all_models_once + W4 _normalize_findings_for_carry_forward).
+  v1.1.0 retrospective MUST include: every helper exercised at a real production
+  call site BEFORE close-task, with invocation-site tripwires (spy or grep audit)
+  per helper, not just unit tests in isolation.
+- **Cross-check telemetry as HARD v1.0.1 deliverable**: upgraded from "v1.0.1+"
+  to "v1.0.1 LOCKED" — operator manual-tally burden is the weakest link in the
+  magi_cross_check default-flip path. balthasar Loop 2 iter 1 condition #2.
+- **Single-pillar default for v1.1.0+**: v1.1.0 defaults to single-pillar
+  releases unless explicit user authorization for multi-pillar bundle. The v0.5.0
+  process commitment is now binding; bundle width is the predictable cause of
+  cap=3 violations.
 
 ### Deferred (rolled to v1.x)
 
