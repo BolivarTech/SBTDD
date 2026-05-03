@@ -381,3 +381,120 @@ def test_h5_1_invoke_writing_plans_passes_skill_kwarg(monkeypatch):
     monkeypatch.setattr("superpowers_dispatch._invoke_skill", fake_invoke)
     invoke_writing_plans(spec_path="sbtdd/spec-behavior.md")
     assert captured["skill"] == "writing-plans"
+
+
+# ---------------------------------------------------------------------------
+# v1.0.1 Item A2 -- headless-mode detection (sec.2.3 / sec.4 escenarios
+# A2-1 .. A2-5). Skills in ``_SUBPROCESS_INCOMPATIBLE_SKILLS`` raise
+# ``PreconditionError`` before subprocess spawn unless the caller opts
+# into ``allow_interactive_skill=True`` (Pre-A2 migration done; wrappers
+# already pass the override automatically).
+# ---------------------------------------------------------------------------
+
+
+def test_a2_1_brainstorming_headless_raises_precondition(monkeypatch):
+    """A2-1: invoke_skill('brainstorming') raises before subprocess spawn.
+
+    Default ``allow_interactive_skill=False`` triggers the gate.
+    """
+    from errors import PreconditionError
+    from superpowers_dispatch import invoke_skill
+
+    # Sentinel: subprocess MUST NOT be reached.
+    def explosive_run(*a, **kw):  # pragma: no cover -- guarded by raise
+        raise AssertionError("subprocess spawned despite A2 gate")
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", explosive_run)
+    with pytest.raises(PreconditionError) as ei:
+        invoke_skill("brainstorming", args=["@spec.md"])
+    msg = str(ei.value)
+    assert "brainstorming" in msg, msg
+    assert "interactivo" in msg.lower() or "subprocess" in msg.lower(), msg
+
+
+def test_a2_2_writing_plans_headless_raises_precondition(monkeypatch):
+    """A2-2: invoke_skill('writing-plans') raises before subprocess spawn."""
+    from errors import PreconditionError
+    from superpowers_dispatch import invoke_skill
+
+    def explosive_run(*a, **kw):  # pragma: no cover
+        raise AssertionError("subprocess spawned despite A2 gate")
+
+    monkeypatch.setattr("subprocess_utils.run_with_timeout", explosive_run)
+    with pytest.raises(PreconditionError) as ei:
+        invoke_skill("writing-plans", args=["@spec.md"])
+    msg = str(ei.value)
+    assert "writing-plans" in msg, msg
+
+
+def test_a2_3_magi_skill_unaffected_regression(monkeypatch):
+    """A2-3: ``magi:magi`` (or other non-interactive skill) keeps working.
+
+    ``magi:magi`` is NOT in ``_SUBPROCESS_INCOMPATIBLE_SKILLS``; gate
+    short-circuits and subprocess flow proceeds.
+    """
+    from superpowers_dispatch import SkillResult, invoke_skill
+
+    class FakeProc:
+        returncode = 0
+        stdout = "magi output"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    result = invoke_skill("magi:magi", args=["@spec.md"])
+    assert isinstance(result, SkillResult)
+    assert result.stdout == "magi output"
+
+
+def test_a2_4_unknown_skill_passes_through_whitelist_semantic(monkeypatch):
+    """A2-4: skills NOT in the set pass through the gate (whitelist semantic).
+
+    Conservative-by-default: only demonstrably-broken skills are gated.
+    Future skills not in the set behave identically to v1.0.0 (subprocess
+    spawned). This regression-guards against accidentally widening the
+    gate to a blacklist.
+    """
+    from superpowers_dispatch import SkillResult, invoke_skill
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    # ``custom-skill`` not in _SUBPROCESS_INCOMPATIBLE_SKILLS: must pass.
+    result = invoke_skill("custom-skill", args=["@x.md"])
+    assert isinstance(result, SkillResult)
+
+
+def test_a2_5_wrapper_call_passes_override_internally(monkeypatch):
+    """A2-5: high-level ``brainstorming`` wrapper bypasses the gate.
+
+    Wrappers ARE the safe coordinated dispatch path; they pass
+    ``allow_interactive_skill=True`` internally (Pre-A2 migration), so
+    the gate short-circuits and the subprocess flow proceeds. This
+    regression-guards against a blanket-raise pattern that would force
+    every wrapper to bypass the gate by hand.
+    """
+    from superpowers_dispatch import SkillResult, brainstorming
+
+    class FakeProc:
+        returncode = 0
+        stdout = "wrapper bypass works"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess_utils.run_with_timeout",
+        lambda cmd, timeout, capture=True, cwd=None: FakeProc(),
+    )
+    # Wrapper invokes invoke_skill with allow_interactive_skill=True (per
+    # Pre-A2 inspect-based forwarding); the gate must short-circuit.
+    result = brainstorming(args=["@spec.md"])
+    assert isinstance(result, SkillResult)
+    assert result.stdout == "wrapper bypass works"
