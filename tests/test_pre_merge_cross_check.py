@@ -1033,4 +1033,64 @@ def test_c2_build_cross_check_prompt_embeds_diff():
     ]
     prompt = _build_cross_check_prompt(diff, "GO_WITH_CAVEATS", findings)
     assert "Cumulative diff under review" in prompt
+
+
+def test_phase4_pre_merge_audit_dir_invoked_from_loop2(tmp_path, monkeypatch):
+    """Task 1c (Loop 2 iter 2->3 R11 sweep): ``_loop2`` must compute the
+    cross-check audit directory through ``auto_cmd._phase4_pre_merge_audit_dir``.
+
+    Pre-fix the audit_dir was inlined as
+    ``root / ".claude" / "magi-cross-check"`` at the call site, leaving
+    ``auto_cmd._phase4_pre_merge_audit_dir`` actually-dead. The fix wires
+    the cross-cutting helper into the production path via deferred
+    ``import auto_cmd`` so the cross-subagent boundary is respected (pre-
+    merge is dispatcher-side, the helper lives in auto_cmd which both
+    pre-merge and the auto-mode loop2-with-cross-check call site use).
+    """
+    import auto_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+    (tmp_path / "planning" / "claude-plan-tdd.md").write_text("# plan\n", encoding="utf-8")
+
+    pre_merge_cmd._reset_cross_check_breadcrumb_for_tests()
+
+    findings_t = ({"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "caspar"},)
+    fake_verdict = _make_magi_verdict_with_findings("GO", findings_t)
+
+    monkeypatch.setattr(magi_dispatch, "invoke_magi", lambda **_kw: fake_verdict)
+
+    # Spy on the helper; return a sentinel path so the test can assert
+    # the value flows through to _loop2_cross_check.
+    sentinel_dir = tmp_path / "sentinel-cross-check-dir"
+    spy_calls: list[Path] = []
+
+    def _spy(root: Path) -> Path:
+        spy_calls.append(root)
+        return sentinel_dir
+
+    monkeypatch.setattr(auto_cmd, "_phase4_pre_merge_audit_dir", _spy)
+
+    captured: dict = {}
+
+    def fake_cross_check(*, diff, verdict, findings, iter_n, config, audit_dir):
+        captured["audit_dir"] = audit_dir
+        return [{**f, "cross_check_decision": "KEEP"} for f in findings]
+
+    monkeypatch.setattr(pre_merge_cmd, "_loop2_cross_check", fake_cross_check)
+    monkeypatch.setattr(pre_merge_cmd, "_persist_retried_agents_to_audit", lambda *_a, **_kw: None)
+
+    cfg = _make_pluginconfig_for_loop2(magi_cross_check=True, root=tmp_path)
+    pre_merge_cmd._loop2(tmp_path, cfg, threshold_override=None)
+
+    assert len(spy_calls) == 1, (
+        "_loop2 must invoke auto_cmd._phase4_pre_merge_audit_dir exactly once "
+        "(pre-fix the helper was actually-dead and the path was inlined)"
+    )
+    assert spy_calls[0] == tmp_path
+    assert captured["audit_dir"] == sentinel_dir, (
+        "audit_dir threaded into _loop2_cross_check must be the helper's return"
+    )
     assert "real change" in prompt
