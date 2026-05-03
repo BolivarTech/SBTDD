@@ -109,6 +109,41 @@ every post-v0.1 release.
   releases unless explicit user authorization for multi-pillar bundle. The v0.5.0
   process commitment is now binding; bundle width is the predictable cause of
   cap=3 violations.
+- **Iter 1 INV-29 bypass (one-time exception)**: Loop 2 iter 1 fix package was
+  applied without `/receiving-code-review` skill triage. Iter 2 onwards routes
+  every iter through the skill. v1.x process commitment: every Loop 2 iter
+  MUST run `/receiving-code-review` on findings — no exceptions, no override
+  flag.
+- **R11 exhaustive sweep result (Loop 2 iter 2->3)**: invocation-site audit of
+  ALL helpers added in 3610a9f..HEAD. Found 9 dead helpers across the cycle:
+  4 caught at Loop 1 (Feature G + drift gate suite), 2 at Loop 2 iter 1
+  (J2 `_resolve_all_models_once` + W4 `_normalize_findings_for_carry_forward`),
+  3 at Loop 2 iter 2 (`_emit_drain_decode_error_breadcrumb`,
+  `_emit_persistence_error_breadcrumb`, `_phase4_pre_merge_audit_dir`). All
+  wired in respective iter fix packages. v1.1.0 plan-task default: every
+  helper has invocation-site tripwire BEFORE close-task.
+- **Cross-check own-cycle dogfood deferred**: v1.0.0 ships Feature G + INV-35
+  but the own-cycle dogfood (running v1.0.0 `/sbtdd pre-merge` against v1.1.0
+  cycle) requires v1.1.0 to use v1.0.0's pre-merge orchestration. v1.0.0
+  Loop 2 iters 1+2 ran with `magi_cross_check: false` (default-OFF posture
+  per spec sec.5.2 + balthasar Loop 2 iter 1 recursive-circular-risk
+  WARNING). G3 manual sign-off vacuous for these iters (no audit artifact
+  generated). Iter 3+ flips `magi_cross_check: true` to exercise the helpers.
+- **Pre-dispatch commitment for Loop 2 iter 3 (G2 binding)**: per spec
+  sec.7.1.3 G2, if iter 3 does not converge cleanly, **default = option-A
+  scope-trim** (defer Pillar 2 = Feature I + Group B option 2 + 5 to
+  v1.0.1; ship v1.0.0 = Pillar 1 + v0.5.1 fold-in only). INV-0 override
+  available ONLY with explicit user authorization phrase per G2.
+- **Diff cap raised to 1MB (W3/W7 sweep)**: v0.5.0 cap was 200KB; cumulative
+  v1.0.0 diff measured ~918KB silently truncated at 78%. The cap was raised
+  to 1MB so realistic plan-bundle diffs reach the cross-check meta-reviewer
+  untruncated. Truncation metadata (`diff_truncated`, `diff_original_bytes`,
+  `diff_cap_bytes`) now lands in the cross-check audit JSON for post-mortem
+  visibility.
+- **`_read_auto_run_audit` skeleton**: shipped in v1.0.0 as scaffolding for
+  future status renderers; deferred to v1.0.1+ when an actual status
+  renderer needs to consume the audit JSON. Documented in the helper's
+  module-level docstring so removal is gated on intentional follow-through.
 
 ### Deferred (rolled to v1.x)
 
