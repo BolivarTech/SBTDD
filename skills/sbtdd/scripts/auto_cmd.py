@@ -718,11 +718,13 @@ def _drain_heartbeat_queue_and_persist(auto_run_path: Path) -> None:
             tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             os.replace(tmp_path, auto_run_path)
         except OSError as exc:
-            sys.stderr.write(
-                f"[sbtdd] warning: failed to persist heartbeat counters: "
-                f"{type(exc).__name__}: {exc!s}\n"
+            # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through
+            # ``_emit_persistence_error_breadcrumb`` so the W7 separate-
+            # dedup contract (drain vs persistence flags) is enforced by
+            # the production path. Pre-fix the helper was actually-dead.
+            _emit_persistence_error_breadcrumb(
+                f"failed to persist heartbeat counters: {type(exc).__name__}: {exc!s}"
             )
-            sys.stderr.flush()
             try:
                 tmp_path.unlink()
             except FileNotFoundError:
