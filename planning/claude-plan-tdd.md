@@ -142,13 +142,13 @@ git commit -m "chore: mark task A1 complete"
 | Test | test_superpowers_dispatch.py | 85 | same |
 | Test | test_superpowers_dispatch.py | 98 | `invoke_skill("writing-plans", ..., allow_interactive_skill=True)` |
 
-- [ ] Step 1: grep audit (output captured above as evidence)
-- [ ] Step 2: edit `_make_wrapper` factory body line 291
-- [ ] Step 3: edit `_invoke_skill` line 369-370
-- [ ] Step 4: edit 4 test callsites in test_superpowers_dispatch.py
-- [ ] Step 5: run `make verify` — all should pass (override permits same behavior)
-- [ ] Step 6: commit `refactor: pre-A2 migrate direct invoke_skill callers to wrapper-aware override`
-- [ ] Step 7: mark task complete chore: commit
+- [x] Step 1: grep audit (output captured above as evidence)
+- [x] Step 2: edit `_make_wrapper` factory body line 291
+- [x] Step 3: edit `_invoke_skill` line 369-370
+- [x] Step 4: edit 4 test callsites in test_superpowers_dispatch.py
+- [x] Step 5: run `make verify` — all should pass (override permits same behavior)
+- [x] Step 6: commit `refactor: pre-A2 migrate direct invoke_skill callers to wrapper-aware override`
+- [x] Step 7: mark task complete chore: commit
 
 ---
 
