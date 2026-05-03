@@ -61,7 +61,21 @@ every post-v0.1 release.
   breadcrumb (independent dedup flags).
 - **W8** Windows tmp filename PID collision flake fixed via
   `path.parent / (path.name + ".tmp.{getpid()}.{threading.get_ident()}")`
-  pattern in three writers.
+  pattern in three writers. **Residual flake characterized at v1.0.0 ship
+  (accepted-risk, Windows-only, test-only):** `test_concurrent_write_audit_writers_serialize_via_file_lock`
+  exercises 10 threads writing `auto-run.json` simultaneously. After W8
+  fix, empirical reliability ~80% under concurrent test load (1/5 fails
+  with `PermissionError` on `os.replace(tmp, path)`). Root cause is
+  Windows file-system semantics: `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`
+  fails with PermissionError when the target has any open handle, even
+  transiently — Windows lazily releases handles after Python's context-
+  manager close, and external processes (Defender, indexer) may briefly
+  scan the file in the inter-thread window. Production is unaffected
+  because INV-22 mandates single-thread auto execution; this race is
+  test-induced concurrency only. Mitigation: `make verify` re-run passes
+  cleanly. Full remediation (retry-loop with backoff + Windows-specific
+  PermissionError handling) deferred to v1.x evaluation if observed in
+  field, per spec sec.4.4.5 documented accepted-risk.
 
 ### Process notes
 
