@@ -160,7 +160,7 @@ git commit -m "chore: mark task A1 complete"
 
 **Per-spec scenarios to satisfy**: A0-1, A0-2, A0-3, A0-4, A0-5 (sec.4 of spec).
 
-- [ ] **Step 1: Write failing test for A0-1 (brainstorming silently no-op)**
+- [x] **Step 1: Write failing test for A0-1 (brainstorming silently no-op)**
 
 Add to `tests/test_spec_cmd.py` a test where:
 - Pre-existing `sbtdd/spec-behavior.md` exists.
@@ -168,18 +168,18 @@ Add to `tests/test_spec_cmd.py` a test where:
 - Run `_run_spec_flow(tmp_path)`.
 - Assert `PreconditionError` raised with message containing "no fue modificado".
 
-- [ ] **Step 2: Run test — should FAIL**
+- [x] **Step 2: Run test — should FAIL**
 
 Expected: FAIL — currently no mtime check, so PreconditionError NOT raised about unchanged mtime.
 
-- [ ] **Step 3: Commit Red phase**
+- [x] **Step 3: Commit Red phase**
 
 ```bash
 git add tests/test_spec_cmd.py
 git commit -m "test: A0-1 brainstorming no-op mtime check (Red)"
 ```
 
-- [ ] **Step 4: Extend `_run_spec_flow` with composite-signature checks (`_file_signature` helper)**
+- [x] **Step 4: Extend `_run_spec_flow` with composite-signature checks (`_file_signature` helper)**
 
 Modify `spec_cmd.py:112`:
 1. Add module-level helper `_file_signature(path: Path) -> tuple[int, int, str]` returning `(mtime_ns, size, sha256_of_content)`. Uses `hashlib.sha256` + chunked read (65536 bytes). See spec sec.2.1 pseudo-code for exact shape.
@@ -190,9 +190,9 @@ Modify `spec_cmd.py:112`:
 6. First-run path (file absent pre-subprocess) tolerated by `sig_before is None` short-circuit.
 7. Composite signature is resilient against three failure modes: FS-precision floors (mtime collision), same-content rewrite, and touched-but-empty subprocess output. See spec sec.2.1 rationale.
 
-- [ ] **Step 5: Run test — should PASS**
+- [x] **Step 5: Run test — should PASS**
 
-- [ ] **Step 5b: Write failing test for A0-5 (FS-precision same-content rewrite)**
+- [x] **Step 5b: Write failing test for A0-5 (FS-precision same-content rewrite)**
 
 Add to `tests/test_spec_cmd.py` a test where:
 - Pre-existing `sbtdd/spec-behavior.md` exists with known content C.
@@ -201,7 +201,7 @@ Add to `tests/test_spec_cmd.py` a test where:
 
 Run the test — should PASS once the composite-signature implementation is in place. This regression-guards against the FS-precision class documented in spec sec.2.1.
 
-- [ ] **Step 5c: Add 2 edge-case tests for `_file_signature` (W7 caspar iter 2)**
+- [x] **Step 5c: Add 2 edge-case tests for `_file_signature` (W7 caspar iter 2)**
 
 Add to `tests/test_spec_cmd.py`:
 1. `test_file_signature_handles_empty_file` — file with size 0 returns signature `(mtime_ns, 0, sha256(b""))` where `sha256(b"")` is the well-known constant `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. Asserts the helper handles empty content correctly.
@@ -209,23 +209,23 @@ Add to `tests/test_spec_cmd.py`:
 
 These edge cases close the W7 caspar concern about composite-signature edge case test coverage. Skip binary content since production specs are text-only (UTF-8); empty + large suffice.
 
-- [ ] **Step 6: Add 3 more A0 tests**
+- [x] **Step 6: Add 3 more A0 tests**
 
 Tests for A0-2 (writing_plans no-op), A0-3 (first-run path), A0-4 (happy path).
 
-- [ ] **Step 7: Run full spec_cmd test suite**
+- [x] **Step 7: Run full spec_cmd test suite**
 
 Run: `python -m pytest tests/test_spec_cmd.py -v`
 Expected: ALL pass (existing tests with stubs that DO write the files still happy).
 
-- [ ] **Step 8: Commit Green + Refactor**
+- [x] **Step 8: Commit Green + Refactor**
 
 ```bash
 git add skills/sbtdd/scripts/spec_cmd.py tests/test_spec_cmd.py
 git commit -m "feat: A0 mtime tripwire in _run_spec_flow"
 ```
 
-- [ ] **Step 9: Mark task complete**
+- [x] **Step 9: Mark task complete**
 
 ```bash
 git commit -m "chore: mark task A0 complete"
