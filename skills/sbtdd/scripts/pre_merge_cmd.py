@@ -722,10 +722,26 @@ def _loop2(
         # field; absence is treated as opted-out.
         if getattr(cfg, "magi_cross_check", False):
             audit_dir = root / ".claude" / "magi-cross-check"
+            # v1.0.0 W4 (caspar Loop 2 iter 4): normalize findings before
+            # they enter the cross-check meta-reviewer. In iter 1, MAGI's
+            # consensus.findings list is fresh and carries no annotation
+            # fields, so this call is a no-op; in iter 2+, if a future
+            # refactor were to thread prior-iter annotated findings into
+            # the MAGI payload (e.g., as context), the normalizer strips
+            # ``cross_check_decision`` / ``cross_check_rationale`` /
+            # ``cross_check_recommended_severity`` plus the dispatch
+            # diagnostic flags ``_dispatch_failure`` / ``_failure_reason``
+            # so the working set stays lossless for MAGI without
+            # double-bookkeeping (spec sec.2.1 W4). Defensive wiring per
+            # the C3 invocation-site tripwire: keeps the contract live
+            # even if iter coupling changes downstream.
+            findings_for_cross_check = _normalize_findings_for_carry_forward(
+                [dict(f) for f in (verdict.findings or ())]
+            )
             annotated_findings = _loop2_cross_check(
                 diff="",  # diff context wired in by reviewer's runtime
                 verdict=verdict.verdict,
-                findings=[dict(f) for f in (verdict.findings or ())],
+                findings=findings_for_cross_check,
                 iter_n=iteration,
                 config=cfg,
                 audit_dir=audit_dir,
