@@ -842,6 +842,26 @@ v1.0.1 ship-ready cuando:
 
 ---
 
+## 9.8 Inherited invariants from v0.4.x (HF1 cross-artifact wording)
+
+The v0.4.0 manual-synthesis recovery breadcrumb wording is preserved
+verbatim across spec / CHANGELOG / impl per the HF1 cross-artifact
+alignment contract (`tests/test_changelog.py`). v1.0.1 ships no
+behavioral change to this path; the wording is repeated here so the
+v0.4.x invariant survives the v1.0.1 spec rewrite (same pattern as
+v1.0.0 spec sec.10.7).
+
+**Canonical wording**: `[sbtdd magi] synthesizer failed; manual synthesis recovery applied`
+
+When `magi_dispatch.invoke_magi` is called with `allow_recovery=True`
+(default ON since v0.4.0 F46.5) and the orchestrator-side synthesizer
+crashes, the dispatch path reconstructs the consensus from per-agent
+JSON outputs and emits the canonical breadcrumb to stderr. Every
+artifact that documents this fall-back path uses identical wording so
+HF1's whitespace-normalized cross-file search matches consistently.
+
+---
+
 ## 10. Referencias
 
 - Spec base v1.0.1: `sbtdd/spec-behavior-base.md` (commit `8e7295a`).
