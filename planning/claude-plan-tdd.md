@@ -52,47 +52,47 @@ Once `/sbtdd spec` approves this plan (sets `plan_approved_at`), the four author
 
 **Per-spec scenarios to satisfy**: A1-1, A1-2, A1-3, A1-4, A1-5 (sec.4 of spec).
 
-- [ ] **Step 1: Write failing test for A1-2 (distributed escenarios)**
+- [x] **Step 1: Write failing test for A1-2 (distributed escenarios)**
 
 Add to `tests/test_spec_snapshot.py` a test asserting that a spec with `**Escenario X-1: ...**` blocks distributed across `## 2. Pillar 1` + `## 3. Pillar 2` (no `## §4 Escenarios` header) parses correctly. Returns dict with both escenario titles.
 
-- [ ] **Step 2: Run test — should FAIL with ValueError**
+- [x] **Step 2: Run test — should FAIL with ValueError**
 
 Run: `python -m pytest tests/test_spec_snapshot.py::test_emit_snapshot_distributed_escenarios_across_sections -xvs`
 Expected: FAIL with `ValueError: No §4 Escenarios section found`.
 
-- [ ] **Step 3: Commit Red phase**
+- [x] **Step 3: Commit Red phase**
 
 ```bash
 git add tests/test_spec_snapshot.py
 git commit -m "test: A1-2 distributed escenarios across pillar sections (Red)"
 ```
 
-- [ ] **Step 4: Refactor `emit_snapshot` to Tier 1 + Tier 2**
+- [x] **Step 4: Refactor `emit_snapshot` to Tier 1 + Tier 2**
 
 Modify `spec_snapshot.py emit_snapshot`:
 1. Tier 1: search `_SECTION_RE` for legacy `## §4 Escenarios` header. If matched AND `_extract_scenarios` returns non-empty, return that.
 2. Tier 2 (fallback): if Tier 1 missed (no header) OR matched section is empty, run `_extract_scenarios` on whole document text.
 3. If both tiers yield zero, raise `ValueError` with message mentioning both legacy + distributed patterns.
 
-- [ ] **Step 5: Run test — should PASS**
+- [x] **Step 5: Run test — should PASS**
 
 Run: `python -m pytest tests/test_spec_snapshot.py::test_emit_snapshot_distributed_escenarios_across_sections -xvs`
 Expected: PASS.
 
-- [ ] **Step 6: Run full spec_snapshot test suite — verify no regressions**
+- [x] **Step 6: Run full spec_snapshot test suite — verify no regressions**
 
 Run: `python -m pytest tests/test_spec_snapshot.py -v`
 Expected: ALL pass (existing Tier 1 path tests still work).
 
-- [ ] **Step 7: Commit Green phase**
+- [x] **Step 7: Commit Green phase**
 
 ```bash
 git add skills/sbtdd/scripts/spec_snapshot.py
 git commit -m "feat: A1 emit_snapshot Tier 2 fallback for distributed escenarios"
 ```
 
-- [ ] **Step 8: Add 4 more A1 tests (Refactor)**
+- [x] **Step 8: Add 4 more A1 tests (Refactor)**
 
 Add tests for:
 - A1-1 (legacy fixture regression).
@@ -100,19 +100,19 @@ Add tests for:
 - A1-4 (legacy header empty falls through).
 - A1-5 (prose mention of word "escenario" in commentary doesn't match scenario regex — Tier 2 widening must NOT match plain prose, only structured `**Escenario X: ...**` / `## Escenario X: ...` / `### Escenario X: ...` blocks).
 
-- [ ] **Step 9: Run new tests + full suite**
+- [x] **Step 9: Run new tests + full suite**
 
 Run: `python -m pytest tests/test_spec_snapshot.py -v`
 Expected: ALL pass.
 
-- [ ] **Step 10: Commit Refactor**
+- [x] **Step 10: Commit Refactor**
 
 ```bash
 git add tests/test_spec_snapshot.py
 git commit -m "test: A1 round-out coverage with A1-1/A1-3/A1-4 (Refactor)"
 ```
 
-- [ ] **Step 11: Mark task complete**
+- [x] **Step 11: Mark task complete**
 
 ```bash
 # Mark [x] in plan
