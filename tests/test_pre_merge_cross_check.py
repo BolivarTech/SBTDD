@@ -941,3 +941,96 @@ def test_c3_emit_cross_check_disabled_breadcrumb_referenced_from_loop2_body():
         "longer referenced from ``pre_merge_cmd._loop2``. The G4 "
         "breadcrumb is silently dead. Re-wire per spec sec.2.1 G4."
     )
+
+
+# ---------------------------------------------------------------------------
+# C2 (caspar Loop 2 iter 1 CRITICAL): cross-check must evaluate findings
+# against the real cumulative diff, not an empty placeholder. Without this,
+# the meta-reviewer has no production code to compare against -- the
+# recursive payoff is invalidated. Spec sec.2.1 G6 + W-NEW1.
+# ---------------------------------------------------------------------------
+
+
+def test_c2_compute_loop2_diff_returns_diff_text(tmp_path, monkeypatch):
+    """C2: ``_compute_loop2_diff`` returns the cumulative diff text on success."""
+    import subprocess_utils
+    from pre_merge_cmd import _compute_loop2_diff
+
+    fake_diff = "diff --git a/foo.py b/foo.py\n+changed line\n"
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = fake_diff
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    out = _compute_loop2_diff(tmp_path)
+    assert out == fake_diff
+
+
+def test_c2_compute_loop2_diff_handles_subprocess_failure(tmp_path, monkeypatch, capsys):
+    """C2: ``_compute_loop2_diff`` returns '' + stderr breadcrumb on subprocess failure."""
+    import subprocess_utils
+    from pre_merge_cmd import _compute_loop2_diff
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        raise OSError("git not found")
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    out = _compute_loop2_diff(tmp_path)
+    assert out == ""
+    captured = capsys.readouterr()
+    assert "[sbtdd magi-cross-check] failed to compute diff" in captured.err
+    assert "git not found" in captured.err
+
+
+def test_c2_compute_loop2_diff_truncates_oversized(tmp_path, monkeypatch):
+    """C2: ``_compute_loop2_diff`` truncates output >200KB with marker."""
+    import subprocess_utils
+    from pre_merge_cmd import _compute_loop2_diff
+
+    huge_diff = "x" * (500 * 1024)  # 500KB
+
+    def fake_run(cmd, timeout=None, cwd=None):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = huge_diff
+        result.stderr = ""
+        return result
+
+    monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
+    out = _compute_loop2_diff(tmp_path)
+    assert len(out) <= 200 * 1024 + 100  # 200KB + truncation marker overhead
+    assert "[... truncated for prompt budget ...]" in out
+
+
+def test_c2_loop2_passes_real_diff_to_cross_check(tmp_path, monkeypatch):
+    """C2: ``_loop2`` threads ``_compute_loop2_diff`` output into cross-check."""
+    import inspect
+    import pre_merge_cmd
+
+    # Text-level audit: ``_loop2`` body must reference the diff helper. If
+    # absent, the cross-check is still evaluating ``diff=""`` -- recursive
+    # payoff is invalidated.
+    source = inspect.getsource(pre_merge_cmd._loop2)
+    assert "_compute_loop2_diff" in source, (
+        "REGRESSION: ``_compute_loop2_diff`` no longer referenced from "
+        "``pre_merge_cmd._loop2``. Cross-check meta-reviewer evaluates "
+        "an empty diff -- recursive payoff invalidated. Re-wire per "
+        "spec sec.2.1 W-NEW1 / Loop 2 iter 1 caspar CRITICAL."
+    )
+
+
+def test_c2_build_cross_check_prompt_embeds_diff():
+    """C2: ``_build_cross_check_prompt`` includes diff content in the prompt."""
+    from pre_merge_cmd import _build_cross_check_prompt
+
+    diff = "diff --git a/foo.py b/foo.py\n+real change\n"
+    findings: list[dict] = [
+        {"severity": "CRITICAL", "title": "x", "detail": "y", "agent": "caspar"},
+    ]
+    prompt = _build_cross_check_prompt(diff, "GO_WITH_CAVEATS", findings)
+    assert "Cumulative diff under review" in prompt
+    assert "real change" in prompt
