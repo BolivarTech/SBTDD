@@ -816,3 +816,128 @@ def test_g1_apply_cross_check_decisions_default_keep_for_missing_decision():
     # Severities still untouched.
     assert annotated[0]["severity"] == "CRITICAL"
     assert annotated[1]["severity"] == "WARNING"
+
+
+# ---------------------------------------------------------------------------
+# C3 (caspar CRITICAL) — invocation-site tripwires for v1.0.0 helpers.
+# Loop 1 caught dead-code wiring on TWO showpiece features (Feature G
+# cross-check + spec-snapshot drift gate). C3 audits the remaining four
+# helpers to prove they are invoked from production paths, not just
+# unit-tested in isolation.
+# ---------------------------------------------------------------------------
+
+
+def test_c3_record_magi_retried_agents_invoked_from_persist_helper(tmp_path, monkeypatch):
+    """C3: ``_record_magi_retried_agents`` is invoked from
+    ``pre_merge_cmd._persist_retried_agents_to_audit`` in the production
+    path after each MAGI Loop 2 iter when ``auto-run.json`` exists.
+
+    Wiring under test: ``_loop2`` calls ``_persist_retried_agents_to_audit``,
+    which (when the audit file is present) invokes
+    ``auto_cmd._record_magi_retried_agents`` to propagate retried_agents
+    telemetry. Spy on ``auto_cmd._record_magi_retried_agents`` and assert
+    it fires once.
+    """
+    import auto_cmd
+    import magi_dispatch
+    import pre_merge_cmd
+
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    # Audit file MUST exist for the wiring to fire (interactive pre-merge
+    # without auto-run.json skips silently per design).
+    (tmp_path / ".claude" / "auto-run.json").write_text("{}", encoding="utf-8")
+
+    spy = {"calls": 0, "kwargs": None}
+
+    def fake_record(auto_run_path, *, iter_n, retried_agents):
+        spy["calls"] += 1
+        spy["kwargs"] = {
+            "auto_run_path": auto_run_path,
+            "iter_n": iter_n,
+            "retried_agents": retried_agents,
+        }
+
+    monkeypatch.setattr(auto_cmd, "_record_magi_retried_agents", fake_record)
+
+    verdict = magi_dispatch.MAGIVerdict(
+        verdict="GO",
+        degraded=False,
+        conditions=(),
+        findings=(),
+        raw_output='{"verdict": "GO"}',
+        retried_agents=("balthasar",),
+    )
+    pre_merge_cmd._persist_retried_agents_to_audit(tmp_path, 2, verdict)
+
+    assert spy["calls"] == 1
+    assert spy["kwargs"]["iter_n"] == 2
+    assert spy["kwargs"]["retried_agents"] == ["balthasar"]
+
+
+def test_c3_resolve_all_models_once_invoked_from_phase2_task_loop(tmp_path, monkeypatch):
+    """C3: ``_resolve_all_models_once`` is invoked from the production
+    ``auto_cmd._phase2_task_loop`` preflight path EXACTLY ONCE per auto run.
+
+    Spec sec.2.3 (J2): replaces ~70-150 CLAUDE.md disk reads per auto run
+    with a single read at task-loop entry. If this helper is genuinely dead
+    (defined + unit-tested but never called from production), this test
+    reveals the wiring gap.
+    """
+    import auto_cmd
+    import inspect
+
+    # Text-level audit: ``_phase2_task_loop`` body must reference the
+    # preflight helper at least once. If absent, the helper is dead code
+    # despite being unit-tested in isolation.
+    source = inspect.getsource(auto_cmd._phase2_task_loop)
+    assert "_resolve_all_models_once" in source, (
+        "DEAD CODE: ``_resolve_all_models_once`` is defined and unit-tested "
+        "but never invoked from ``auto_cmd._phase2_task_loop``. Wire the "
+        "preflight call at task-loop entry per spec sec.2.3 (J2)."
+    )
+
+
+def test_c3_normalize_findings_for_carry_forward_invoked_from_loop2():
+    """C3: ``_normalize_findings_for_carry_forward`` is invoked from the
+    production ``pre_merge_cmd._loop2`` between MAGI iters to strip
+    cross-check annotation fields before re-emitting findings.
+
+    Spec sec.2.1 W4 (caspar Loop 2 iter 4 fix): annotation fields
+    accumulate unbounded across iters if not stripped. The "Prior triage
+    context" block is the canonical record; the working ``findings`` set
+    MUST be normalized back to the un-annotated form.
+    """
+    import inspect
+    import pre_merge_cmd
+
+    # Text-level audit: ``_loop2`` body must reference the normalizer at
+    # least once. If absent, annotations carry over unbounded across iters
+    # despite the helper being unit-tested in isolation.
+    source = inspect.getsource(pre_merge_cmd._loop2)
+    assert "_normalize_findings_for_carry_forward" in source, (
+        "DEAD CODE: ``_normalize_findings_for_carry_forward`` is defined "
+        "and unit-tested but never invoked from ``pre_merge_cmd._loop2``. "
+        "Wire it between MAGI iters to strip annotations before "
+        "re-emitting findings (spec sec.2.1 W4)."
+    )
+
+
+def test_c3_emit_cross_check_disabled_breadcrumb_referenced_from_loop2_body():
+    """C3: ``_emit_cross_check_disabled_breadcrumb_once`` is referenced
+    from the production ``pre_merge_cmd._loop2`` body.
+
+    Already exercised functionally by
+    ``test_c1_loop2_emits_off_breadcrumb_once_per_invocation``; this
+    grep-style audit is a defense-in-depth tripwire that catches
+    dead-code regressions even if the functional test is silently
+    monkeypatched away in a refactor.
+    """
+    import inspect
+    import pre_merge_cmd
+
+    source = inspect.getsource(pre_merge_cmd._loop2)
+    assert "_emit_cross_check_disabled_breadcrumb_once" in source, (
+        "REGRESSION: ``_emit_cross_check_disabled_breadcrumb_once`` no "
+        "longer referenced from ``pre_merge_cmd._loop2``. The G4 "
+        "breadcrumb is silently dead. Re-wire per spec sec.2.1 G4."
+    )
