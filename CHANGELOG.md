@@ -43,8 +43,9 @@ every post-v0.1 release.
 - **`_SUBPROCESS_INCOMPATIBLE_SKILLS` audit + criteria for set membership**
   (W2 balthasar iter 2): re-evaluate the whitelist after first production
   exposure; document criteria for adding/removing skills from the set.
-  Bundled with v1.0.3 LOCKED real headless detection (see [1.0.0]
-  Deferred section).
+  Bundled with v1.0.4 LOCKED real headless detection (see [1.0.0]
+  Deferred section; resequenced 2026-05-03 — v1.0.3 = template alignment
+  audit only).
 - **600s subprocess hang for `/brainstorming` and `/writing-plans`**
   (user directive 2026-05-03): empirically observed manifestation of
   Finding A — when `_run_spec_flow` calls the wrapper functions, A2's
@@ -54,8 +55,9 @@ every post-v0.1 release.
   `ValidationError`. v1.0.1 mitigations: hang is bounded (not infinite);
   `--resume-from-magi` recovery flag (Item A3) provides operator escape;
   spec sec.6.5 + this CHANGELOG document the manual `python run_magi.py`
-  fallback verbatim. **Full LOUD-FAST fix**: rolled to v1.0.3 LOCKED
-  (real headless detection). v1.0.1 ships only the conservative whitelist
+  fallback verbatim. **Full LOUD-FAST fix**: rolled to v1.0.4 LOCKED
+  (real headless detection; resequenced 2026-05-03 — v1.0.3 = template
+  alignment audit only). v1.0.1 ships only the conservative whitelist
   baseline.
 - **Meta-test enforcing `allow_interactive_skill=True` on direct
   `invoke_skill` callsites** (W4 caspar iter 2): point-in-time pre-A2
@@ -325,40 +327,6 @@ every post-v0.1 release.
 
 ### Deferred (rolled to v1.x)
 
-- **Parallel task dispatcher with deferred MAGI gate (v1.0.3 LOCKED)**:
-  user directive 2026-05-03. Replace current sequential `auto` Phase 2
-  task loop (strict INV-22 single-thread) with DAG-aware parallel
-  dispatcher that runs parallelizable tasks concurrently (respecting
-  `addBlockedBy` dependencies) and triggers full MAGI Loop 1+2 ONCE at
-  the end on the cumulative diff. Codifies the v0.4.0/v0.5.0/v1.0.0
-  manual subagent-parallel pattern (~40% wall-time reduction empirically)
-  as plugin feature. Touches `auto_cmd._phase2_task_loop` rewrite + new
-  `task_graph.py` + `parallel_dispatch.py` modules + worktree-per-
-  subagent integration with `superpowers:using-git-worktrees`. INV-22
-  reword: "sequential-within-task, parallel-across-tasks-when-allowed".
-  Estimated 2-3 day single-pillar v1.0.3 cycle. Depends on v1.0.1
-  (plugin self-hosting fix) + v1.0.2 (cross-check completion).
-- **Real headless detection for `_SUBPROCESS_INCOMPATIBLE_SKILLS`
-  (v1.0.3 LOCKED, user directive 2026-05-03)**: v1.0.1 ships A2
-  whitelist + `allow_interactive_skill: bool = False` override hatch as
-  conservative-by-default baseline. The override is bypassed by the
-  wrapper functions internally so the wrappers can dispatch
-  `/brainstorming` and `/writing-plans` via `claude -p` subprocess —
-  but if those subprocesses then HANG (waiting for stdin that never
-  arrives, observed empirically 2026-05-03 on `/writing-plans`) the
-  operator waits the full `subprocess_utils.run_with_timeout` budget
-  (default 600s) before getting a `ValidationError`. v1.0.3 replaces
-  the override hatch with **actual environment detection** — env var
-  `SBTDD_HEADLESS=1` set by `run_sbtdd.py` entrypoint, OR
-  `os.isatty(0)` stdin-TTY check — that raises EVEN when wrappers pass
-  `allow_interactive_skill=True` if the calling context is genuinely
-  headless. This collapses both Finding A manifestations (silent-no-op
-  AND 600s hang) to a single LOUD-FAST `PreconditionError` before any
-  subprocess spawns. Companion v1.0.3 work: audit + criteria for set
-  membership of `_SUBPROCESS_INCOMPATIBLE_SKILLS` post first
-  production exposure (W2 balthasar v1.0.1 iter 2). Depends on v1.0.1
-  (whitelist + override hatch shipped as baseline) + v1.0.2 (so
-  v1.0.3 can iterate on top of own-cycle dogfood evidence from v1.0.2).
 - **MAGI gate template alignment audit (v1.0.3 LOCKED, user directive
   2026-05-03)**: verify the plugin's MAGI cycle implementation
   (`pre_merge_cmd._loop2` + `magi_dispatch` + cross-check sub-phase
@@ -374,9 +342,49 @@ every post-v0.1 release.
   carry-forward format for iter N+1 payload, review summary artifact
   per-feature emission, cost awareness + per-skill model selection,
   per-project setup checklist `{placeholder}` markers in
-  `templates/CLAUDE.local.md.template`. Estimated 1-2 days. Depends on
-  v1.0.2 (cross-check completion) so the audit runs against a
-  fully-functional plugin pipeline.
+  `templates/CLAUDE.local.md.template`. Estimated 1-2 days
+  single-pillar v1.0.3 cycle. Depends on v1.0.2 (cross-check completion)
+  so the audit runs against a fully-functional plugin pipeline.
+  **Sequenced first** (user directive 2026-05-03) so v1.0.4+ cycles
+  run against a template-aligned baseline.
+- **Parallel task dispatcher with deferred MAGI gate (v1.0.4 LOCKED,
+  user directive 2026-05-03 — moved from v1.0.3)**: replace current
+  sequential `auto` Phase 2 task loop (strict INV-22 single-thread)
+  with DAG-aware parallel dispatcher that runs parallelizable tasks
+  concurrently (respecting `addBlockedBy` dependencies) and triggers
+  full MAGI Loop 1+2 ONCE at the end on the cumulative diff. Codifies
+  the v0.4.0/v0.5.0/v1.0.0 manual subagent-parallel pattern (~40%
+  wall-time reduction empirically) as plugin feature. Touches
+  `auto_cmd._phase2_task_loop` rewrite + new `task_graph.py` +
+  `parallel_dispatch.py` modules + worktree-per-subagent integration
+  with `superpowers:using-git-worktrees`. INV-22 reword:
+  "sequential-within-task, parallel-across-tasks-when-allowed".
+  Estimated 2-3 days. Depends on v1.0.1 (plugin self-hosting fix) +
+  v1.0.2 (cross-check completion) + v1.0.3 (template alignment so
+  parallelism iterates on a verified MAGI gate baseline).
+- **Real headless detection for `_SUBPROCESS_INCOMPATIBLE_SKILLS`
+  (v1.0.4 LOCKED, user directive 2026-05-03 — moved from v1.0.3)**:
+  v1.0.1 ships A2 whitelist + `allow_interactive_skill: bool = False`
+  override hatch as conservative-by-default baseline. The override is
+  bypassed by the wrapper functions internally so the wrappers can
+  dispatch `/brainstorming` and `/writing-plans` via `claude -p`
+  subprocess — but if those subprocesses then HANG (waiting for stdin
+  that never arrives, observed empirically 2026-05-03 on
+  `/writing-plans`) the operator waits the full
+  `subprocess_utils.run_with_timeout` budget (default 600s) before
+  getting a `ValidationError`. v1.0.4 replaces the override hatch
+  with **actual environment detection** — env var `SBTDD_HEADLESS=1`
+  set by `run_sbtdd.py` entrypoint, OR `os.isatty(0)` stdin-TTY
+  check — that raises EVEN when wrappers pass
+  `allow_interactive_skill=True` if the calling context is genuinely
+  headless. This collapses both Finding A manifestations
+  (silent-no-op AND 600s hang) to a single LOUD-FAST
+  `PreconditionError` before any subprocess spawns. Companion v1.0.4
+  work: audit + criteria for set membership of
+  `_SUBPROCESS_INCOMPATIBLE_SKILLS` post first production exposure
+  (W2 balthasar v1.0.1 iter 2). Depends on v1.0.1 (whitelist +
+  override hatch shipped as baseline) + v1.0.2 (own-cycle dogfood
+  evidence) + v1.0.3 (template-aligned baseline).
 - INV-31 default flip dedicated cycle (separate field-data doc).
 - Group B options 1, 3, 4, 6, 7 (opt-in flags only; not core deliverable).
 - GitHub Actions CI workflow.
