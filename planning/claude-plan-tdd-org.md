@@ -27,7 +27,7 @@
 
 ### NF-A budget
 
-`make verify` <= 150s budget. Soft-target <= 130s. v1.0.0 baseline 117s + ~10-15 new tests should keep under target.
+`make verify` <= 150s budget. Soft-target <= 140s (W6 caspar iter 2: relaxed from <=130s to account for sha256 hashing CPU cost in `_file_signature`). v1.0.0 baseline 117s + ~21 new tests should keep under target.
 
 ### Surfaces
 
@@ -201,6 +201,14 @@ Add to `tests/test_spec_cmd.py` a test where:
 
 Run the test — should PASS once the composite-signature implementation is in place. This regression-guards against the FS-precision class documented in spec sec.2.1.
 
+- [ ] **Step 5c: Add 2 edge-case tests for `_file_signature` (W7 caspar iter 2)**
+
+Add to `tests/test_spec_cmd.py`:
+1. `test_file_signature_handles_empty_file` — file with size 0 returns signature `(mtime_ns, 0, sha256(b""))` where `sha256(b"")` is the well-known constant `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. Asserts the helper handles empty content correctly.
+2. `test_file_signature_handles_large_file` — file >100MB (use `tmp_path / "large.bin"` written via streaming chunked write). Confirm `_file_signature` reads via 64KB chunks (per impl) and returns correct sha256 without loading whole file into memory. Use `@pytest.mark.slow` marker since this is a multi-second test on slower disks.
+
+These edge cases close the W7 caspar concern about composite-signature edge case test coverage. Skip binary content since production specs are text-only (UTF-8); empty + large suffice.
+
 - [ ] **Step 6: Add 3 more A0 tests**
 
 Tests for A0-2 (writing_plans no-op), A0-3 (first-run path), A0-4 (happy path).
@@ -348,6 +356,7 @@ Modify `main`:
 - A3-3 (artifacts missing → abort with `PreconditionError`).
 - A3-5 (malformed spec rejected — `spec_snapshot.emit_snapshot` raises `ValueError` or returns empty dict; structural check fires before MAGI dispatch).
 - A3-6 (malformed plan rejected — missing `### Task` heading OR missing `- [ ]` checkbox; structural check fires before MAGI dispatch).
+- **A3-7 exception leakage regression** (W3 caspar iter 2): monkeypatch `spec_snapshot.emit_snapshot` to raise `OSError("simulated FS read failure")`; assert `--resume-from-magi` path catches it (per widened `except (FileNotFoundError, ValueError, OSError)` in spec sec.2.4) and re-raises as `PreconditionError`, NOT a leaked OSError to the operator. Regression-guards the W3 widening.
 
 - [ ] **Step 7: Run full test suite**
 

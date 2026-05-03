@@ -8,6 +8,65 @@ The plugin is pre-1.0 (`v0.1.x`); the CHANGELOG starts recording changes
 introduced during Milestone D hardening and will be human-curated for
 every post-v0.1 release.
 
+## [1.0.1] - DRAFT (in flight, MAGI Checkpoint 2 iter 2 accepted GO_WITH_CAVEATS 3-0)
+
+> **Status**: Spec + plan accepted; implementation pending. v1.0.0
+> Deferred items rolled forward to v1.0.2 per user directive 2026-05-03.
+> v1.0.1 pivoted to "Plugin self-hosting fix" after 3 dogfood findings of
+> v1.0.0 (Finding A claude-p Skill subprocess broken; Finding B
+> spec_snapshot regex too strict; Finding C output validation missing).
+
+### Planned (4 items LOCKED + 1 pre-migration task)
+
+- **A1** Permissive escenario regex (`spec_snapshot.emit_snapshot` two-tier
+  fallback for distributed escenarios across pillar sections).
+- **Pre-A2** Audit + migration of direct `invoke_skill` callers (3 prod +
+  4 test sites opt into `allow_interactive_skill=True` BEFORE A2 lands).
+- **A0** Output validation tripwire with composite signature
+  (mtime_ns + size + sha256) for cross-platform correctness; INV-37
+  proposed (mtime check fragile under FAT32/network mounts).
+- **A2** Headless-mode detection: `_SUBPROCESS_INCOMPATIBLE_SKILLS`
+  set + `allow_interactive_skill: bool = False` kwarg in `invoke_skill`
+  (safe-by-default; wrappers opt in internally).
+- **A3** `--resume-from-magi` recovery flag + structural validation
+  (`spec_snapshot.emit_snapshot` parse + plan task/checkbox regex).
+
+### Deferred to v1.0.2 (rolled forward from v1.0.0 + new from iter 2 triage)
+
+- Cross-check telemetry aggregation script (originally v1.0.1 LOCKED;
+  pivot deferred).
+- Cross-check prompt diff threading (W-NEW1, originally v1.0.1).
+- H5-2 spec_lint enforcement at Checkpoint 2 (originally v1.0.1).
+- Own-cycle cross-check dogfood (originally v1.0.1; depends on v1.0.1
+  fixes shipping first to enable `/sbtdd pre-merge` end-to-end).
+- **`_SUBPROCESS_INCOMPATIBLE_SKILLS` audit + criteria for set membership**
+  (W2 balthasar iter 2): re-evaluate the whitelist after first production
+  exposure; document criteria for adding/removing skills from the set.
+- **Meta-test enforcing `allow_interactive_skill=True` on direct
+  `invoke_skill` callsites** (W4 caspar iter 2): point-in-time pre-A2
+  audit catches current callsites; v1.0.2 adds AST-based or grep-based
+  meta-test to enforce against future regressions where new code adds
+  direct calls without the override.
+- **Per-module coverage threshold via `coverage.py` + `--fail-under=85`**
+  (I2 iter 1): out of scope for defensive-fix v1.0.1 release.
+
+### Process notes
+
+- **v1.0.1 own-cycle methodology**: spec + plan hand-crafted in
+  interactive Claude Code session (NOT via `claude -p /brainstorming`
+  subprocess) per consistency with Finding A discovery — the broken
+  subprocess pattern IS the bug v1.0.1 ships fixes for. Recovery flag
+  A3 will codify this pattern post-ship.
+- **Manual MAGI Checkpoint 2 dispatch**: `python skills/magi/scripts/run_magi.py`
+  invoked directly because v1.0.0 plugin's `/sbtdd spec` flow is broken
+  via Finding A (the same bug v1.0.1 fixes). Iter 1 GO_WITH_CAVEATS (3-0)
+  with 3 CRITICAL/10 WARNING; iter 2 GO_WITH_CAVEATS (3-0) with 0 CRITICAL
+  (resolved) + 7 WARNING (low-risk doc/test). All 3 agents recommended
+  iter 2 terminal under G1 cap=3 HARD; INV-29 satisfied via
+  /receiving-code-review triage.
+- **G1 binding cap=3 HARD respected**: Checkpoint 2 converged in 2 iters
+  (iter 2 terminal). NO INV-0 override invoked.
+
 ## [1.0.0] - 2026-05-02
 
 > **Status**: Shipped. Bundle accepted at-threshold per spec sec.6 Gate

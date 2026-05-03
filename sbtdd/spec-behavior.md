@@ -39,7 +39,7 @@ Cuatro items LOCKED single-pillar:
 **Criterio de exito**:
 - 1033 + 1 skipped tests preservados + ~21-25 nuevos = ~1054-1058
   (5 A0 + 5 A1 + 5 A2 + 6 A3 + Pre-A2 audit step verification).
-- `make verify` <= 150s (soft-target <= 130s).
+- `make verify` <= 150s (soft-target <= 140s).
 - Empirical: en sesion Claude Code nueva, `/brainstorming` +
   `/writing-plans` interactivos + `/sbtdd spec --resume-from-magi`
   completa end-to-end.
@@ -262,9 +262,14 @@ def main(argv=None):
         plan_org_path = root / "planning" / "claude-plan-tdd-org.md"
 
         # spec-behavior.md must yield a parseable snapshot (>=1 escenario).
+        # W3 caspar iter 2 fix: widen exception class to include OSError
+        # (FS-level read failures: permission denied, broken symlink, etc.)
+        # so structural validation never leaks an unexpected exception
+        # type to the operator. Regression test ensures exception leakage
+        # caught at A3 boundary.
         try:
             snapshot = spec_snapshot.emit_snapshot(spec_behavior_path)
-        except (FileNotFoundError, ValueError) as exc:
+        except (FileNotFoundError, ValueError, OSError) as exc:
             raise PreconditionError(
                 f"--resume-from-magi requires a valid {spec_behavior_path} "
                 f"(spec_snapshot.emit_snapshot failed: {exc}). Run "
@@ -652,6 +657,35 @@ existed in production. Document the fallback choice + iteration in
 CHANGELOG `[1.0.1]` Process notes. The v0.5.0 + v1.0.0 ship cycles
 are precedent that this manual fallback is workable; R4 risk register
 entry covers this scenario.
+
+**Verbatim fallback command** (W1 balthasar iter 2): warm + ready
+to copy-paste:
+
+```bash
+mkdir -p .claude/magi-runs/v101-checkpoint2-loop2-iter1
+{
+  cat .claude/magi-runs/v101-loop2-iter1-header.md  # operator-prepared
+  echo "---"
+  cat sbtdd/spec-behavior.md
+  echo "---"
+  cat planning/claude-plan-tdd.md
+} > .claude/magi-runs/v101-loop2-iter1-payload.md
+python skills/magi/scripts/run_magi.py code-review \
+  .claude/magi-runs/v101-loop2-iter1-payload.md \
+  --model opus --timeout 900 \
+  --output-dir .claude/magi-runs/v101-loop2-iter1
+```
+
+**A0 escape hatch documentation** (W5 caspar iter 2): the
+`--resume-from-magi` flag explicitly bypasses A0 composite-signature
+mtime check because operator-acknowledged manual artifacts (produced
+out-of-band via `/brainstorming` + `/writing-plans` interactive
+session, OR via hand-crafting like v1.0.1's own cycle) do NOT have
+their mtime ticked by a subprocess. INV-37 mtime-tripwire applies
+ONLY when `_run_spec_flow` dispatches Skills via subprocess; resume
+path skips `_run_spec_flow` entirely. Document this in CHANGELOG
+`[1.0.1]` Process notes so future operators understand the escape
+semantics.
 
 ---
 
