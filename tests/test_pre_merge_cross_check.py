@@ -11,6 +11,7 @@ distinct-from-dispatch-failure (melchior iter 4 W).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -1037,9 +1038,7 @@ def test_compute_loop2_diff_cap_raised_to_1mb(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess_utils, "run_with_timeout", fake_run)
     out = _compute_loop2_diff(tmp_path)
     # No truncation: full diff content present, no marker.
-    assert len(out) == len(diff), (
-        "900KB diff must NOT be truncated under the raised 1MB cap"
-    )
+    assert len(out) == len(diff), "900KB diff must NOT be truncated under the raised 1MB cap"
     assert "[... truncated for prompt budget ...]" not in out
 
 

@@ -1751,7 +1751,6 @@ def test_persistence_error_breadcrumb_invoked_on_write_failure(monkeypatch, tmp_
     auto_cmd._drain_heartbeat_queue_and_persist(auto_run_path)
 
     assert len(calls) == 1, (
-        "persistence write-failure path must invoke "
-        "_emit_persistence_error_breadcrumb"
+        "persistence write-failure path must invoke _emit_persistence_error_breadcrumb"
     )
     assert "OSError" in calls[0] or "simulated tmp write failure" in calls[0]

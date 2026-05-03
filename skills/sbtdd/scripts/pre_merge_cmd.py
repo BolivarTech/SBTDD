@@ -760,8 +760,8 @@ def _loop2(
             # the cap fired and what the original raw size was. Pre-fix
             # post-mortem readers had no signal that 78% of the patch had
             # been silently dropped.
-            cross_check_diff, diff_original_bytes, diff_truncated = (
-                _compute_loop2_diff_with_meta(root)
+            cross_check_diff, diff_original_bytes, diff_truncated = _compute_loop2_diff_with_meta(
+                root
             )
             annotated_findings = _loop2_cross_check(
                 diff=cross_check_diff,
