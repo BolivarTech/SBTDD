@@ -184,20 +184,27 @@ def test_h2_1_scenario_header_form_tolerance(
 
 
 def test_emit_snapshot_raises_when_no_escenarios_section(tmp_path: Path) -> None:
-    """WARNING melchior zero-match guard: missing §4 section raises ValueError."""
+    """WARNING melchior zero-match guard: missing §4 section raises ValueError.
+
+    v1.0.1 Item A1: Tier 2 fallback also runs against the whole document;
+    when neither tier finds scenarios the unified ``No escenarios found``
+    error fires (still preserves the zero-match guard).
+    """
     from spec_snapshot import emit_snapshot
 
     spec = tmp_path / "spec.md"
     spec.write_text("# spec without scenarios section", encoding="utf-8")
-    with pytest.raises(ValueError, match=r"No.*Escenarios section"):
+    with pytest.raises(ValueError, match=r"No escenarios"):
         emit_snapshot(spec)
 
 
 def test_emit_snapshot_raises_when_section_empty(tmp_path: Path) -> None:
-    """WARNING melchior zero-match guard: empty §4 section raises ValueError.
+    """WARNING melchior zero-match guard: empty §4 section + empty doc raises.
 
     Silent {} would compare equal to another empty {} from a similarly
-    broken spec, masking real drift.
+    broken spec, masking real drift. v1.0.1 Item A1: when Tier 1 finds the
+    section but its body is empty, Tier 2 fallback also runs; when Tier 2
+    yields zero scenarios the unified error fires.
     """
     from spec_snapshot import emit_snapshot
 
@@ -213,7 +220,7 @@ def test_emit_snapshot_raises_when_section_empty(tmp_path: Path) -> None:
 """,
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="zero scenarios"):
+    with pytest.raises(ValueError, match=r"No escenarios"):
         emit_snapshot(spec)
 
 
