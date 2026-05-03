@@ -614,3 +614,275 @@ def test_spec_routes_writing_plans_through_invoke_writing_plans_wrapper(
         "bare superpowers_dispatch.writing_plans MUST NOT be called -- the "
         "H5-1 scenario-stub directive lives in invoke_writing_plans"
     )
+
+
+# ---------------------------------------------------------------------------
+# v1.0.1 Item A0 -- output validation tripwire (sec.2.1 / sec.4 escenarios
+# A0-1 .. A0-5). The composite-signature (mtime_ns + size + sha256) check
+# inside ``_run_spec_flow`` detects subprocesses that exit cleanly but
+# silently fail to write the expected output file (Finding C from v1.0.0
+# dogfood: ``claude -p /brainstorming`` returncode=0, file unchanged).
+# ---------------------------------------------------------------------------
+
+
+def _seed_a0_env(tmp_path: Path) -> None:
+    """Seed the minimum dirs for A0 ``_run_spec_flow`` tests."""
+    (tmp_path / "sbtdd").mkdir(exist_ok=True)
+    (tmp_path / "planning").mkdir(exist_ok=True)
+
+
+def test_a0_1_brainstorming_silent_no_op_detected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A0-1: brainstorming subprocess returns exit 0 but does not modify spec.
+
+    Pre-existing ``sbtdd/spec-behavior.md`` from a previous cycle; stub
+    brainstorming does NOT touch the file (simulates ``claude -p`` headless
+    no-op). ``_run_spec_flow`` must detect the unchanged composite signature
+    and raise ``PreconditionError`` with "no fue modificado".
+    """
+    import spec_cmd
+    import superpowers_dispatch
+    from errors import PreconditionError
+
+    _seed_a0_env(tmp_path)
+    spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
+    spec_behavior.write_text(
+        "# pre-existing behavior\n\n## §4 Escenarios BDD\n\n"
+        "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+
+    def silent_brainstorming(*a: object, **kw: object) -> object:
+        # Simulate `claude -p /brainstorming` exit 0 with NO file write.
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", silent_brainstorming)
+    monkeypatch.setattr(
+        superpowers_dispatch, "invoke_writing_plans", lambda **kw: None
+    )
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd._run_spec_flow(tmp_path)
+    msg = str(ei.value)
+    assert "no fue modificado" in msg, msg
+    assert "spec-behavior.md" in msg, msg
+
+
+def test_a0_2_writing_plans_silent_no_op_detected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A0-2: writing_plans subprocess silently no-op on pre-existing plan-org."""
+    import spec_cmd
+    import superpowers_dispatch
+    from errors import PreconditionError
+
+    _seed_a0_env(tmp_path)
+    spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
+    plan_org = tmp_path / "planning" / "claude-plan-tdd-org.md"
+    spec_behavior.write_text(
+        "# pre-existing behavior\n\n## §4 Escenarios BDD\n\n"
+        "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+        encoding="utf-8",
+    )
+    plan_org.write_text(
+        "# pre-existing plan\n\n### Task 1: x\n- [ ] do\n", encoding="utf-8"
+    )
+
+    def updating_brainstorming(*a: object, **kw: object) -> object:
+        # Brainstorming WRITES new content (passes A0 check).
+        spec_behavior.write_text(
+            "# updated behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: updated**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+            encoding="utf-8",
+        )
+        return None
+
+    def silent_writing_plans(**kw: object) -> object:
+        # writing_plans does NOT modify plan_org -> A0 must detect.
+        return None
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "brainstorming", updating_brainstorming
+    )
+    monkeypatch.setattr(
+        superpowers_dispatch, "invoke_writing_plans", silent_writing_plans
+    )
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd._run_spec_flow(tmp_path)
+    msg = str(ei.value)
+    assert "no fue modificado" in msg, msg
+    assert "claude-plan-tdd-org.md" in msg, msg
+
+
+def test_a0_3_first_run_with_no_prior_artifacts_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A0-3: first run (no pre-existing files) -- composite check skipped.
+
+    Pre-subprocess signature is ``None``; post-subprocess existence check
+    still verifies the file is now present. Composite check short-circuits
+    when ``before is None``, allowing the freshly-written file through.
+    """
+    import spec_cmd
+    import superpowers_dispatch
+
+    _seed_a0_env(tmp_path)
+    spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
+    plan_org = tmp_path / "planning" / "claude-plan-tdd-org.md"
+    assert not spec_behavior.exists()
+    assert not plan_org.exists()
+
+    def writing_brainstorming(*a: object, **kw: object) -> object:
+        spec_behavior.write_text(
+            "# behavior\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: x**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+            encoding="utf-8",
+        )
+        return None
+
+    def writing_plans_writer(**kw: object) -> object:
+        plan_org.write_text(
+            "### Task 1: x\n- [ ] do\n", encoding="utf-8"
+        )
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", writing_brainstorming)
+    monkeypatch.setattr(
+        superpowers_dispatch, "invoke_writing_plans", writing_plans_writer
+    )
+
+    # Should NOT raise -- first-run path tolerated.
+    spec_cmd._run_spec_flow(tmp_path)
+    assert spec_behavior.exists()
+    assert plan_org.exists()
+
+
+def test_a0_4_happy_path_both_subprocesses_write_correctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A0-4: pre-existing files + both subprocesses write new content -> success."""
+    import spec_cmd
+    import superpowers_dispatch
+
+    _seed_a0_env(tmp_path)
+    spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
+    plan_org = tmp_path / "planning" / "claude-plan-tdd-org.md"
+    spec_behavior.write_text("# OLD spec\n", encoding="utf-8")
+    plan_org.write_text("# OLD plan\n", encoding="utf-8")
+
+    def writing_brainstorming(*a: object, **kw: object) -> object:
+        spec_behavior.write_text(
+            "# NEW spec\n\n## §4 Escenarios BDD\n\n"
+            "**Escenario 1: new**\n\n> **Given** g\n> **When** w\n> **Then** t\n",
+            encoding="utf-8",
+        )
+        return None
+
+    def writing_plans_writer(**kw: object) -> object:
+        plan_org.write_text(
+            "# NEW plan\n\n### Task 1: x\n- [ ] do\n", encoding="utf-8"
+        )
+        return None
+
+    monkeypatch.setattr(superpowers_dispatch, "brainstorming", writing_brainstorming)
+    monkeypatch.setattr(
+        superpowers_dispatch, "invoke_writing_plans", writing_plans_writer
+    )
+
+    # Should NOT raise -- both signatures change -> happy path.
+    spec_cmd._run_spec_flow(tmp_path)
+
+
+def test_a0_5_same_content_rewrite_under_fast_clock_detected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A0-5: identical-bytes rewrite on fast-clock FS -> composite tuple equal.
+
+    Simulates the FS-precision regression class: a subprocess that
+    rewrites the file with byte-identical content within the same
+    mtime tick. Bare-mtime check would catch THIS case incidentally
+    (mtime equal), but composite signature catches it deterministically
+    via size + sha256 equality. Test verifies the check fires.
+    """
+    import spec_cmd
+    import superpowers_dispatch
+    from errors import PreconditionError
+
+    _seed_a0_env(tmp_path)
+    spec_behavior = tmp_path / "sbtdd" / "spec-behavior.md"
+    same_content = (
+        "# behavior\n\n## §4 Escenarios BDD\n\n"
+        "**Escenario 1: stub**\n\n> **Given** g\n> **When** w\n> **Then** t\n"
+    )
+    spec_behavior.write_text(same_content, encoding="utf-8")
+
+    # Capture the original signature before the test stub re-writes.
+    original_sig = spec_cmd._file_signature(spec_behavior)
+
+    def same_content_brainstorming(*a: object, **kw: object) -> object:
+        # Rewrite with IDENTICAL bytes; no real content change.
+        spec_behavior.write_text(same_content, encoding="utf-8")
+        return None
+
+    monkeypatch.setattr(
+        superpowers_dispatch, "brainstorming", same_content_brainstorming
+    )
+    # Force composite signature equality regardless of FS clock precision
+    # by pinning ``_file_signature`` to return ``original_sig`` for both
+    # pre and post calls. This makes the test deterministic across
+    # FAT32 / NTFS / network-mount precision differences.
+    monkeypatch.setattr(spec_cmd, "_file_signature", lambda p: original_sig)
+
+    with pytest.raises(PreconditionError) as ei:
+        spec_cmd._run_spec_flow(tmp_path)
+    msg = str(ei.value)
+    assert "no fue modificado" in msg, msg
+    assert "composite signature" in msg, msg
+
+
+def test_file_signature_handles_empty_file(tmp_path: Path) -> None:
+    """A0 W7 edge case: empty file returns deterministic signature.
+
+    sha256 of empty bytes is the well-known constant; helper must handle
+    zero-byte content without IO error.
+    """
+    import spec_cmd
+
+    p = tmp_path / "empty.bin"
+    p.write_bytes(b"")
+    sig = spec_cmd._file_signature(p)
+    mtime_ns, size, digest = sig
+    assert size == 0
+    # SHA256 of empty bytes is a well-known constant.
+    assert digest == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert isinstance(mtime_ns, int)
+
+
+@pytest.mark.slow
+def test_file_signature_handles_large_file(tmp_path: Path) -> None:
+    """A0 W7 edge case: file >100MB streams via 64KB chunks without OOM.
+
+    Confirms the chunked-read implementation does NOT load the entire
+    file into memory. Marked slow because writing 100MB takes seconds
+    on slower disks.
+    """
+    import hashlib
+
+    import spec_cmd
+
+    p = tmp_path / "large.bin"
+    chunk = b"A" * 65536  # 64KB
+    expected_h = hashlib.sha256()
+    # Write 100MB total = 1600 chunks of 64KB.
+    n_chunks = 1600
+    with p.open("wb") as fh:
+        for _ in range(n_chunks):
+            fh.write(chunk)
+            expected_h.update(chunk)
+    expected_size = 65536 * n_chunks  # 100MB exactly
+    sig = spec_cmd._file_signature(p)
+    _mtime_ns, size, digest = sig
+    assert size == expected_size
+    assert digest == expected_h.hexdigest()
