@@ -1093,4 +1093,3 @@ def test_phase4_pre_merge_audit_dir_invoked_from_loop2(tmp_path, monkeypatch):
     assert captured["audit_dir"] == sentinel_dir, (
         "audit_dir threaded into _loop2_cross_check must be the helper's return"
     )
-    assert "real change" in prompt

@@ -721,7 +721,15 @@ def _loop2(
         # shadow configs (e.g. _ShadowCfg from auto_cmd) that may lack the
         # field; absence is treated as opted-out.
         if getattr(cfg, "magi_cross_check", False):
-            audit_dir = root / ".claude" / "magi-cross-check"
+            # v1.0.0 Loop 2 iter 2->3 R11 sweep: route through the
+            # ``auto_cmd._phase4_pre_merge_audit_dir`` helper so the
+            # audit-directory path has a single source of truth shared
+            # between pre-merge and auto-mode call sites. Deferred import
+            # honors the cross-subagent boundary (pre_merge_cmd is the
+            # dispatcher; auto_cmd owns the helper).
+            import auto_cmd  # noqa: PLC0415 - deferred to honor cross-module boundary
+
+            audit_dir = auto_cmd._phase4_pre_merge_audit_dir(root)
             # v1.0.0 W4 (caspar Loop 2 iter 4): normalize findings before
             # they enter the cross-check meta-reviewer. In iter 1, MAGI's
             # consensus.findings list is fresh and carries no annotation
