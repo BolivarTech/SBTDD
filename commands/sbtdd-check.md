@@ -129,14 +129,24 @@ after a phase closes):
 
 Steps:
 - Read `current_phase` from `.claude/session-state.json`.
+- If `current_phase == "done"`: report `N/A — plan complete; pre-merge review
+  commits (test:/fix:/refactor:) are expected and not drift`. Stop here.
 - Read the prefix of the last git commit message (e.g. `test:`, `feat:`,
   `fix:`, `refactor:`).
-- Apply the mapping: if `current_phase` does NOT match the phase implied by
-  the last phase-closing commit (e.g., state says `green` but last commit is
-  `refactor:` → drift; state says `refactor` but last commit is `test:` →
-  drift), report `FAIL — drift detected: state=<phase>, last_commit=<prefix>`.
-- If they are consistent (e.g., state `green` + last commit `test:`, or
-  state `refactor` + last commit `feat:`), report `PASS`.
+- Classify the (current_phase, last_commit) pair in order:
+  1. **Consistent** — `current_phase` matches the phase implied by the last
+     phase-closing commit per the table (e.g., state `green` + last commit
+     `test:`). Report `PASS`.
+  2. **Recoverable lag** — `current_phase` matches the phase that was *closed
+     by* the last commit (e.g., state `red` + last commit `test:` — the commit
+     landed but the state was not advanced yet). Report
+     `NOTE — recoverable lag: state=<phase>, last_commit=<prefix>. Complete
+     the state update and confirm with the user before resuming.` This is NOT
+     a hard failure.
+  3. **DRIFT** — neither of the above (e.g., state says `green` but last
+     commit is `refactor:`, or state says `refactor` but last commit is
+     `test:`). Report `FAIL — drift detected: state=<phase>,
+     last_commit=<prefix>`.
 
 For deeper drift analysis, refer to
 `${CLAUDE_PLUGIN_ROOT}/skills/sbtdd/references/routing.md` (this file

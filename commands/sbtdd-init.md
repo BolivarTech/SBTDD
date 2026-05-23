@@ -152,6 +152,23 @@ sbtdd/
 planning/
 ```
 
+**Already-tracked warning:** before appending any entry, run
+`git ls-files -- <path>` for each of the five entries in the target repo.
+If any path is **already tracked** by git, emit a **PROMINENT WARNING**:
+
+> ⚠ WARNING: the following paths are already tracked by git:
+>   <list tracked paths>
+> Adding them to `.gitignore` will NOT cause git to untrack them — git
+> continues to track already-committed files regardless of `.gitignore`.
+> Ignoring an already-tracked path is surprising and usually unintended.
+> To untrack a path you must run: `git rm --cached <path>`
+> **Do you still want to add these entries to `.gitignore`?** (Proceed / Skip
+> the already-tracked entries / Abort)
+
+Wait for the user's decision before writing those entries. Entries that are
+NOT already tracked may be appended without waiting (subject to the checks
+below). Do NOT change which entries are in the checked set.
+
 **Exact-line matching:** when checking whether an entry already exists, match
 the **full line exactly** (strip leading/trailing whitespace; also treat a
 line with an optional trailing `/` as matching the bare form — e.g. `sbtdd/`

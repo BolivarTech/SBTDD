@@ -110,16 +110,23 @@ they diverge, apply this canon order:
 | `refactor:`                      | `red` (next task) or `done` (plan complete) |
 | `chore:`                         | `red` (next task) or `done` (plan complete) |
 
-**Operational rule:** if `.claude/session-state.json` `current_phase` does NOT
-match the phase implied by the last phase-closing commit per the table above
-(e.g., `current_phase: "green"` but last commit is `refactor:` → drift;
-`current_phase: "refactor"` but last commit is `test:` → drift),
-**there is drift** — abort and escalate to the user. Recovery is manual,
-not automatic; silent synchronization hides protocol bugs.
+**Operational rule — classify in order:**
 
-Recovery if the state file is corrupted or lost: regenerate it from the plan
-(last `[x]`) + git (last commit), then escalate to the user for confirmation
-before continuing.
+1. **N/A** — `current_phase == "done"`: plan complete; post-done review
+   commits (`test:` / `fix:` / `refactor:`) are expected. NOT drift.
+2. **Consistent** — `current_phase` equals the phase implied by the last
+   phase-closing commit per the table above. Normal; continue.
+3. **Recoverable lag** — `current_phase` equals the phase *closed by* the
+   last commit (commit landed, state update was interrupted). NOT drift;
+   complete the state update and confirm with the user before resuming.
+4. **DRIFT** — none of the above. **Abort and escalate to the user.**
+   Recovery is manual, not automatic; silent synchronization hides protocol
+   bugs. (e.g., `current_phase: "green"` but last commit is `refactor:` →
+   drift; `current_phase: "refactor"` but last commit is `test:` → drift.)
+
+Recovery if the `.claude/session-state.json` is corrupted or lost: regenerate
+it from the plan (last `[x]`) + git (last commit), then escalate to the user
+for confirmation before continuing.
 
 ### 2.2 State file schema
 

@@ -67,18 +67,41 @@ The consistency check therefore compares `current_phase` to the phase
 **implied by** the last phase-closing commit, not to the prefix of that same
 phase.
 
+**Classification rules (evaluate in order):**
+
+1. **N/A** — `current_phase == "done"`: the plan is complete; any post-done
+   commits (`test:` / `fix:` / `refactor:` from a pre-merge review mini-cycle)
+   are expected and correct. This is NOT drift; do not abort.
+
+2. **Consistent** — `current_phase` equals the phase implied by the last
+   phase-closing commit per the table above. Normal state; continue.
+
+3. **Recoverable lag** — `current_phase` equals the phase that was *closed* by
+   the last commit (i.e. the commit landed but the state update was
+   interrupted before `current_phase` was advanced). This is NOT drift; resume
+   by completing the state update and advancing `current_phase`, then
+   escalate to the user for confirmation.
+
+4. **DRIFT** — none of the above. `current_phase` does not match either the
+   implied next phase or the closed phase. **Abort and escalate to the user
+   immediately.** Do not attempt silent reconciliation; silent sync hides
+   protocol bugs.
+
 Worked examples:
+- `current_phase = "done"` + last commit `fix:` → **N/A** (pre-merge
+  review mini-cycle after plan completion; not drift).
+- `current_phase = "red"` + last commit `test:` → **recoverable lag** (the
+  `test:` commit closed Red, but `current_phase` was not yet advanced to
+  `green`; resume by updating state).
+- `current_phase = "green"` + last commit `feat:` → **recoverable lag** (the
+  `feat:` commit closed Green, but `current_phase` was not yet advanced to
+  `refactor`).
+- `current_phase = "green"` + last commit `test:` → **consistent**.
+- `current_phase = "refactor"` + last commit `feat:` → **consistent**.
 - `current_phase = "green"` + last commit `refactor:` → **DRIFT** (green
   implies the last closing commit was `test:`, but we see `refactor:`).
 - `current_phase = "refactor"` + last commit `test:` → **DRIFT** (refactor
   implies the last closing commit was `feat:`/`fix:`, but we see `test:`).
-- `current_phase = "green"` + last commit `test:` → **consistent**.
-- `current_phase = "refactor"` + last commit `feat:` → **consistent**.
-
-**Hard rule:** if the mapping above shows that `current_phase` does NOT match
-the phase implied by the last phase-closing commit, **drift has occurred** —
-**abort and escalate to the user immediately**. Do not attempt silent
-reconciliation; silent sync hides protocol bugs.
 
 ### Recovery procedure (manual, not automatic)
 

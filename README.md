@@ -137,12 +137,19 @@ Install the `superpowers` plugin via your Claude Code plugin manager.
 
 ### `magi` plugin
 
-The MAGI gate (`magi:magi`) is used as a multi-perspective review checkpoint
-between planning and TDD execution. Install the `magi` plugin separately.
+The MAGI gate (`magi:magi`) runs **twice** across the full SBTDD lifecycle:
 
-Note: MAGI requires genuine uncertainty to be useful — it is a deliberation
-gate, not a rubber stamp. If `magi:magi` is unavailable, `/sbtdd` will report
-the missing skill and halt rather than skip the gate silently.
+1. **Plan gate (Checkpoint 2)** — after planning, before TDD execution begins.
+   MAGI reviews the spec + plan and must reach at least GO WITH CAVEATS before
+   the approved `claude-plan-tdd.md` is written.
+2. **Pre-merge review** — after all TDD tasks are complete (`current_phase:
+   "done"`), as part of the dual-loop review (Loop 2). "Once" in any phase
+   description means once per that phase, not once per task or TDD cycle.
+
+Install the `magi` plugin separately. Note: MAGI requires genuine uncertainty
+to be useful — it is a deliberation gate, not a rubber stamp. If `magi:magi`
+is unavailable, `/sbtdd` will report the missing skill and halt rather than
+skip the gate silently.
 
 ### `tdd-guard` binary
 
