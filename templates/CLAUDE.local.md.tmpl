@@ -44,7 +44,7 @@ this project's stack:
 This project follows the SBTDD paradigm
 (Spec + Behavior + Test Driven Development).
 
-### Document hierarchy
+### 1.1 Document hierarchy
 
 | File | Purpose | Tracked |
 |------|---------|---------|
@@ -71,8 +71,9 @@ Implications:
 - A new developer cloning the repo **instantiates their own `CLAUDE.local.md`**
   from the template and **configures their own `.claude/settings.json`** with
   the hooks in §4.1.
-- The state file (`.claude/session-state.json`) is also local — each autonomous
-  session regenerates it.
+- The state file (`.claude/session-state.json`) is also local — it is
+  **created on first run and resumed thereafter — never overwritten mid-plan**
+  (see §2.3).
 
 ---
 
@@ -158,7 +159,7 @@ Add `.claude/session-state.json` to the project `.gitignore`.
     to `null` (no phase closure has occurred yet).
 - **When closing a phase** — the agent updates `current_phase`,
   `phase_started_at_commit`, and the verification fields inside the state file,
-  **after** the atomic commit for the phase (see §4).
+  **after** the atomic commit for the phase (see §5).
 - **When closing a complete task** (all 3 phases closed) — the agent marks `[x]`
   on the corresponding checkbox in the plan, commits the plan change with prefix
   `chore: mark task {id} complete`, and updates the state file: advances
@@ -178,6 +179,11 @@ manual user intervention and review of the impact on the active plan.
 
 All ephemeral state (task, phase, progress) lives in the three state artifacts
 of §2 (state file, git, plan). Never in `CLAUDE.local.md`.
+
+> **Note on section numbering:** Sections §3 (TDD cycle), §6 (code review),
+> and §7 (finalization) are intentionally not in this file — they are
+> procedural and live in the `sbtdd` orchestrator skill. Numbering is kept
+> aligned with the skill's cross-references.
 
 ---
 
@@ -257,7 +263,8 @@ Authorized commit prefixes in this project:
 
 ### Exception under approved plan
 
-Once `planning/claude-plan-tdd.md` is signed off at Checkpoint 2, **plan
+Once `planning/claude-plan-tdd.md` is signed off at Checkpoint 2 (the MAGI
+plan-review gate, run during planning), **plan
 approval constitutes explicit user authorization to autonomously execute all
 commits required to complete the plan**. The agent MUST NOT interrupt to
 request permission before each authorized commit.
