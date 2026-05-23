@@ -1,0 +1,7 @@
+# Local session memory (remember plugin) — developer-local, not plugin source
+.remember/
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+*.swp
