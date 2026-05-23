@@ -1,3 +1,14 @@
+[project]
+name = "sbtdd"
+version = "0.0.1"
+requires-python = ">= 3.9"
+description = "SBTDD workflow orchestrator plugin for Claude Code"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "Julian Bolivar" }]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

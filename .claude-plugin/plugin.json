@@ -1,7 +1,21 @@
 {
   "name": "sbtdd",
-  "description": "SBTDD orchestrator: drives the Spec + Behavior + Test-Driven Development multi-agent workflow on top of superpowers (spec, plan, MAGI gate, TDD execution, dual-loop review, finalization).",
-  "version": "0.1.0",
-  "author": { "name": "jbolivarg" },
-  "keywords": ["sbtdd", "tdd", "workflow", "orchestrator", "superpowers"]
+  "version": "0.0.1",
+  "description": "SBTDD orchestrator: drives the Spec + Behavior + Test-Driven Development multi-agent workflow on top of superpowers — spec, plan, MAGI gate, TDD execution, dual-loop review, and finalization — behind a single state-routed /sbtdd entry.",
+  "author": {
+    "name": "Julian Bolivar",
+    "url": "https://github.com/BolivarTech"
+  },
+  "repository": "https://github.com/BolivarTech/SBTDD",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "sbtdd",
+    "tdd",
+    "test-driven-development",
+    "workflow",
+    "orchestrator",
+    "superpowers",
+    "claude-code"
+  ],
+  "skills": "./skills/"
 }

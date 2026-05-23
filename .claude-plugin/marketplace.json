@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "bolivartech-sbtdd",
+  "description": "SBTDD workflow orchestrator plugin by BolivarTech",
+  "version": "0.0.1",
+  "owner": {
+    "name": "BolivarTech",
+    "url": "https://github.com/BolivarTech"
+  },
+  "plugins": [
+    {
+      "name": "sbtdd",
+      "description": "Spec + Behavior + Test-Driven Development orchestrator for Claude Code",
+      "version": "0.0.1",
+      "author": {
+        "name": "Julian Bolivar",
+        "url": "https://github.com/BolivarTech"
+      },
+      "source": "./",
+      "category": "development",
+      "homepage": "https://github.com/BolivarTech/SBTDD",
+      "tags": ["sbtdd", "tdd", "workflow", "orchestrator", "superpowers"]
+    }
+  ]
+}
