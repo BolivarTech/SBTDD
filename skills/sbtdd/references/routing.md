@@ -17,7 +17,7 @@ entry point. Evaluate rows top-to-bottom; take the first matching row.
 | `sbtdd/spec-behavior-base.md` absent or empty | — | **Stop and request** the file from the user before proceeding |
 | `sbtdd/spec-behavior-base.md` present; `sbtdd/spec-behavior.md` absent | Specification | Invoke `superpowers:brainstorming` using `spec-behavior-base.md` as input |
 | `sbtdd/spec-behavior.md` present; `planning/claude-plan-tdd-org.md` absent | Planning | Invoke `superpowers:writing-plans` to generate `claude-plan-tdd-org.md` |
-| `planning/claude-plan-tdd-org.md` present; `planning/claude-plan-tdd.md` absent or not yet approved | Plan gate (Checkpoint 2) | Run MAGI review against spec + plan; iterate until `claude-plan-tdd.md` is approved |
+| `planning/claude-plan-tdd-org.md` present; `planning/claude-plan-tdd.md` absent or not yet approved | Plan gate (Checkpoint 2) | Run MAGI review against spec + plan; iterate until `claude-plan-tdd.md` is approved (see `references/review-gates.md` for the MAGI verdict table) |
 | Approved `planning/claude-plan-tdd.md` exists; `session-state.json` present with `current_phase` ≠ `"done"` | Execution — resume | Read `session-state.json`; resume from `current_task_id` / `current_phase` |
 | Approved `planning/claude-plan-tdd.md` exists; `session-state.json` absent | Execution — start | Create `session-state.json` from plan (first `[ ]` task, phase `"red"`) |
 | All plan tasks `[x]` and `session-state.json` reports `current_phase: "done"` | Pre-merge review | Run Loop 1 (`superpowers:requesting-code-review`) then Loop 2 (`magi:magi`) |
@@ -57,6 +57,9 @@ tables from that section here; refer to it for the authoritative definition.
 the last git commit carries a `refactor:` prefix, **drift has occurred** —
 **abort and escalate to the user immediately**. Do not attempt silent
 reconciliation; silent sync hides protocol bugs.
+
+This rule applies to ANY mismatch between `current_phase` and the expected
+commit prefix for that phase (e.g., `"red"` + `test:`, `"green"` + `feat:`/`fix:`, `"refactor"` + `refactor:`).
 
 ### Recovery procedure (manual, not automatic)
 

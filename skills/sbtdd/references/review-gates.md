@@ -5,7 +5,7 @@ the MAGI verdict table, and the correction loop with its safety valve.
 For commit prefix conventions, see `CLAUDE.local.md` §5.
 
 > **Note:** this reference also serves the Plan gate (Checkpoint 2) described
-> in `CLAUDE.local.md` §1 — the MAGI verdict table and the 3-iteration safety
+> in `references/routing.md` — the MAGI verdict table and the 3-iteration safety
 > valve apply identically to the plan-review loop at planning time.
 
 ---
@@ -14,7 +14,7 @@ For commit prefix conventions, see `CLAUDE.local.md` §5.
 
 | Level | When | What runs |
 |-------|------|-----------|
-| Per TDD-phase close | At the close of each Red / Green / Refactor phase | `superpowers:verification-before-completion` + atomic commit + `session-state.json` update (3-step close per `references/tdd-cycle.md`). No MAGI, no `superpowers:requesting-code-review`. |
+| Per TDD-phase close | At the close of each Red / Green / Refactor phase | `superpowers:verification-before-completion` + atomic commit + `.claude/session-state.json` update (3-step close per `references/tdd-cycle.md`). No MAGI, no `superpowers:requesting-code-review`. |
 | Pre-merge (once) | Once, when the plan's finalization checklist is satisfied | Loop 1: `superpowers:requesting-code-review` then Loop 2: `magi:magi` (both mandatory, in strict sequence) |
 
 `magi:magi` runs **once** over the full accumulated diff, not per task or per
@@ -61,7 +61,9 @@ prioritized findings (`[CRITICAL]` / `[WARNING]` / `[INFO]`). Procedure:
    with justification rather than implementing them blindly. `[INFO]` findings
    may be deferred with explicit justification.
 3. Apply approved fixes — each fix is its own mini TDD cycle (see
-   `CLAUDE.local.md` §5 for the `test:` → `fix:` → `refactor:` sequence).
+   `CLAUDE.local.md` §5 for the `test:` → `fix:` → `refactor:` sequence;
+   `fix:` is the authorized prefix for post-review corrections, per
+   `CLAUDE.local.md` §5).
 4. Each commit in the mini-cycle must pass `superpowers:verification-before-completion`
    before landing.
 5. Repeat `superpowers:requesting-code-review` after each fix batch until the
@@ -93,7 +95,7 @@ The minimum acceptable verdict to proceed to merge / PR is **`GO WITH CAVEATS`**
 | `GO WITH CAVEATS` | Apply the *Conditions for Approval* reported by MAGI, then proceed. **No re-evaluation needed** if the conditions are low-risk (documentation, additional tests, naming, logging, error messages, comments). **Re-evaluate MAGI** (follow the correction loop below) if conditions involve structural changes — public API signature modifications, contract changes between modules, behavioral changes (not just cosmetic), or introduction / removal of layers / abstractions. |
 | `HOLD -- TIE` | **Blocked.** Apply the actions recommended by the individual agents; re-run `magi:magi`. |
 | `HOLD` | **Blocked.** Apply the recommended actions; re-run `magi:magi`. |
-| `STRONG NO-GO` | **Blocked.** Reconsider the design; this likely requires replanning (return to `CLAUDE.local.md` §1 Specification flow). |
+| `STRONG NO-GO` | **Blocked.** Reconsider the design; this likely requires replanning (return to the Specification phase (see `references/routing.md`)). |
 
 ---
 
@@ -117,8 +119,9 @@ When `magi:magi` does not approve (verdict below `GO WITH CAVEATS`):
 After **3 iterations** of the correction loop without reaching the threshold,
 stop and escalate to the user. Possible causes:
 
-- **The plan had a structural defect** — requires replanning (return to
-  `CLAUDE.local.md` §1, step 3, with the revised spec).
+- **The plan had a structural defect** — requires replanning (return to the
+  Specification phase (see `references/routing.md`), regenerating the plan
+  with the revised spec).
 - **The implementation diverged from the plan** — review alignment between the
   accumulated diff and `planning/claude-plan-tdd.md`; correct divergences before
   continuing.

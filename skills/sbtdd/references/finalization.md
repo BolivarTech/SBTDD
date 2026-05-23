@@ -40,17 +40,19 @@ All items must be verified by the agent before invoking
 `superpowers:finishing-a-development-branch`.
 
 - [ ] All plan tasks marked `[x]` in `planning/claude-plan-tdd.md`
-- [ ] `session-state.json` reports `current_task_id: null`, `current_task_title: null`, and `current_phase: "done"`
+- [ ] `.claude/session-state.json` reports `current_task_id: null`, `current_task_title: null`, and `current_phase: "done"`
 - [ ] All verification commands in `CLAUDE.local.md` §0.1 pass without warnings
 - [ ] `git status` clean with respect to plan scope (Section 1 criteria above)
 - [ ] `sbtdd/spec-behavior.md` and `planning/claude-plan-tdd.md` reflect the final state
 - [ ] `superpowers:requesting-code-review` executed and all findings resolved (Loop 1 clean to go)
-- [ ] **MAGI gate approved** — `magi:magi` verdict ≥ `GO WITH CAVEATS`; if the verdict was `GO WITH CAVEATS`, all structural *Conditions for Approval* applied before merge
+- [ ] **MAGI gate approved** — `magi:magi` verdict ≥ `GO WITH CAVEATS`; if the verdict was `GO WITH CAVEATS`, all structural *Conditions for Approval* applied before merge (see `references/review-gates.md` §5)
 - [ ] Commits follow the prefix conventions in `CLAUDE.local.md` §5 (atomic, correct prefix per context: TDD phase close, task close, review fix mini-cycles)
 - [ ] `CLAUDE.md` updated if any durable architectural decisions were made during implementation
 
 Only when every checklist item is checked invoke `superpowers:finishing-a-development-branch`.
 The skill guides the decision between direct merge, pull request, or branch cleanup.
+
+---
 
 ---
 

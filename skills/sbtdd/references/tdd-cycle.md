@@ -28,7 +28,7 @@ At the close of the Refactor phase, two bookkeeping actions are required:
 
 1. Mark the checkbox `[x]` in `planning/claude-plan-tdd.md` for the completed
    task.
-2. Update `session-state.json` per the protocol in `CLAUDE.local.md` §2.3.
+2. Update `.claude/session-state.json` per the protocol in `CLAUDE.local.md` §2.3.
 
 These actions are **not** "adding functionality" and do not violate Refactor's
 blocked list. They are administrative task-close bookkeeping per §2.3 of
