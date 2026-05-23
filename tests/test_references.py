@@ -23,3 +23,15 @@ def test_tdd_cycle_present_with_phase_rules_and_close():
     assert "session-state.json" in t
     assert "worktree" in t.lower()
     assert "§5" in t or "CLAUDE.local.md" in t
+
+
+def test_review_gates_present_with_dual_loop_and_verdicts():
+    t = (REF / "review-gates.md").read_text(encoding="utf-8")
+    assert "requesting-code-review" in t
+    assert "receiving-code-review" in t
+    assert "magi" in t.lower()
+    assert "clean to go" in t.lower()
+    assert "GO WITH CAVEATS" in t
+    for verdict in ("STRONG GO", "HOLD", "STRONG NO-GO"):
+        assert verdict in t
+    assert "3 iterations" in t.lower() or "three iterations" in t.lower()
