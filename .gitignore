@@ -1,11 +1,24 @@
-# Local session memory (remember plugin) — developer-local, not plugin source
-.remember/
-
-# Python caches / env tooling (test suite only)
+# Python caches / build artifacts
 __pycache__/
+*.pyc
+.*_cache/
 .pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Environments / lockfiles (test suite tooling only)
+.env
 .venv/
 uv.lock
+
+# Developer-local SBTDD workflow artifacts — not part of the shipped plugin
+.claude/
+sbtdd/
+planning/
+CLAUDE.md
+CLAUDE.local.md
+.remember/
 
 # OS / editor cruft
 Thumbs.db
