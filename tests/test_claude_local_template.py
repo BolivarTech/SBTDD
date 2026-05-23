@@ -23,7 +23,8 @@ def test_keeps_rules_sections_only():
 def test_tracking_override_applied():
     t = _txt()
     assert "planning/" in t and "gitignored" in t
-    assert "team coordination" not in t.lower() or "developer-local" in t.lower()
+    assert "developer-local" in t.lower()
+    assert "planning/" in t
 
 
 def test_has_stack_and_errortype_placeholders():
