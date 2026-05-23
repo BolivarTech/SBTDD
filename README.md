@@ -59,12 +59,16 @@ failing check, run `/sbtdd-init`.
    reference `${CLAUDE_PLUGIN_ROOT}` are resolved by the harness to the installed
    plugin directory automatically.
 
-2. **Install runtime dependencies** (see Dependencies below) — ensure
-   `tdd-guard` and the stack reporter are on `PATH`.
+2. **Install `tdd-guard` first** — ensure the `tdd-guard` binary is on `PATH`
+   before running `/sbtdd-init`. The scaffolding command only writes the
+   TDD-Guard hooks when the binary is already present; a PreToolUse hook
+   pointing at a missing binary fails closed and blocks every Write/Edit.
+   See the `tdd-guard` upstream docs for platform-specific install instructions.
+   Optionally install the stack reporter too (see Dependencies below).
 
 3. **Scaffold your project** — run `/sbtdd-init` in your project. The command
-   detects your stack (Rust / Python / C-C++) and creates all required files
-   and directories.
+   detects your stack (Rust / Python / C/C++) and creates all required files
+   and directories, including the TDD-Guard hooks (now that the binary is present).
 
 4. **Verify the setup** — run `/sbtdd-check` to confirm every check passes.
 
@@ -80,9 +84,9 @@ verification block into `CLAUDE.local.md`:
 
 | Manifest file           | Stack   | Test command             |
 |-------------------------|---------|--------------------------|
-| `Cargo.toml`            | Rust    | `cargo test`             |
-| `pyproject.toml` / `setup.py` | Python | `python -m pytest` |
-| `CMakeLists.txt`        | C/C++   | CMake + CTest            |
+| `Cargo.toml`            | Rust    | `cargo nextest run`      |
+| `pyproject.toml` / `setup.py` | Python | `pytest`           |
+| `CMakeLists.txt`        | C/C++   | `ctest`                  |
 
 If more than one manifest is detected — or none — `/sbtdd-init` pauses and
 asks which stack to configure.

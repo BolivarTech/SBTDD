@@ -124,6 +124,11 @@ they diverge, apply this canon order:
    bugs. (e.g., `current_phase: "green"` but last commit is `refactor:` →
    drift; `current_phase: "refactor"` but last commit is `test:` → drift.)
 
+5. **Unrecognised or absent prefix — escalate** — the last commit prefix is
+   not one of `test:` / `feat:` / `fix:` / `refactor:` / `chore:` (e.g.
+   `docs:`, a merge commit, or no commits yet in the repo). **Stop and ask
+   the user before assuming any phase.** Never guess; never crash.
+
 Recovery if the `.claude/session-state.json` is corrupted or lost: regenerate
 it from the plan (last `[x]`) + git (last commit), then escalate to the user
 for confirmation before continuing.

@@ -87,6 +87,12 @@ phase.
    immediately.** Do not attempt silent reconciliation; silent sync hides
    protocol bugs.
 
+5. **Unrecognised or absent prefix — escalate** — the last commit prefix is
+   not one of `test:` / `feat:` / `fix:` / `refactor:` / `chore:` (e.g.
+   `docs:`, a merge commit, or no commits yet). **Stop and ask the user.**
+   Never assume a phase; never crash. Use `.get(prefix)` or equivalent
+   safe-lookup — never direct key indexing — when implementing this check.
+
 Worked examples:
 - `current_phase = "done"` + last commit `fix:` → **N/A** (pre-merge
   review mini-cycle after plan completion; not drift).

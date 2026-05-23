@@ -51,23 +51,35 @@ Source template: `${CLAUDE_PLUGIN_ROOT}/templates/settings.json.tmpl`
 
 ### tdd-guard binary pre-check
 
-**Before writing or merging hooks**, check whether the `tdd-guard` binary is
-on PATH:
+**Before writing or merging any hooks**, check whether the `tdd-guard` binary
+is on PATH:
 
 ```powershell
+# PowerShell-first
 Get-Command tdd-guard -ErrorAction SilentlyContinue
 ```
 
-If `tdd-guard` is **NOT** found, emit a **PROMINENT WARNING**:
+```sh
+# POSIX fallback
+command -v tdd-guard
+```
 
-> ⚠ WARNING: `tdd-guard` binary not found on PATH.
-> The hooks have been written, but the environment is BROKEN until
-> `tdd-guard` is installed. Every Write/Edit operation will FAIL the next
-> session because the PreToolUse hook will error.
-> **Install `tdd-guard` first before running `/sbtdd`.**
+**If `tdd-guard` is NOT found — do NOT write or merge the hooks.** Instead,
+stop and tell the user:
 
-Then continue writing the hooks (the hooks are still installed so the user
-only needs to install the binary to fix the setup).
+> `tdd-guard` is not on PATH. The TDD-Guard hooks have NOT been written.
+> Installing a PreToolUse hook that calls a missing binary would lock you out
+> of your own project — every Write/Edit would fail closed.
+>
+> **Install `tdd-guard` first**, then re-run `/sbtdd-init`. The command is
+> idempotent and will add the hooks once the binary is present.
+>
+> See the `tdd-guard` upstream docs for platform-specific install instructions.
+
+Skip the rest of Step 3 (neither writing a new file nor merging into an
+existing one). Continue with Step 4.
+
+**If `tdd-guard` IS found**, proceed normally with the steps below.
 
 ### If `.claude/settings.json` does not exist
 

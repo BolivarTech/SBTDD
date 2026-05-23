@@ -24,7 +24,7 @@ state file exists yet.
 
 ---
 
-## Check 2 — Three TDD-Guard hooks active
+## Check 2 — TDD-Guard hooks consistent with binary availability
 
 Parse `.claude/settings.json` (run from the project root, or resolve the
 path relative to the project root):
@@ -42,15 +42,27 @@ POSIX fallback (no hard dependency on `jq`/`which`, but use if available):
 jq '.hooks' .claude/settings.json
 ```
 
-Verify that **all three** of the following hook events are present and
-each has a `tdd-guard` command entry:
+Evaluate the combination of hook presence and binary availability:
+
+| Hooks present | `tdd-guard` on PATH | Result |
+|---------------|---------------------|--------|
+| Yes (all 3)   | Yes                 | **PASS** |
+| No hooks      | No binary           | **NOTE** — not yet enabled (consistent). Run `/sbtdd-init` after installing `tdd-guard`. |
+| No hooks      | Binary present      | **FAIL** — hooks missing; run `/sbtdd-init` to add them. |
+| Hooks present | Binary absent       | **FAIL** — fail-closed risk: every Write/Edit will be blocked. Remove the hooks or install `tdd-guard`. |
+
+The three required hook events (when hooks are present) are:
 
 - `PreToolUse`
 - `SessionStart`
 - `UserPromptSubmit`
 
-**FAIL remediation:** run `/sbtdd-init` — it will merge the missing hooks
-into `.claude/settings.json` (backing up the existing file first).
+**FAIL remediation (missing hooks, binary present):** run `/sbtdd-init` — it
+will merge the missing hooks into `.claude/settings.json` (backing up the
+existing file first).
+
+**FAIL remediation (hooks present, binary absent):** install `tdd-guard` per
+its upstream docs, then run `/sbtdd-check` again to confirm PASS.
 
 ---
 
@@ -147,6 +159,12 @@ Steps:
      commit is `refactor:`, or state says `refactor` but last commit is
      `test:`). Report `FAIL — drift detected: state=<phase>,
      last_commit=<prefix>`.
+  4. **Unrecognised prefix — escalate** — the last commit prefix is not one
+     of `test:` / `feat:` / `fix:` / `refactor:` / `chore:` (e.g. `docs:`,
+     a merge commit, or no commits yet in the repo). Report
+     `NOTE — unrecognised or absent last-commit prefix (<prefix>); stop and
+     ask the user before assuming any phase. Do not attempt to classify.`
+     Never assume a phase from an unrecognised prefix.
 
 For deeper drift analysis, refer to
 `${CLAUDE_PLUGIN_ROOT}/skills/sbtdd/references/routing.md` (this file
