@@ -1,199 +1,213 @@
-# sbtdd — Spec + Behavior + Test-Driven Development Plugin
+# SBTDD — Spec + Behavior + Test-Driven Development Orchestrator for Claude Code
 
-`sbtdd` is a Claude Code plugin that orchestrates the **SBTDD** (Spec +
-Behavior + Test-Driven Development) multi-agent workflow on top of the
-`superpowers` skill suite. It acts as a state-routing engine: each time you
-invoke `/sbtdd`, it reads the current project state and advances you to the
-next phase — from initial spec capture through MAGI gate, TDD execution,
-dual-loop review, and finalization.
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen.svg)](#running-tests)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
+A Claude Code plugin that drives the **SBTDD** workflow — **S**pec + **B**ehavior + **T**est-**D**riven **D**evelopment — as a single, resumable, state-routed flow on top of the [`superpowers`](https://github.com/obra/superpowers) skill library and the [`magi`](https://github.com/BolivarTech/magi-claude) multi-perspective review gate.
+
+One entry point, `/sbtdd`, inspects your project, figures out which phase you are in, and runs the next step — from spec refinement through planning, a MAGI plan gate, disciplined Red-Green-Refactor execution, a dual-loop pre-merge review, and finalization.
+
+---
+
+## Why SBTDD?
+
+Most "AI writes the code" workflows collapse three different concerns into one prompt: *what to build*, *how it should behave*, and *whether it works*. SBTDD keeps them separate and ordered, and makes the separation **enforceable** rather than aspirational:
+
+- **Spec (SDD)** — the objective and functional requirements are written down first (`spec-behavior-base.md` → `spec-behavior.md`).
+- **Behavior (BDD)** — expected behavior is captured as Given/When/Then scenarios; test names describe behavior, not implementation.
+- **Test-Driven (TDD)** — every change follows Red → Green → Refactor, with an atomic commit and a verification gate per phase.
+
+The plugin's contribution is **orchestration with gates that don't move**:
+
+- A **state machine** tracks the active task and TDD phase in `.claude/session-state.json`, so a half-finished plan resumes cleanly across sessions.
+- **Drift detection** aborts and escalates when the recorded phase and the git history disagree — silent desync hides protocol bugs.
+- Two **human gates** stay explicit (plan approval, and the MAGI verdict) — the agent never auto-approves them.
+- Autonomy is scoped: the agent commits autonomously **only** under an approved plan, per the rules it is handed.
+
+The result is a flow where the *value* is the sequencing and the gates, not just "code got written."
 
 ---
 
 ## Commands
 
-### `/sbtdd` — Drive or resume the workflow
-
-Routes by project state (`sbtdd/`, `planning/`, `.claude/session-state.json`)
-and executes the next SBTDD phase. Run this at any point to start the workflow
-or to continue from where you left off.
-
-### `/sbtdd-init` — Scaffold a project
-
-Idempotent setup command that prepares a project for the SBTDD workflow:
-
-- Detects the build stack (`Cargo.toml` → Rust, `pyproject.toml`/`setup.py`
-  → Python, `CMakeLists.txt` → C/C++) and injects the correct per-phase
-  verification block into `CLAUDE.local.md`.
-- Writes `CLAUDE.local.md` from the plugin template (skips if already present).
-- Creates or merges `.claude/settings.json` with the three required
-  `tdd-guard` hooks (`PreToolUse`, `SessionStart`, `UserPromptSubmit`).
-- Creates the `sbtdd/` and `planning/` working directories.
-- Seeds `sbtdd/spec-behavior-base.md` from the plugin template.
-- Updates `.gitignore` with the five local-only entries (see Tracking Policy
-  below).
-
-`/sbtdd-init` never overwrites existing files and always reports what was
-created vs. skipped.
-
-### `/sbtdd-check` — Verify the environment (read-only)
-
-Runs seven diagnostic checks and reports `PASS`, `FAIL`, or `N/A` for each:
-
-1. `CLAUDE.local.md` present and contains required rule sections
-2. Three `tdd-guard` hooks active in `.claude/settings.json`
-3. `sbtdd/` and `planning/` directories exist
-4. `.gitignore` contains all five local-only entries
-5. `tdd-guard` binary and stack reporter on `PATH`
-6. State-file drift check (skipped if no session state yet)
-7. `superpowers` skills and `magi:magi` reachable by the harness
-
-`/sbtdd-check` diagnoses only — it does not modify anything. To repair a
-failing check, run `/sbtdd-init`.
+| Command | Purpose |
+|---------|---------|
+| `/sbtdd` | Drive or **resume** the workflow. Detects the current phase from project artifacts + `.claude/session-state.json` and runs the next step, delegating to the right `superpowers` / `magi:magi` skill. |
+| `/sbtdd-init` | Scaffold a project for SBTDD. Detects the stack (Rust / Python / C-C++), writes `CLAUDE.local.md` (rules) and the TDD-Guard hooks, creates the `sbtdd/` and `planning/` directories, and updates `.gitignore`. Idempotent. |
+| `/sbtdd-check` | Read-only environment verifier. Confirms rules, hooks, directories, the `tdd-guard` binary, and the delegated `superpowers` / `magi:magi` skills are present. Diagnoses; never fixes. |
 
 ---
 
-## Getting Started
+## Installation
 
-1. **Install the plugin** — place this plugin directory where your Claude Code
-   harness loads plugins, then restart the harness. Command template paths that
-   reference `${CLAUDE_PLUGIN_ROOT}` are resolved by the harness to the installed
-   plugin directory automatically.
+### From GitHub (for users)
 
-2. **Install `tdd-guard` first** — ensure the `tdd-guard` binary is on `PATH`
-   before running `/sbtdd-init`. The scaffolding command only writes the
-   TDD-Guard hooks when the binary is already present; a PreToolUse hook
-   pointing at a missing binary fails closed and blocks every Write/Edit.
-   See the `tdd-guard` upstream docs for platform-specific install instructions.
-   Optionally install the stack reporter too (see Dependencies below).
+```bash
+# 1. Add this repo as a marketplace source
+/plugin marketplace add BolivarTech/SBTDD
 
-3. **Scaffold your project** — run `/sbtdd-init` in your project. The command
-   detects your stack (Rust / Python / C/C++) and creates all required files
-   and directories, including the TDD-Guard hooks (now that the binary is present).
+# 2. Install the plugin
+/plugin install sbtdd@bolivartech-sbtdd
 
-4. **Verify the setup** — run `/sbtdd-check` to confirm every check passes.
-
-5. **Run the workflow** — run `/sbtdd` to start the SBTDD flow. Run it again
-   any time to advance to the next phase or to resume after an interruption.
-
----
-
-## Multi-Stack Support
-
-`/sbtdd-init` auto-detects the build stack and injects the right per-phase
-verification block into `CLAUDE.local.md`:
-
-| Manifest file           | Stack   | Test command             |
-|-------------------------|---------|--------------------------|
-| `Cargo.toml`            | Rust    | `cargo nextest run`      |
-| `pyproject.toml` / `setup.py` | Python | `pytest`           |
-| `CMakeLists.txt`        | C/C++   | `ctest`                  |
-
-If more than one manifest is detected — or none — `/sbtdd-init` pauses and
-asks which stack to configure.
-
----
-
-## Tracking Policy and Trade-off
-
-All SBTDD process files are **developer-local** and excluded from version
-control. `/sbtdd-init` appends these entries to `.gitignore`:
-
-```
-# SBTDD local-only files
-CLAUDE.local.md
-CLAUDE.md
-.claude/
-sbtdd/
-planning/
+# 3. Initialize a project, verify, then drive the flow
+/sbtdd-init
+/sbtdd-check
+/sbtdd
 ```
 
-**Trade-off:** Because these paths are gitignored, the spec, plan, state
-machine, and SBTDD configuration are not committed to the repository.
-This means:
+To update after new versions are published:
 
-- No cross-machine continuity — the workflow state does not follow you to
-  another machine or a new clone.
-- No git audit trail of spec changes, planning documents, or SBTDD phase
-  transitions.
+```bash
+/plugin marketplace update
+```
 
-The design is intentional: SBTDD is a developer-local thinking and execution
-aid, not a shared artifact. Only the production code and its tests are
-committed; the scaffolding that produced them stays private.
+### Dependencies
+
+SBTDD is an **orchestrator** — it delegates to existing skills rather than reimplementing them. Install these too:
+
+| Dependency | Why |
+|------------|-----|
+| [`superpowers`](https://github.com/obra/superpowers) | The skills SBTDD delegates to (`brainstorming`, `writing-plans`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `finishing-a-development-branch`, …). |
+| [`magi`](https://github.com/BolivarTech/magi-claude) | The `magi:magi` multi-perspective gate, run **twice** across the lifecycle: at the plan checkpoint and at pre-merge. |
+| `tdd-guard` binary + per-stack reporter | Real-time Red-Green-Refactor enforcement. Install the binary **before** `/sbtdd-init` writes the hooks (a hook pointing at a missing binary fails closed). Optional reporters sync test output on demand: `tdd-guard-rust`, `tdd-guard-pytest`, etc. |
+
+`/sbtdd-check` verifies all of the above and fails loudly on anything missing.
+
+### Local Development
+
+```bash
+# Plugin flag
+claude --plugin-dir /path/to/SBTDD
+```
+
+Changes are picked up with `/reload-plugins` without restarting.
 
 ---
 
-## Dependencies
+## How It Works
 
-The following must be installed and reachable by the harness before running
-`/sbtdd`:
+`/sbtdd` is a thin command that invokes the `sbtdd` skill. The skill is deliberately short — it holds only the **routing** logic and a **delegation table**; the per-phase detail lives in `references/*` and is read on demand (progressive disclosure).
 
-### `superpowers` plugin
+```
+/sbtdd (command) ──▶ sbtdd skill (SKILL.md)
+                       │
+                       ├─ Preflight   verify CLAUDE.local.md, sbtdd/, planning/  (else → /sbtdd-init)
+                       ├─ Route       detect phase from artifacts + session-state.json
+                       │              on drift → abort & escalate
+                       ├─ Execute     read the phase reference, invoke the delegated skill(s)
+                       ├─ Gates       human stops (plan approval, MAGI verdict) — never auto-approved
+                       └─ Loop        re-route to the next phase
+```
 
-`/sbtdd` delegates to these `superpowers` skills at various phases:
+### State-routed lifecycle
 
-- `superpowers:writing-plans` — structured planning phase
-- `superpowers:test-driven-development` — Red-Green-Refactor execution
-- `superpowers:systematic-debugging` — diagnosis when tests stay red
-- `superpowers:verification-before-completion` — pre-commit gate
-- `superpowers:requesting-code-review` — review before finalization
+| Detected phase | Reference | Delegates to |
+|----------------|-----------|--------------|
+| Spec refinement | `routing.md` | `superpowers:brainstorming` |
+| Planning | `routing.md` | `superpowers:writing-plans` |
+| Plan gate (Checkpoint 2) | `review-gates.md` | `magi:magi` (+ manual review) |
+| Execution | `tdd-cycle.md` | `superpowers:test-driven-development`, `…:verification-before-completion`, `…:systematic-debugging`; mode `…:subagent-driven-development` / `…:executing-plans` |
+| Pre-merge review | `review-gates.md` | `superpowers:requesting-code-review` → `…:receiving-code-review` → `magi:magi` |
+| Finalization | `finalization.md` | `superpowers:finishing-a-development-branch` |
 
-Install the `superpowers` plugin via your Claude Code plugin manager.
+### Multi-stack scaffolding
 
-### `magi` plugin
+`/sbtdd-init` auto-detects the build stack and injects the matching per-phase verification block into the scaffolded `CLAUDE.local.md`:
 
-The MAGI gate (`magi:magi`) runs **twice** across the full SBTDD lifecycle:
+| Manifest file | Stack | Test command |
+|---------------|-------|--------------|
+| `Cargo.toml` | Rust | `cargo nextest run` |
+| `pyproject.toml` / `setup.py` | Python | `pytest` |
+| `CMakeLists.txt` | C/C++ | `ctest` |
 
-1. **Plan gate (Checkpoint 2)** — after planning, before TDD execution begins.
-   MAGI reviews the spec + plan and must reach at least GO WITH CAVEATS before
-   the approved `claude-plan-tdd.md` is written.
-2. **Pre-merge review** — after all TDD tasks are complete (`current_phase:
-   "done"`), as part of the dual-loop review (Loop 2). "Once" in any phase
-   description means once per that phase, not once per task or TDD cycle.
+If more than one manifest is detected — or none — `/sbtdd-init` pauses and asks which stack to configure.
 
-Install the `magi` plugin separately. Note: MAGI requires genuine uncertainty
-to be useful — it is a deliberation gate, not a rubber stamp. If `magi:magi`
-is unavailable, `/sbtdd` will report the missing skill and halt rather than
-skip the gate silently.
+### Single source of truth
 
-### `tdd-guard` binary
-
-`tdd-guard` enforces the TDD cycle via Claude Code hooks (PreToolUse,
-SessionStart, UserPromptSubmit). The binary must be on `PATH`. Run
-`/sbtdd-check` (Check 5) to verify.
-
-Install per the `tdd-guard` upstream docs (external to this plugin).
-
-### Stack reporter (optional, on-demand)
-
-The stack reporter syncs test results back to `tdd-guard` on demand.
-It is **not required** for enforcement — the PreToolUse hook works
-directly via the `tdd-guard` binary. Install only if you need on-demand
-test-result sync:
-
-- **Rust:** `cargo install tdd-guard-rust`
-- **Python:** `pip install tdd-guard-pytest`
-- **C/C++:** no official reporter; the PreToolUse hook still enforces;
-  test-result sync is manual.
+The skill **points to** the scaffolded `CLAUDE.local.md` for canonical rule values (commit prefixes, the state-file schema, verification commands) instead of duplicating them — change a rule in one place, no second copy drifts.
 
 ---
 
-## Workflow Phases (overview)
+## Project Structure
 
 ```
-/sbtdd-init  →  /sbtdd-check  →  /sbtdd
-                                    │
-                          ┌─────────▼──────────┐
-                          │  1. Spec capture    │
-                          │  2. Behavior spec   │
-                          │  3. Planning        │
-                          │  4. MAGI gate       │
-                          │  5. TDD execution   │
-                          │     (Red→Green→     │
-                          │      Refactor)      │
-                          │  6. Dual-loop review│
-                          │  7. Finalization    │
-                          └────────────────────┘
+.claude-plugin/
+  plugin.json                 -- Plugin manifest (name, version, author, repository, license)
+  marketplace.json            -- Marketplace config (bolivartech-sbtdd)
+skills/sbtdd/
+  SKILL.md                    -- Orchestrator: state routing + delegation table
+  references/
+    routing.md                -- State-detection table + authority order + drift handling
+    tdd-cycle.md              -- Per-phase rules + atomic 3-step close + TDD-Guard under parallelism
+    review-gates.md           -- Dual-loop pre-merge review + MAGI verdict table
+    finalization.md           -- Clean git-status check + final checklist
+commands/
+  sbtdd.md                    -- Thin entry wrapper (invokes the skill)
+  sbtdd-init.md               -- Multi-stack scaffolding (idempotent)
+  sbtdd-check.md              -- Read-only environment verifier
+templates/                    -- Assets /sbtdd-init writes into a target repo
+  CLAUDE.local.md.tmpl        -- The immutable project rules (standards, artifact contract, commits)
+  settings.json.tmpl          -- TDD-Guard hooks
+  spec-behavior-base.tmpl.md  -- Flow input template
+  verification/{rust,python,cpp}.md  -- Per-stack verification blocks
+tests/                        -- pytest structural-validation suite (repo-dev tooling)
+docs/superpowers/             -- Design spec + implementation plan
+pyproject.toml                -- Python >= 3.9, dual license, pytest config
 ```
 
-Each phase is driven by the `sbtdd` skill; `/sbtdd` is the single entry point
-to advance through all of them.
+---
+
+## Tracking Policy
+
+The entire SBTDD process is **developer-local**. `/sbtdd-init` adds these to a target project's `.gitignore`: `CLAUDE.md`, `CLAUDE.local.md`, `.claude/`, `sbtdd/`, and `planning/`. Git records source code and the TDD-cycle commits only.
+
+**Trade-off (intentional):** the spec, plan, and runtime state are not versioned or shared via git — there is no cross-machine continuity and no git audit trail of the process. Local cross-session resumability is unaffected (the files persist on disk; recovery is defined in `CLAUDE.local.md` §2.1). If a team needs to share spec/plan, use a channel other than git.
+
+---
+
+## Running Tests
+
+The plugin is markdown/JSON/templates, so the test suite asserts **structure and content presence** (a green run is a presence/lint signal, not proof of agent runtime behavior). The real acceptance gate is `plugin-validator` plus manual behavioral evaluation.
+
+```bash
+# All tests (43)
+python -m pytest -q
+
+# Verbose
+python -m pytest -v
+```
+
+| Layer | What it checks |
+|-------|----------------|
+| `test_manifest` / `test_*_template` | Manifest validity, per-stack verification blocks, settings + rules templates |
+| `test_skill` / `test_references` | Frontmatter, the delegation table, per-reference required content |
+| `test_commands` | The three commands (incl. the defensive `settings.json` merge contract) |
+| `test_drift_model` | Behavioral classifier for the TDD-phase drift detection (consistent / lag / done / drift) |
+| `test_integration` | Cross-reference integrity + section-name drift guard |
+
+---
+
+## Requirements
+
+| Component | Required | Notes |
+|-----------|----------|-------|
+| Claude Code | Yes | The plugin runs inside Claude Code. |
+| `superpowers` plugin | Yes | Delegated skills. |
+| `magi` plugin | Yes | `magi:magi` review gate. |
+| `tdd-guard` + reporter | For execution | Real-time TDD enforcement; install before `/sbtdd-init`. |
+| Python 3.9+ | For the test suite | The plugin itself ships no runtime Python. |
+
+---
+
+## License
+
+Dual licensed under [MIT](LICENSE) OR [Apache-2.0](LICENSE-APACHE), at your option.
+
+---
+
+## Credits
+
+SBTDD was built by **dogfooding its own methodology**: the plugin was specified with `brainstorming`, planned with `writing-plans`, gated by `magi:magi`, implemented Red-Green-Refactor via subagent-driven development, and reviewed through a four-iteration pre-merge MAGI loop before its first release.
+
+Authored by [Julian Bolivar](https://github.com/BolivarTech) (BolivarTech). Built on [`superpowers`](https://github.com/obra/superpowers) by Jesse Vincent and the [`magi`](https://github.com/BolivarTech/magi-claude) plugin.
