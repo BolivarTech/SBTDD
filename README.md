@@ -152,7 +152,7 @@ templates/                    -- Assets /sbtdd-init writes into a target repo
   spec-behavior-base.tmpl.md  -- Flow input template
   verification/{rust,python,cpp}.md  -- Per-stack verification blocks
 tests/                        -- pytest structural-validation suite (repo-dev tooling)
-docs/superpowers/             -- Design spec + implementation plan
+docs/SBTDD-Theory.md          -- The theory and quality rationale behind SBTDD
 pyproject.toml                -- Python >= 3.9, dual license, pytest config
 ```
 
