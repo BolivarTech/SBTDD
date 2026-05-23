@@ -50,6 +50,12 @@ and invoke the listed skill(s) using their fully qualified names
 | Pre-merge review | review-gates.md | `superpowers:requesting-code-review` → `superpowers:receiving-code-review` → `magi:magi` |
 | Finalization | finalization.md | `superpowers:finishing-a-development-branch` |
 
+> **Execution default:** serial `superpowers:subagent-driven-development` with
+> TDD-Guard ON is the preferred mode. Suggest parallel agents
+> (`superpowers:dispatching-parallel-agents` + `superpowers:using-git-worktrees`,
+> **TDD-Guard OFF**, then merge each worktree to the parent branch) only for a
+> perceptible gain on mutually independent tasks. See `references/tdd-cycle.md` §4.
+
 > **TDD-Guard toggle:** TDD-Guard enforcement is only meaningful during the
 > Execution phase. Toggle `tdd-guard off` before non-Execution phases (Spec,
 > Planning, Plan gate, Pre-merge review, Finalization) so legitimate

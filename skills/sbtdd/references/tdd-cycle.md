@@ -80,36 +80,62 @@ When the closed phase is Refactor, the task is complete. Two sub-cases apply:
 ## 4. TDD-Guard Under Multi-Agent Execution
 
 TDD-Guard is active for all sub-agents spawned from the main session because
-the hooks in `.claude/settings.json` are session-global. However, TDD-Guard
-maintains **shared state at process level** (its own internal file under
-`.claude/tdd-guard/`, separate from `session-state.json`), which creates a
-strong constraint under parallelism.
+the hooks in `.claude/settings.json` are session-global. It maintains **shared
+state at process level** (its own internal file under `.claude/tdd-guard/`,
+separate from `session-state.json`). That shared state is the root of the
+parallelism constraint below: it cannot be partitioned per sub-agent, not even
+across separate worktrees.
+
+### Default and Preferred Mode
+
+**Serial execution with TDD-Guard ON, via
+`superpowers:subagent-driven-development`.** This is the default and the
+preferred mode for the skill: one task at a time, each running its own
+Red→Green→Refactor cycle under real-time guard enforcement. Suggest parallel
+agents only when **both** conditions hold:
+
+1. There is a **perceptible time gain** from running the tasks concurrently.
+2. The tasks are **mutually independent** — no shared state and no cross-task
+   dependencies (dependent tasks must be marked `addBlockedBy` and run serially
+   anyway).
+
+When in doubt, stay serial. Parallelism trades the guard's real-time
+enforcement for speed and must be set up deliberately (see the rules below).
 
 ### Scenario Table
 
 | Scenario | TDD-Guard | Behavior |
 |----------|-----------|----------|
-| Sub-agents **serial** (one task at a time) | ON | Correct — each task completes its own Red→Green→Refactor cycle |
-| Sub-agents **parallel** in the **same worktree** | ON | **Conflict** — one sub-agent's phase can block legitimate writes from another |
-| Sub-agents **parallel** in **separate worktrees** | ON | Correct — each worktree has its own TDD-Guard state file |
-| Sub-agents parallel, same worktree | OFF | Correct — correctness enforcement deferred to `superpowers:verification-before-completion` at phase close; Red-Green-Refactor discipline rests solely on `superpowers:test-driven-development` |
+| **Serial** (one task at a time) — *default / preferred* | ON | Correct — each task completes its own Red→Green→Refactor cycle under real-time enforcement |
+| **Parallel** sub-agents, any layout — same **or** separate worktrees | ON | **Conflict** — the guard's shared process state collides across agents and blocks legitimate writes, *even in separate worktrees* |
+| **Parallel** sub-agents, one isolated worktree each | OFF | Correct — git isolation per agent; Red-Green-Refactor discipline rests on `superpowers:test-driven-development`, with `superpowers:verification-before-completion` mandatory at every phase close |
 
-### 3 Practical Rules
+### Practical Rules
 
-1. **Default: serial execution with TDD-Guard ON.** `superpowers:executing-plans`
-   and `superpowers:subagent-driven-development` process tasks in plan order
-   when no explicit dependencies are marked.
+1. **Default & preferred: serial execution with TDD-Guard ON.**
+   `superpowers:executing-plans` and `superpowers:subagent-driven-development`
+   process tasks in plan order when no explicit dependencies are marked.
 
-2. **Real parallelism** requires one of:
-   - `superpowers:using-git-worktrees` → one worktree per sub-agent, TDD-Guard ON.
-   - The user explicitly toggles `tdd-guard off` before dispatching parallel
-     execution and `tdd-guard on` when done. During the OFF window,
-     `superpowers:verification-before-completion` is mandatory at every phase
-     close, and `superpowers:test-driven-development` is the sole discipline
-     enforcer. Sub-agents cannot toggle TDD-Guard themselves.
+2. **Go parallel only when it is worth it** — a perceptible time gain *and*
+   mutually independent tasks (see "Default and Preferred Mode" above).
+   Otherwise stay serial.
 
-3. **Never** run parallel tasks in the same worktree with TDD-Guard ON — this
-   produces false blocks and inconsistent state.
+3. **Parallel requires this full combination** (the parts are not alternatives):
+   - **TDD-Guard OFF.** With the guard ON, parallel sub-agents conflict *even in
+     separate worktrees* — one agent's phase state blocks another's legitimate
+     writes. The user toggles `tdd-guard off` before dispatching and
+     `tdd-guard on` when the parallel run finishes; sub-agents cannot toggle it.
+   - **One isolated worktree per sub-agent** via `superpowers:using-git-worktrees`,
+     so concurrent work never contaminates a shared working tree.
+   - **`superpowers:test-driven-development` enforces the Red-Green-Refactor
+     discipline** during the OFF window, with
+     `superpowers:verification-before-completion` mandatory at every phase close
+     (it replaces the guard's real-time check).
+   - **On completion, each sub-agent commits its work and merges its worktree
+     branch back into the parent ("mother") branch.**
+
+4. **Never run parallel sub-agents with TDD-Guard ON**, regardless of worktree
+   separation — it produces false blocks and inconsistent guard state.
 
 ---
 
