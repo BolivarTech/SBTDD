@@ -20,6 +20,9 @@ CLAUDE.md
 CLAUDE.local.md
 .remember/
 
+# Internal planning/process docs — kept local, not published
+docs/superpowers/
+
 # OS / editor cruft
 Thumbs.db
 .DS_Store
