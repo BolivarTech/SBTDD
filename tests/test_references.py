@@ -35,3 +35,12 @@ def test_review_gates_present_with_dual_loop_and_verdicts():
     for verdict in ("STRONG GO", "HOLD", "STRONG NO-GO"):
         assert verdict in t
     assert "3 iterations" in t.lower() or "three iterations" in t.lower()
+
+
+def test_finalization_present_with_checklist():
+    t = (REF / "finalization.md").read_text(encoding="utf-8")
+    assert "finishing-a-development-branch" in t
+    assert "git status" in t
+    assert "current_phase" in t and "done" in t
+    assert "- [ ]" in t
+    assert "MAGI" in t
