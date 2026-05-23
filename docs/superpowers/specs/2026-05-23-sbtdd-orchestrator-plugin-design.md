@@ -211,7 +211,11 @@ them by § number.
    section, and resolving placeholders `{ErrorType}`, `{Author}` (ask or mark
    `TODO`).
 3. **Write/merge `.claude/settings.json`** with the 3 TDD-Guard hooks (§4.1).
-   If it exists, **merge** hooks (preserve existing config).
+   If it exists: **back it up first** (`settings.json.bak`), parse it, append only
+   the hooks not already present, **never touch keys other than `hooks`**, and show
+   the resulting diff + backup path before writing. (Per the no-scripts decision
+   this merge is LLM-performed; the backup + show-diff is the safety net — see §13
+   residual risks.)
 4. **Create dirs** `sbtdd/` and `planning/`.
 5. **Seed `sbtdd/spec-behavior-base.md`** from template if absent.
 6. **Update `.gitignore`**: add `CLAUDE.local.md`, `CLAUDE.md`, `.claude/`,
@@ -223,14 +227,18 @@ them by § number.
 Emits a pass/fail checklist with per-item remediation; does not fix — routes to
 `/sbtdd-init` for anything missing.
 
+Checks are **PowerShell-first** (`Get-Command`, `ConvertFrom-Json`) — no hard
+dependency on `jq`/`which`; POSIX equivalents are documented as fallback.
+
 | # | Verifies | How |
 |---|---|---|
 | 1 | `CLAUDE.local.md` present with rule sections | existence + key sections |
-| 2 | 3 TDD-Guard hooks active | `jq '.hooks'` over `.claude/settings.json` |
+| 2 | 3 TDD-Guard hooks active | `ConvertFrom-Json` on `.claude/settings.json` (fallback `jq '.hooks'`) |
 | 3 | `sbtdd/` and `planning/` exist | — |
 | 4 | `.gitignore` has the local-only entries | grep the 5 entries |
-| 5 | `tdd-guard` binary + stack reporter on PATH | `which` / `Get-Command` |
+| 5 | `tdd-guard` binary + stack reporter on PATH | `Get-Command` (fallback `which`) |
 | 6 | State file consistent (if present) | light drift check vs git/plan |
+| 7 | Delegated skills/plugins available | superpowers skills + `magi:magi` present; **fail loud** listing any missing |
 
 ## 8. Error handling & edge cases
 
@@ -269,19 +277,28 @@ Consequences:
 
 ## 10. Testing strategy
 
-Skills/commands are markdown, so "testing" = structural validation + behavioral
-eval:
-1. **Structural validity** — valid `plugin.json`, correct skill frontmatter
-   (`plugin-dev:plugin-validator`).
-2. **Triggering eval** — skill `description` fires when expected
-   (`skill-creator` evals).
+Skills/commands are markdown, so the pytest suite can only assert **content
+presence** (tokens/sections present), not behavior. Be honest about this: a green
+pytest run is a **presence/lint signal**, not proof of correct behavior. The
+**required acceptance gate** is items 1–5 below (plugin-validator + the manual
+behavioral evals), not the substring suite.
+
+- **Presence/lint (pytest, automated, necessary-not-sufficient):** valid
+  `plugin.json`, skill frontmatter, required sections per artifact, cross-reference
+  integrity, and **drift checks** — referenced section names actually exist in
+  `CLAUDE.local.md.tmpl`, and every delegated skill name is in the allowlist.
+
+**Required acceptance gate (must pass before "done"):**
+1. **Structural validity** — `plugin-dev:plugin-validator` reports no errors.
+2. **Triggering eval** — skill `description` fires when expected.
 3. **Per-stack scaffolding dry-run** — run `/sbtdd-init` in 3 throwaway repos
-   (Rust/Python/C++); verify each writes the correct §0.1 and `/sbtdd-check`
-   passes all 6 items.
+   (Rust/Python/C++); verify each writes the correct §0.1, `.claude/settings.json`
+   merge preserved prior keys (created a `.bak`), and `/sbtdd-check` passes all 7
+   items.
 4. **Routing-table coverage** — for each state (artifacts created by hand),
-   confirm `/sbtdd` detects the correct phase; include a drift case that must
-   abort.
-5. **Idempotency** — `/sbtdd-init` twice: no clobber, hooks merged once.
+   confirm `/sbtdd` announces the correct phase **with the evidence it found**;
+   include a drift case that must abort & escalate.
+5. **Idempotency** — `/sbtdd-init` twice: no clobber, hooks not duplicated.
 6. **`.gitignore`** — verify the 5 entries (incl. `sbtdd/`, `planning/`) and
    that `git status` does not show those artifacts.
 
@@ -313,4 +330,32 @@ eval:
 - **`/sbtdd-check`** — input: target repo; output: pass/fail report. Depends on:
   nothing (read-only).
 - **templates/** — static assets; no dependencies.
-```
+
+## 13. MAGI review revisions (2026-05-23)
+
+MAGI verdict on design+plan: **GO WITH CAVEATS (3-0)** (all CONDITIONAL). Findings
+processed via `superpowers:receiving-code-review`. User decisions on the structural
+caveats:
+
+- **D7 kept unchanged** — `sbtdd/`/`planning/`/state stay gitignored. Accepted
+  trade-off: **no cross-machine continuity and no git audit trail** of spec/plan/
+  state. Local cross-session resumability is unaffected (files persist on disk);
+  recovery follows §2.1. (Declined: revert tracking; declined: export/backup path.)
+- **Settings target kept** — hooks stay in `.claude/settings.json` (not
+  `settings.local.json`). The convention-inversion MAGI flagged is accepted; all of
+  `.claude/` is gitignored either way.
+- **No helper scripts** — file operations stay LLM-performed (declined a shipped
+  Python merge/probe script).
+
+**Low-risk caveats applied** (this revision): defensive settings merge (backup +
+diff, `hooks`-only) in `/sbtdd-init` (§7); `/sbtdd-check` PowerShell-first + new
+item 7 (delegated-skill availability preflight) (§7); testing reframed — pytest is
+presence/lint, plugin-validator + manual behavioral evals are the required gate
+(§10); routing announces the evidence it found and confirms on ambiguity; references
+use section **names** + a drift check; `magi:magi` fully qualified.
+
+**Consciously-accepted residual risks** (consequence of the no-scripts + keep-settings
+decisions): the **merge-clobber** critical is *mitigated, not closed* — its safety
+net is the backup + show-diff + manual validation, not a deterministic tested
+script; and the deterministic-behavior test gap remains (pytest stays substring-based,
+so the manual gate in §10 carries the real assurance).
