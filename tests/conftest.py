@@ -10,7 +10,21 @@ def read(rel: str) -> str:
 
 
 def frontmatter(text: str) -> str:
-    """Return the YAML frontmatter block (between the first two '---' lines)."""
+    """Return the YAML frontmatter block (between the first two '---' lines).
+
+    Args:
+        text: Full file contents, must begin with '---'.
+
+    Returns:
+        The YAML content between the opening and closing '---' fences.
+
+    Raises:
+        AssertionError: If the text does not start with a frontmatter fence.
+        ValueError: If there is no closing '---' fence.
+    """
     assert text.startswith("---"), "file must start with YAML frontmatter"
-    end = text.index("\n---", 3)
+    try:
+        end = text.index("\n---", 3)
+    except ValueError:
+        raise ValueError("no closing frontmatter fence")
     return text[3:end]
