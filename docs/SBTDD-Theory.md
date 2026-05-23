@@ -73,7 +73,7 @@ Every change follows the strict **Red → Green → Refactor** cycle:
 
 Each phase closes with a **verification gate** (run the suite, lint, types — clean
 output as *evidence*) and an **atomic commit** with a phase-specific prefix
-(`test:` / `feat:` / `refactor:`).
+(`test:` / `feat:` or `fix:` / `refactor:`).
 
 > **Targets:** untested code, over-building, unverifiable "it should work" claims.
 
