@@ -7,8 +7,10 @@ description: Read-only SBTDD setup verifier — diagnoses the full configuration
 **This command is read-only. It diagnoses; it does not fix.**
 For any failing item, the remediation is to run `/sbtdd-init`.
 
-Run all seven checks below in order. For each check report either
-`PASS` or `FAIL <reason>` with a one-line remediation hint.
+Run all seven checks below in order. For each check report `PASS`,
+`FAIL <reason>`, or `N/A <reason>` (where applicable) with a one-line
+remediation hint. Check 6 may legitimately report `N/A` when no session
+state file exists yet.
 
 ---
 
@@ -24,7 +26,8 @@ Run all seven checks below in order. For each check report either
 
 ## Check 2 — Three TDD-Guard hooks active
 
-Parse `.claude/settings.json`:
+Parse `.claude/settings.json` (run from the project root, or resolve the
+path relative to the project root):
 
 ```powershell
 # PowerShell-first
@@ -88,8 +91,8 @@ Get-Command sbtdd-reporter -ErrorAction SilentlyContinue
 POSIX fallback:
 
 ```sh
-which tdd-guard
-which sbtdd-reporter
+command -v tdd-guard
+command -v sbtdd-reporter
 ```
 
 Report whether each binary is found or missing.
@@ -102,14 +105,24 @@ commands).
 
 ## Check 6 — State-file consistency / drift check
 
-If `.claude/session-state.json` is present, perform a light drift check:
+If `.claude/session-state.json` is absent, report `N/A (no session state
+yet)` — this is not a failure.
 
-- Compare the `currentPhase` field against the most recent git log entry
-  and the `planning/` spec to detect obvious drift.
-- If the file is absent, report `PASS (no session state yet)`.
+If the file is present, perform a light drift check inline:
 
-For a deep drift analysis, defer to the routing rules in
-`skills/sbtdd/routing.md`.
+- Read `current_phase` from `.claude/session-state.json`.
+- Read the prefix of the last git commit message (e.g. `test:`, `feat:`,
+  `fix:`, `refactor:`).
+- If the phase implied by the commit prefix does not match `current_phase`
+  (for example, the state file says `green` but the last commit is
+  `refactor:`), report `FAIL — drift detected: state=<phase>,
+  last_commit=<prefix>`.
+- If they are consistent, report `PASS`.
+
+For deeper drift analysis, refer to
+`${CLAUDE_PLUGIN_ROOT}/skills/sbtdd/references/routing.md` (this file
+lives in the plugin, not the target project; it may be absent in older
+installs — treat a missing file as N/A for the deep check only).
 
 **FAIL remediation:** review `.claude/session-state.json` manually or
 run `/sbtdd` to let the orchestrator re-evaluate the phase.

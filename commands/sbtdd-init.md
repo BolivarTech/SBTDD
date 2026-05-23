@@ -34,7 +34,7 @@ Substitutions:
 - `{StackVerification}` → contents of
   `${CLAUDE_PLUGIN_ROOT}/templates/verification/<stack>.md`
   (where `<stack>` is `rust`, `python`, or `cpp`)
-- §4 stack line → replace the placeholder with the detected stack name
+- §4 stack line → replace the literal `(filled by /sbtdd-init)` on the §4 Stack line with the detected stack (language, test runner, test command).
 - `{ErrorType}` → ask the user for their preferred error/exception type
   (or leave `TODO: set ErrorType` if the user skips)
 - `{Author}` → ask the user for their name/handle
@@ -59,13 +59,28 @@ Copy the template verbatim. Create `.claude/` first if absent.
 2. Parse the existing file (`ConvertFrom-Json` on PowerShell; `jq` as
    POSIX fallback).
 3. Parse the template to obtain its `hooks` object.
-4. For each hook event (`PreToolUse`, `SessionStart`, `UserPromptSubmit`):
-   append only hook entries **not already present** in the existing file.
-5. **Never modify any key other than `hooks`** — preserve all other
+4. **Hook-entry equality rule:** A hook entry is considered already present
+   if, under the same event key, an existing entry has the same `matcher`
+   value (treat an absent matcher as equal only to another absent matcher)
+   AND the same `command` value(s). Append an entry only when no equal
+   entry exists; if the event key itself is absent, create it. Never
+   duplicate an existing matcher+command pair.
+5. For each hook event (`PreToolUse`, `SessionStart`, `UserPromptSubmit`):
+   append only hook entries not already present (per rule 4 above).
+6. **Never modify any key other than `hooks`** — preserve all other
    settings exactly.
-6. **Show the unified diff and the backup path** before writing. Wait for
-   implicit approval (the agent writes after showing — no extra prompt
-   unless the diff is destructive).
+7. **Show the unified diff and the backup path before writing.** Apply
+   this decision rule:
+   - If the merge would add, modify, or remove **any** key or value other
+     than appending new entries to the `hooks` arrays, **STOP** and
+     require explicit user confirmation before writing.
+   - If the change is purely appending missing hook entries (and nothing
+     else), you may write after showing the diff — no additional prompt
+     needed.
+8. **PowerShell JSON depth:** When re-serializing the merged settings with
+   PowerShell, use `ConvertTo-Json -Depth 10` — the default depth of 2
+   truncates the nested `hooks` structure and corrupts the file.
+   (Alternatively, use `jq` to write.)
 
 The merge is performed by the agent directly; backup + show-diff is the
 safety net.
@@ -95,11 +110,12 @@ exist**. If it exists, skip and note it in the report.
 
 ## Step 6 — Update `.gitignore`
 
-Append the following entries if not already present in `.gitignore`
-(create `.gitignore` if absent):
+Append entries that are not already present in `.gitignore`
+(create `.gitignore` if absent).
+
+The checked set consists of these five content entries:
 
 ```
-# SBTDD local-only files
 CLAUDE.local.md
 CLAUDE.md
 .claude/
@@ -107,8 +123,9 @@ sbtdd/
 planning/
 ```
 
-Check each line individually — add only the missing ones. Do not
-duplicate existing entries.
+The comment line `# SBTDD local-only files` is added once only if it is
+not already present. Check each of the five content entries individually
+and add only the missing ones. Do not duplicate existing entries.
 
 ---
 
