@@ -20,9 +20,10 @@ def test_sbtdd_init_covers_all_scaffolding_steps():
         assert tmpl in t
     assert "idempotent" in t.lower() or "do not overwrite" in t.lower()
     assert "merge" in t.lower()
+    assert "description:" in frontmatter(t)
 
 
-def test_sbtdd_check_covers_six_items():  # now 7 items; name kept for stability
+def test_sbtdd_check_covers_seven_items():
     t = (CMD / "sbtdd-check.md").read_text(encoding="utf-8")
     assert "CLAUDE.local.md" in t
     assert "PreToolUse" in t and "SessionStart" in t and "UserPromptSubmit" in t
@@ -35,3 +36,4 @@ def test_sbtdd_check_covers_six_items():  # now 7 items; name kept for stability
     assert "Get-Command" in t
     assert "read-only" in t.lower() or "does not fix" in t.lower()
     assert "sbtdd-init" in t
+    assert "description:" in frontmatter(t)
