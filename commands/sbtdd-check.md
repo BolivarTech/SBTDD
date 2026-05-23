@@ -85,22 +85,29 @@ Report which specific entries are missing.
 ```powershell
 # PowerShell-first
 Get-Command tdd-guard -ErrorAction SilentlyContinue
-Get-Command sbtdd-reporter -ErrorAction SilentlyContinue
 ```
 
 POSIX fallback:
 
 ```sh
 command -v tdd-guard
-command -v sbtdd-reporter
 ```
 
-Report whether each binary is found or missing.
+Check whether `tdd-guard` is on PATH and report found or missing.
 
-**FAIL remediation:** the per-stack **reporter** install command is printed in
-`/sbtdd-init`'s final reminder — run `/sbtdd-init` to see it. The `tdd-guard`
-**binary** itself is installed per its own upstream docs (external to this
-plugin; see the `tdd-guard` project for platform-specific install instructions).
+**Stack reporter (optional, on-demand):** the reporter only syncs test output
+on demand — the `tdd-guard` PreToolUse hook enforces the TDD cycle directly
+via the `tdd-guard` binary without a reporter. The reporter is NOT required for
+enforcement. If you want to sync test results, install the appropriate reporter:
+
+- **Rust:** `cargo install tdd-guard-rust`
+- **Python:** `pip install tdd-guard-pytest`
+- **C/C++:** no official C/C++ reporter; the PreToolUse hook still enforces;
+  test-result sync is manual.
+
+**FAIL remediation:** install the `tdd-guard` binary per its upstream docs
+(external to this plugin). The stack reporter is optional — install only if
+you need on-demand test-result sync.
 
 ---
 
@@ -109,16 +116,27 @@ plugin; see the `tdd-guard` project for platform-specific install instructions).
 If `.claude/session-state.json` is absent, report `N/A (no session state
 yet)` — this is not a failure.
 
-If the file is present, perform a light drift check inline:
+If the file is present, perform a light drift check inline using the
+canonical mapping (`current_phase` is set to the phase to work on NEXT
+after a phase closes):
 
+| Last phase-closing commit prefix | `current_phase` SHOULD be |
+|----------------------------------|---------------------------|
+| `test:`                          | `green`                   |
+| `feat:` or `fix:`                | `refactor`                |
+| `refactor:`                      | `red` or `done`           |
+| `chore:`                         | `red` or `done`           |
+
+Steps:
 - Read `current_phase` from `.claude/session-state.json`.
 - Read the prefix of the last git commit message (e.g. `test:`, `feat:`,
   `fix:`, `refactor:`).
-- If the phase implied by the commit prefix does not match `current_phase`
-  (for example, the state file says `green` but the last commit is
-  `refactor:`), report `FAIL — drift detected: state=<phase>,
-  last_commit=<prefix>`.
-- If they are consistent, report `PASS`.
+- Apply the mapping: if `current_phase` does NOT match the phase implied by
+  the last phase-closing commit (e.g., state says `green` but last commit is
+  `refactor:` → drift; state says `refactor` but last commit is `test:` →
+  drift), report `FAIL — drift detected: state=<phase>, last_commit=<prefix>`.
+- If they are consistent (e.g., state `green` + last commit `test:`, or
+  state `refactor` + last commit `feat:`), report `PASS`.
 
 For deeper drift analysis, refer to
 `${CLAUDE_PLUGIN_ROOT}/skills/sbtdd/references/routing.md` (this file

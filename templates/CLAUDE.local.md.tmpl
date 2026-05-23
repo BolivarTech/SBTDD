@@ -101,10 +101,21 @@ they diverge, apply this canon order:
 3. Plan is canon of the future + record — what remains + what was completed
 ```
 
-**Operational rule:** if `.claude/session-state.json` reports `current_phase: "green"` but
-the last commit is `refactor:`, **there is drift** — abort and escalate to the
-user. Recovery is manual, not automatic; silent synchronization hides protocol
-bugs.
+**Canonical mapping — phase implied by the last phase-closing commit:**
+
+| Last phase-closing commit prefix | `current_phase` SHOULD be |
+|----------------------------------|---------------------------|
+| `test:`                          | `green`                   |
+| `feat:` or `fix:`                | `refactor`                |
+| `refactor:`                      | `red` (next task) or `done` (plan complete) |
+| `chore:`                         | `red` (next task) or `done` (plan complete) |
+
+**Operational rule:** if `.claude/session-state.json` `current_phase` does NOT
+match the phase implied by the last phase-closing commit per the table above
+(e.g., `current_phase: "green"` but last commit is `refactor:` → drift;
+`current_phase: "refactor"` but last commit is `test:` → drift),
+**there is drift** — abort and escalate to the user. Recovery is manual,
+not automatic; silent synchronization hides protocol bugs.
 
 Recovery if the state file is corrupted or lost: regenerate it from the plan
 (last `[x]`) + git (last commit), then escalate to the user for confirmation

@@ -49,13 +49,38 @@ present)"**. Do not overwrite.
 
 Source template: `${CLAUDE_PLUGIN_ROOT}/templates/settings.json.tmpl`
 
+### tdd-guard binary pre-check
+
+**Before writing or merging hooks**, check whether the `tdd-guard` binary is
+on PATH:
+
+```powershell
+Get-Command tdd-guard -ErrorAction SilentlyContinue
+```
+
+If `tdd-guard` is **NOT** found, emit a **PROMINENT WARNING**:
+
+> ⚠ WARNING: `tdd-guard` binary not found on PATH.
+> The hooks have been written, but the environment is BROKEN until
+> `tdd-guard` is installed. Every Write/Edit operation will FAIL the next
+> session because the PreToolUse hook will error.
+> **Install `tdd-guard` first before running `/sbtdd`.**
+
+Then continue writing the hooks (the hooks are still installed so the user
+only needs to install the binary to fix the setup).
+
 ### If `.claude/settings.json` does not exist
 
 Copy the template verbatim. Create `.claude/` first if absent.
 
 ### If `.claude/settings.json` already exists (merge strategy)
 
-1. **Back it up** to `.claude/settings.json.bak` before any modification.
+1. **Back it up with a non-clobbering filename:**
+   - Attempt `.claude/settings.json.bak`.
+   - If that file **already exists**, use a timestamped name instead:
+     `.claude/settings.json.<timestamp>.bak` (e.g.
+     `.claude/settings.json.20260523T143022.bak`).
+   - Never overwrite an existing backup.
 2. Parse the existing file (`ConvertFrom-Json` on PowerShell; `jq` as
    POSIX fallback).
 3. Parse the template to obtain its `hooks` object.
@@ -81,6 +106,10 @@ Copy the template verbatim. Create `.claude/` first if absent.
    PowerShell, use `ConvertTo-Json -Depth 10` — the default depth of 2
    truncates the nested `hooks` structure and corrupts the file.
    (Alternatively, use `jq` to write.)
+9. **Validate after writing:** after writing the file, re-read it and
+   parse it (`ConvertFrom-Json` / `json.loads`) to confirm the result is
+   valid JSON. If parsing fails, **immediately restore from the backup**
+   and report the error — do not leave a corrupted settings file.
 
 The merge is performed by the agent directly; backup + show-diff is the
 safety net.
@@ -123,6 +152,14 @@ sbtdd/
 planning/
 ```
 
+**Exact-line matching:** when checking whether an entry already exists, match
+the **full line exactly** (strip leading/trailing whitespace; also treat a
+line with an optional trailing `/` as matching the bare form — e.g. `sbtdd/`
+matches `sbtdd`). Do NOT use naive substring matching (e.g., `sbtdd` must
+not be considered present just because the file contains `sbtdd-foo/`).
+A distinct entry is added only when no full-line match exists for that
+pattern.
+
 The comment line `# SBTDD local-only files` is added once only if it is
 not already present. Check each of the five content entries individually
 and add only the missing ones. Do not duplicate existing entries.
@@ -146,8 +183,11 @@ Print a summary table:
 Then remind the user:
 
 > **Next steps**
-> 1. Install the `tdd-guard` binary and ensure it is on `PATH`.
-> 2. Install the stack reporter for your stack
->    (`cargo install sbtdd-reporter` / `pip install sbtdd-reporter` /
->    build from source for C++).
+> 1. Install the `tdd-guard` binary and ensure it is on `PATH`
+>    (see `tdd-guard` upstream docs for platform-specific instructions).
+> 2. *(Optional)* Install the stack reporter if you need on-demand
+>    test-result sync — the PreToolUse hook enforces the TDD cycle without it:
+>    - **Rust:** `cargo install tdd-guard-rust`
+>    - **Python:** `pip install tdd-guard-pytest`
+>    - **C/C++:** no official reporter; test-result sync is manual.
 > 3. Run `/sbtdd-check` to verify the full setup.

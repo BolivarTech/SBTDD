@@ -14,7 +14,7 @@ entry point. Evaluate rows top-to-bottom; take the first matching row.
 
 | Condition | Phase entered | Action |
 |-----------|---------------|--------|
-| `sbtdd/spec-behavior-base.md` absent or empty | — | **Stop and request** the file from the user before proceeding |
+| `sbtdd/spec-behavior-base.md` absent, empty, or still contains `<!-- replace -->` markers | — | **Stop and ask the user to fill it in** before proceeding — do NOT proceed to brainstorming on unfilled boilerplate |
 | `sbtdd/spec-behavior-base.md` present; `sbtdd/spec-behavior.md` absent | Specification | Invoke `superpowers:brainstorming` using `spec-behavior-base.md` as input |
 | `sbtdd/spec-behavior.md` present; `planning/claude-plan-tdd-org.md` absent | Planning | Invoke `superpowers:writing-plans` to generate `claude-plan-tdd-org.md` |
 | `planning/claude-plan-tdd-org.md` present; `planning/claude-plan-tdd.md` absent or not yet approved | Plan gate (Checkpoint 2) | Run MAGI review against spec + plan; iterate until `claude-plan-tdd.md` is approved (see `references/review-gates.md` for the MAGI verdict table) |
@@ -53,13 +53,32 @@ tables from that section here; refer to it for the authoritative definition.
 
 ## 3. Drift Detection and Recovery
 
-**Hard rule:** if `session-state.json` reports `current_phase: "green"` but
-the last git commit carries a `refactor:` prefix, **drift has occurred** —
+**Canonical mapping — phase implied by the last phase-closing commit:**
+
+| Last phase-closing commit prefix | `current_phase` SHOULD be |
+|----------------------------------|---------------------------|
+| `test:`                          | `green`                   |
+| `feat:` or `fix:`                | `refactor`                |
+| `refactor:`                      | `red` (next task) or `done` (plan complete) |
+| `chore:`                         | `red` (next task) or `done` (plan complete) |
+
+`current_phase` is set to the phase to work on **next** after a phase closes.
+The consistency check therefore compares `current_phase` to the phase
+**implied by** the last phase-closing commit, not to the prefix of that same
+phase.
+
+Worked examples:
+- `current_phase = "green"` + last commit `refactor:` → **DRIFT** (green
+  implies the last closing commit was `test:`, but we see `refactor:`).
+- `current_phase = "refactor"` + last commit `test:` → **DRIFT** (refactor
+  implies the last closing commit was `feat:`/`fix:`, but we see `test:`).
+- `current_phase = "green"` + last commit `test:` → **consistent**.
+- `current_phase = "refactor"` + last commit `feat:` → **consistent**.
+
+**Hard rule:** if the mapping above shows that `current_phase` does NOT match
+the phase implied by the last phase-closing commit, **drift has occurred** —
 **abort and escalate to the user immediately**. Do not attempt silent
 reconciliation; silent sync hides protocol bugs.
-
-This rule applies to ANY mismatch between `current_phase` and the expected
-commit prefix for that phase (e.g., `"red"` + `test:`, `"green"` + `feat:`/`fix:`, `"refactor"` + `refactor:`).
 
 ### Recovery procedure (manual, not automatic)
 

@@ -144,16 +144,25 @@ Note: MAGI requires genuine uncertainty to be useful — it is a deliberation
 gate, not a rubber stamp. If `magi:magi` is unavailable, `/sbtdd` will report
 the missing skill and halt rather than skip the gate silently.
 
-### `tdd-guard` binary + per-stack reporter
+### `tdd-guard` binary
 
-`tdd-guard` enforces the TDD cycle via Claude Code hooks. The stack reporter
-feeds test results back to the guard.
+`tdd-guard` enforces the TDD cycle via Claude Code hooks (PreToolUse,
+SessionStart, UserPromptSubmit). The binary must be on `PATH`. Run
+`/sbtdd-check` (Check 5) to verify.
 
-- **Rust:** `cargo install sbtdd-reporter`
-- **Python:** `pip install sbtdd-reporter`
-- **C/C++:** build from source
+Install per the `tdd-guard` upstream docs (external to this plugin).
 
-Both binaries must be on `PATH`. Run `/sbtdd-check` (Check 5) to verify.
+### Stack reporter (optional, on-demand)
+
+The stack reporter syncs test results back to `tdd-guard` on demand.
+It is **not required** for enforcement — the PreToolUse hook works
+directly via the `tdd-guard` binary. Install only if you need on-demand
+test-result sync:
+
+- **Rust:** `cargo install tdd-guard-rust`
+- **Python:** `pip install tdd-guard-pytest`
+- **C/C++:** no official reporter; the PreToolUse hook still enforces;
+  test-result sync is manual.
 
 ---
 
