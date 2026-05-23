@@ -122,7 +122,29 @@ behavior that is absent from the spec.
 
 ---
 
-## 6. On Unexpected Test Failure
+## 6. TDD-Guard Toggle for Non-Execution Phases
+
+TDD-Guard's `PreToolUse` matcher (`Write|Edit|MultiEdit|TodoWrite`) enforces
+the Red-Green-Refactor cycle by blocking writes that violate it. This
+enforcement is only meaningful during the **Execution** phase.
+
+During non-Execution phases — **Spec**, **Planning**, **Plan gate**,
+**Pre-merge review**, and **Finalization** — the orchestrator and skills make
+legitimate markdown, spec, plan, and `TodoWrite` writes that TDD-Guard would
+otherwise block. To avoid false blocks:
+
+- **Before entering a non-Execution phase:** issue the quick command
+  `tdd-guard off` (via `UserPromptSubmit`). This disables PreToolUse
+  enforcement for the duration of that phase.
+- **When returning to the Execution phase:** issue `tdd-guard on` to
+  re-enable enforcement.
+
+Note: only the user (or the orchestrator acting on the user's behalf via an
+explicit prompt) may toggle TDD-Guard. Sub-agents cannot toggle it.
+
+---
+
+## 7. On Unexpected Test Failure
 
 If a test fails unexpectedly during any phase, invoke
 `superpowers:systematic-debugging` before proposing a fix. Diagnose the root

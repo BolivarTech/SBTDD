@@ -108,7 +108,12 @@ they diverge, apply this canon order:
 | `test:`                          | `green`                   |
 | `feat:` or `fix:`                | `refactor`                |
 | `refactor:`                      | `red` (next task) or `done` (plan complete) |
-| `chore:`                         | `red` (next task) or `done` (plan complete) |
+| `chore:` with message matching `mark task <id> complete` | `red` (next task) or `done` (plan complete) |
+
+A `chore:` commit counts as a task-close signal **only** when its message
+matches `mark task <id> complete`. Any other `chore:` commit is NOT a
+task-close signal — treat it as an unrecognised prefix and escalate (stop
+and ask the user).
 
 **Operational rule — classify in order:**
 

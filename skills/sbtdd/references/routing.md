@@ -14,7 +14,7 @@ entry point. Evaluate rows top-to-bottom; take the first matching row.
 
 | Condition | Phase entered | Action |
 |-----------|---------------|--------|
-| `sbtdd/spec-behavior-base.md` absent, empty, or still contains `<!-- replace -->` markers | — | **Stop and ask the user to fill it in** before proceeding — do NOT proceed to brainstorming on unfilled boilerplate |
+| `sbtdd/spec-behavior-base.md` absent, empty, or still contains any `<!-- replace:` marker | — | **Stop and ask the user to fill it in** before proceeding — if the base still contains any `<!-- replace:` marker, treat it as unfilled boilerplate and do NOT proceed to brainstorming |
 | `sbtdd/spec-behavior-base.md` present; `sbtdd/spec-behavior.md` absent | Specification | Invoke `superpowers:brainstorming` using `spec-behavior-base.md` as input |
 | `sbtdd/spec-behavior.md` present; `planning/claude-plan-tdd-org.md` absent | Planning | Invoke `superpowers:writing-plans` to generate `claude-plan-tdd-org.md` |
 | `planning/claude-plan-tdd-org.md` present; `planning/claude-plan-tdd.md` absent or not yet approved | Plan gate (Checkpoint 2) | Run MAGI review against spec + plan; iterate until `claude-plan-tdd.md` is approved (see `references/review-gates.md` for the MAGI verdict table) |
@@ -60,7 +60,12 @@ tables from that section here; refer to it for the authoritative definition.
 | `test:`                          | `green`                   |
 | `feat:` or `fix:`                | `refactor`                |
 | `refactor:`                      | `red` (next task) or `done` (plan complete) |
-| `chore:`                         | `red` (next task) or `done` (plan complete) |
+| `chore:` with message matching `mark task <id> complete` | `red` (next task) or `done` (plan complete) |
+
+A `chore:` commit counts as a task-close signal **only** when its message
+matches `mark task <id> complete`. Any other `chore:` commit (maintenance,
+housekeeping, etc.) is NOT a task-close signal — treat it as an unrecognised
+prefix and escalate (stop and ask the user).
 
 `current_phase` is set to the phase to work on **next** after a phase closes.
 The consistency check therefore compares `current_phase` to the phase

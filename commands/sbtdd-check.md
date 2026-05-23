@@ -137,7 +137,7 @@ after a phase closes):
 | `test:`                          | `green`                   |
 | `feat:` or `fix:`                | `refactor`                |
 | `refactor:`                      | `red` or `done`           |
-| `chore:`                         | `red` or `done`           |
+| `chore:` matching `mark task <id> complete` | `red` or `done` |
 
 Steps:
 - Read `current_phase` from `.claude/session-state.json`.
@@ -161,7 +161,9 @@ Steps:
      last_commit=<prefix>`.
   4. **Unrecognised prefix — escalate** — the last commit prefix is not one
      of `test:` / `feat:` / `fix:` / `refactor:` / `chore:` (e.g. `docs:`,
-     a merge commit, or no commits yet in the repo). Report
+     a merge commit, or no commits yet in the repo), OR the prefix is
+     `chore:` but the message does NOT match `mark task <id> complete`
+     (i.e. it is a maintenance chore, not a task-close). Report
      `NOTE — unrecognised or absent last-commit prefix (<prefix>); stop and
      ask the user before assuming any phase. Do not attempt to classify.`
      Never assume a phase from an unrecognised prefix.
