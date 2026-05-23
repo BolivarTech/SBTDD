@@ -161,7 +161,59 @@ different priorities rarely share the same blind spot, and the critic's job is t
 
 ---
 
-## 6. Evidence: the methodology applied to itself
+## 6. Why MAGI is vital — the layer the others cannot replace
+
+Every safeguard in §5 except the last checks the *same thing*: does the code do
+what the tests say? Tests, TDD-Guard hooks, and the verification gate are all
+forms of **mechanical correctness** — invaluable, but they share one blind spot:
+**they can only check what someone thought to encode.** They cannot test the
+wisdom of the plan, the soundness of a design trade-off, or the bug no one
+anticipated.
+
+That leaves two gaps that are *structural*, not incidental — and in an LLM
+workflow, both are dangerous:
+
+**1. A green suite can implement a wrong plan flawlessly.** You cannot test your
+way out of a bad design. If the plan is subtly wrong, every test passes and every
+commit is clean while the whole thing heads in the wrong direction. Mechanical
+correctness is silent about the *correctness of intent*.
+
+**2. The author is an LLM — and so is any single reviewer.** A model reviewing its
+own work, or another instance of the same model, carries the same training, the
+same anchoring, the same optimism. Self-review by the author is theater: it
+ratifies, it does not challenge. The blind spot is shared, so it survives the
+review.
+
+MAGI exists precisely to close these two gaps, and **nothing else in the stack
+does**:
+
+- **It evaluates judgment, not just correctness.** Three lenses — a scientist
+  (technical rigor), a pragmatist (maintainability and trade-offs), and a critic
+  (risk and failure modes) — assess the *design and the decision*, the dimensions
+  tests cannot encode.
+- **It is independent and adversarial by construction.** The agents analyze
+  without seeing one another's output (no anchoring), the critic's job is to *find
+  fault* (no groupthink), and the weighted vote penalizes a `reject` more heavily
+  than an `approve` (a deliberate correction for optimism bias). Disagreement
+  between them is the signal — not a failure to reach consensus.
+- **It sits at the two highest-leverage gates.** SBTDD runs MAGI at the **plan
+  checkpoint** — before a single line is written, because a bad plan multiplies
+  into dozens of bad commits — and again **pre-merge** on the whole accumulated
+  diff, where architectural problems hide that no per-task green suite can see.
+  These are the two moments when a wrong call is most expensive to discover later.
+- **Its verdict is quantified and non-negotiable.** Advancing requires at least a
+  `GO WITH CAVEATS` consensus; a stuck review escalates to a human after a bounded
+  number of iterations instead of looping forever. "Looks fine to me" becomes an
+  auditable decision with a recorded rationale.
+
+Remove MAGI and SBTDD degrades into *a well-tested implementation of a
+possibly-wrong plan, signed off by the same mind that wrote it.* That is exactly
+the outcome the methodology is built to prevent — which is why MAGI is not an
+optional polish step but a **load-bearing gate**.
+
+---
+
+## 7. Evidence: the methodology applied to itself
 
 The strongest argument for SBTDD is that **this plugin was built by it.** The
 `sbtdd` plugin was specified with brainstorming, planned with `writing-plans`,
@@ -188,7 +240,7 @@ shipped.
 
 ---
 
-## 7. When *not* to use it
+## 8. When *not* to use it
 
 Discipline has a cost, and SBTDD is honest about it. The full flow is overhead for
 work that does not warrant it:
