@@ -46,3 +46,12 @@ def test_finalization_present_with_checklist():
     assert "current_phase" in t and "done" in t
     assert "- [ ]" in t
     assert "MAGI" in t
+
+
+def test_routing_drift_mapping_is_not_off_by_one():
+    t = (REF / "routing.md").read_text(encoding="utf-8")
+    # the corrected mapping must pair test: -> green and feat:/fix: -> refactor
+    assert "test:" in t and "green" in t
+    assert ("feat:" in t or "fix:" in t) and "refactor" in t
+    # the documented drift example must remain (green + refactor: is drift)
+    assert "drift" in t.lower()
