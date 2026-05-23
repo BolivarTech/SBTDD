@@ -97,9 +97,10 @@ command -v sbtdd-reporter
 
 Report whether each binary is found or missing.
 
-**FAIL remediation:** install `tdd-guard` for your platform and the
-stack-specific `sbtdd-reporter` (see `/sbtdd-init` output for install
-commands).
+**FAIL remediation:** the per-stack **reporter** install command is printed in
+`/sbtdd-init`'s final reminder — run `/sbtdd-init` to see it. The `tdd-guard`
+**binary** itself is installed per its own upstream docs (external to this
+plugin; see the `tdd-guard` project for platform-specific install instructions).
 
 ---
 

@@ -101,7 +101,7 @@ they diverge, apply this canon order:
 3. Plan is canon of the future + record — what remains + what was completed
 ```
 
-**Operational rule:** if `.claude/session-state.json` reports `phase=green` but
+**Operational rule:** if `.claude/session-state.json` reports `current_phase: "green"` but
 the last commit is `refactor:`, **there is drift** — abort and escalate to the
 user. Recovery is manual, not automatic; silent synchronization hides protocol
 bugs.

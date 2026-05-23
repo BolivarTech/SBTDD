@@ -54,8 +54,6 @@ The skill guides the decision between direct merge, pull request, or branch clea
 
 ---
 
----
-
 ## 3. Pending-Change Resolution
 
 If `git status` reports changes related to plan scope, resolve before closing:

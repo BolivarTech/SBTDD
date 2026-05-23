@@ -113,7 +113,16 @@ strong constraint under parallelism.
 
 ---
 
-## 5. On Unexpected Test Failure
+## 5. Spec Precedence on Ambiguity
+
+When `sbtdd/spec-behavior.md` and `planning/claude-plan-tdd.md` contradict each
+other, **`spec-behavior.md` wins** — it is the authoritative behavioral contract.
+Consult `sbtdd/spec-behavior.md` before assuming any behavior; do not implement
+behavior that is absent from the spec.
+
+---
+
+## 6. On Unexpected Test Failure
 
 If a test fails unexpectedly during any phase, invoke
 `superpowers:systematic-debugging` before proposing a fix. Diagnose the root
