@@ -1,4 +1,12 @@
-"""Behavioral test of the SBTDD drift classifier (executable spec of routing §3)."""
+"""Executable spec mirror of the SBTDD routing drift rules (routing.md §3).
+
+This module is an executable spec mirror of the drift-classification rules
+documented in ``skills/sbtdd/references/routing.md`` §3 and
+``templates/CLAUDE.local.md.tmpl`` §2.1.  It documents and guards the
+*intended* classification behaviour; it does NOT execute the agent's runtime
+behaviour.  Any change to the routing rules must be reflected here first
+(Red step of TDD).
+"""
 
 PHASE_AFTER = {"test": "green", "feat": "refactor", "fix": "refactor",
                "refactor": "red", "chore": "red"}      # red also covers 'done'
@@ -7,11 +15,32 @@ PHASE_CLOSED_BY = {"test": "red", "feat": "green", "fix": "green",
 
 
 def classify(current_phase, last_prefix):
+    """Classify the drift state between the session state and the last commit.
+
+    Args:
+        current_phase: Value of ``current_phase`` from session-state.json.
+            One of ``"red"``, ``"green"``, ``"refactor"``, ``"done"``.
+        last_prefix: Prefix of the last git commit (e.g. ``"test"``,
+            ``"feat"``, ``"fix"``, ``"refactor"``, ``"chore"``).
+            Any unrecognised or absent value returns ``"escalate"``.
+
+    Returns:
+        One of:
+        - ``"na"``         — plan complete; post-done review commits expected.
+        - ``"consistent"`` — state matches phase implied by last commit.
+        - ``"lag"``        — commit landed but state update was interrupted.
+        - ``"drift"``      — unrecoverable mismatch; abort and escalate.
+        - ``"escalate"``   — last_prefix is unrecognised or absent; stop and
+                             ask the user before assuming any phase.
+    """
     if current_phase == "done":
         return "na"                       # plan complete; review commits expected
-    if current_phase in (PHASE_AFTER[last_prefix], "done"):
+    phase_next = PHASE_AFTER.get(last_prefix)
+    if phase_next is None:
+        return "escalate"                 # unknown prefix — stop and ask
+    if current_phase in (phase_next, "done"):
         return "consistent"
-    if current_phase == PHASE_CLOSED_BY[last_prefix]:
+    if current_phase == PHASE_CLOSED_BY.get(last_prefix):
         return "lag"                      # commit landed, state update interrupted
     return "drift"
 
@@ -36,3 +65,13 @@ def test_lag_is_recoverable_not_drift():
 def test_done_is_na_under_review_commits():
     for p in ("test", "fix", "refactor"):
         assert classify("done", p) == "na"
+
+
+def test_unknown_prefix_returns_escalate_without_raising():
+    """Unrecognised or absent last-commit prefix must escalate, never crash."""
+    unknown_prefixes = ("docs", "ci", "build", "merge", "", "wip", None)
+    for prefix in unknown_prefixes:
+        result = classify("green", prefix)
+        assert result == "escalate", (
+            f"Expected 'escalate' for prefix={prefix!r}, got {result!r}"
+        )
