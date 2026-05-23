@@ -12,6 +12,7 @@ def test_routing_present_with_state_detection_table():
     assert "authority" in t.lower()
     assert "drift" in t.lower()
     assert "abort" in t.lower() and "escalate" in t.lower()
+    assert ".claude/session-state.json" in t
 
 
 def test_tdd_cycle_present_with_phase_rules_and_close():
@@ -35,6 +36,7 @@ def test_review_gates_present_with_dual_loop_and_verdicts():
     for verdict in ("STRONG GO", "HOLD", "STRONG NO-GO"):
         assert verdict in t
     assert "3 iterations" in t.lower() or "three iterations" in t.lower()
+    assert "HOLD -- TIE" in t
 
 
 def test_finalization_present_with_checklist():
