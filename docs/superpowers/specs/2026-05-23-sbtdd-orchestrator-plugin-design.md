@@ -359,3 +359,49 @@ decisions): the **merge-clobber** critical is *mitigated, not closed* — its sa
 net is the backup + show-diff + manual validation, not a deterministic tested
 script; and the deterministic-behavior test gap remains (pytest stays substring-based,
 so the manual gate in §10 carries the real assurance).
+
+## 14. Pre-merge MAGI outcome + follow-ups
+
+The implementation was built TDD-first via subagent-driven development (per-task
+spec+quality reviews) and then gated by 4 pre-merge MAGI iterations on the full
+diff. All four returned **GO WITH CAVEATS (3-0)**. Three distinct criticals were
+surfaced across the loop and **all fixed before merge**:
+
+1. **Drift-detection off-by-one** — `current_phase` is the phase to work on *next*
+   after a close, so the consistency check must compare it to the phase implied by
+   the last commit (`test:`→green, `feat:`/`fix:`→refactor, `refactor:`/`chore:`→
+   red/done). Fixed with a 4-case classifier (consistent / recoverable-lag /
+   `done`=N/A / drift), an unknown-prefix→escalate branch, and a behavioral
+   `tests/test_drift_model.py`.
+2. **Invented reporter package names** (`sbtdd-reporter`) — replaced with the real
+   `tdd-guard-rust` / `tdd-guard-pytest`; reporter reframed as optional/on-demand.
+3. **Fail-closed hook on a missing binary** — `/sbtdd-init` now installs the
+   TDD-Guard hooks **only when `tdd-guard` is verified on PATH**, never leaving a
+   project that blocks every edit.
+
+Also fixed: boilerplate-marker mismatch that defeated the unfilled-base gate
+(`<!-- replace:` now matched), task-close `chore:` disambiguation, and a TDD-Guard
+toggle note for non-Execution phases.
+
+### Accepted residuals (steady state — not bugs)
+- Structural tests are **presence/lint**, not behavioral; `test_drift_model.py` is
+  an executable spec-mirror, not agent-runtime verification. The required gate is
+  plugin-validator + manual behavioral evals (§10). *(no-scripts decision)*
+- The `settings.json` merge is LLM-performed; safety net = binary-gating +
+  non-clobbering backup + show-diff + validate-and-restore. *(no-scripts decision)*
+- gitignore ignores `CLAUDE.md` / `.claude/` broadly; mitigated by an
+  already-tracked warning. *(user "keep as-is" decision)*
+- Drift rules are stated in 4 places (canonical source: `CLAUDE.local.md` §2.1);
+  anti-duplication is by-pointing, not single-copy.
+
+### Follow-ups (v0.2 candidates, non-blocking)
+- Distinct task-close commit marker (e.g. `chore(sbtdd): mark task N complete`)
+  instead of disambiguating by message.
+- Reconcile the Rust verification block (`nextest`/`clippy`/`audit`) with the
+  global `~/.claude/CLAUDE.md` `cargo test` standard, or document the toolchain as
+  required deps in `/sbtdd-check`.
+- If the no-scripts constraint is relaxed: extract the `settings.json` merge into a
+  deterministic, fixture-tested helper.
+- Define `no-git-repo` and malformed-`settings.json` edge cases in init/check.
+- Revisit process weight and the gitignore-everything policy if this becomes
+  team-shared.
