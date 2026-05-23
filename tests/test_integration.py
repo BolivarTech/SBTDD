@@ -40,3 +40,11 @@ def test_referenced_rule_sections_exist_in_template():
     tmpl = (ROOT / "templates/CLAUDE.local.md.tmpl").read_text(encoding="utf-8")
     for section in ("Mandatory Code Standards", "session-state.json", "Commit"):
         assert section in tmpl
+
+
+def test_routing_boilerplate_marker_matches_seed_template():
+    routing = (ROOT / "skills/sbtdd/references/routing.md").read_text(encoding="utf-8")
+    seed = (ROOT / "templates/spec-behavior-base.tmpl.md").read_text(encoding="utf-8")
+    # the marker prefix the gate looks for must actually appear in the seed template
+    assert "<!-- replace:" in seed
+    assert "<!-- replace:" in routing
