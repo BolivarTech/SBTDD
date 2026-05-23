@@ -1,6 +1,10 @@
 # Local session memory (remember plugin) — developer-local, not plugin source
 .remember/
 
+# Python caches (test suite tooling)
+__pycache__/
+.pytest_cache/
+
 # OS / editor cruft
 Thumbs.db
 .DS_Store
