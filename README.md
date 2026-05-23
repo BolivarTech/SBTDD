@@ -55,7 +55,9 @@ failing check, run `/sbtdd-init`.
 ## Getting Started
 
 1. **Install the plugin** — place this plugin directory where your Claude Code
-   harness loads plugins, then restart the harness.
+   harness loads plugins, then restart the harness. Command template paths that
+   reference `${CLAUDE_PLUGIN_ROOT}` are resolved by the harness to the installed
+   plugin directory automatically.
 
 2. **Install runtime dependencies** (see Dependencies below) — ensure
    `tdd-guard` and the stack reporter are on `PATH`.
