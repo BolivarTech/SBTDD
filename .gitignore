@@ -13,12 +13,13 @@ build/
 uv.lock
 
 # Developer-local SBTDD workflow artifacts — not part of the shipped plugin
-.claude/
-sbtdd/
-planning/
-CLAUDE.md
-CLAUDE.local.md
-.remember/
+# Anchored to repo root so they never match nested paths like skills/sbtdd/
+/.claude/
+/sbtdd/
+/planning/
+/CLAUDE.md
+/CLAUDE.local.md
+/.remember/
 
 # Internal planning/process docs — kept local, not published
 docs/superpowers/
