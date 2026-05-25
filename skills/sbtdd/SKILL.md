@@ -45,7 +45,7 @@ and invoke the listed skill(s) using their fully qualified names
 |---|---|---|
 | Spec refinement | routing.md | `superpowers:brainstorming` |
 | Planning | routing.md | `superpowers:writing-plans` |
-| Plan gate | review-gates.md | `magi:magi` (+ manual review) |
+| Plan gate | review-gates.md | manual review (Checkpoint 1) → `magi:magi` (Checkpoint 2) |
 | Execution | tdd-cycle.md | `superpowers:test-driven-development`, `superpowers:verification-before-completion`, `superpowers:systematic-debugging`; mode `superpowers:subagent-driven-development` or `superpowers:executing-plans`; optional `superpowers:using-git-worktrees`, `superpowers:dispatching-parallel-agents` |
 | Pre-merge review | review-gates.md | `superpowers:requesting-code-review` → `superpowers:receiving-code-review` → `magi:magi` |
 | Finalization | finalization.md | `superpowers:finishing-a-development-branch` |
@@ -64,9 +64,10 @@ and invoke the listed skill(s) using their fully qualified names
 
 ### 4. Gates
 
-Human stops are mandatory at plan approval and MAGI verdict checkpoints. Never
-auto-approve any gate. Wait for explicit human confirmation before advancing to
-the next phase.
+Human stops are mandatory and ordered at the plan gate: **Checkpoint 1** (manual
+review of `claude-plan-tdd-org.md`) precedes **Checkpoint 2** (the `magi:magi`
+verdict); never run MAGI before Checkpoint 1 is approved. Never auto-approve any
+gate. Wait for explicit human confirmation before advancing to the next phase.
 
 ### 5. Loop
 
