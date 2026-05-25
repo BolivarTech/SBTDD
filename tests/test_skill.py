@@ -47,3 +47,17 @@ def test_preflight_routes_to_init_when_uninitialized():
     t = _txt()
     assert "sbtdd-init" in t
     assert "CLAUDE.local.md" in t
+
+
+def test_plan_gate_lists_manual_review_before_magi():
+    row = ""
+    for line in _txt().splitlines():
+        if line.lower().startswith("| plan gate"):
+            row = line
+            break
+    assert row, "plan-gate delegation row not found in SKILL.md"
+    low = row.lower()
+    assert "checkpoint 1" in low and "checkpoint 2" in low
+    assert "manual review" in low
+    assert low.index("manual review") < low.index("magi"), \
+        "manual review (Checkpoint 1) must be listed before magi in the plan-gate row"
