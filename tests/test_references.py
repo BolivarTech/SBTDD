@@ -75,3 +75,32 @@ def test_routing_drift_mapping_is_not_off_by_one():
     assert ("feat:" in t or "fix:" in t) and "refactor" in t
     # the documented drift example must remain (green + refactor: is drift)
     assert "drift" in t.lower()
+
+
+def _section(text: str, header_substr: str) -> str:
+    """Return the lines of the first '## ' section whose header contains
+    header_substr (case-insensitive), up to the next '## ' header."""
+    out, capturing = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if capturing:
+                break
+            capturing = header_substr.lower() in line.lower()
+            if capturing:
+                out.append(line)
+            continue
+        if capturing:
+            out.append(line)
+    return "\n".join(out)
+
+
+def test_review_gates_describes_plan_gate_checkpoint1():
+    sec = _section((REF / "review-gates.md").read_text(encoding="utf-8"), "Plan Gate")
+    assert sec, "'## ... Plan Gate' section not found in review-gates.md"
+    low = sec.lower()
+    assert "checkpoint 1" in low
+    assert "manual review" in low
+    assert "writing-plans" in sec
+    assert "§1" in sec
+    assert low.index("checkpoint 1") < low.index("magi"), \
+        "Checkpoint 1 must precede MAGI within the Plan Gate section"
