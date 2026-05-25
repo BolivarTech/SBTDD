@@ -48,6 +48,26 @@ def test_finalization_present_with_checklist():
     assert "MAGI" in t
 
 
+def _plan_gate_row(text: str) -> str:
+    """Return the single decision-table row describing the plan gate, or ''."""
+    for line in text.splitlines():
+        low = line.lower()
+        if "plan gate" in low and "checkpoint" in low:
+            return line
+    return ""
+
+
+def test_routing_plan_gate_orders_checkpoint1_before_magi():
+    row = _plan_gate_row((REF / "routing.md").read_text(encoding="utf-8"))
+    assert row, "plan-gate row not found in routing.md"
+    low = row.lower()
+    assert "checkpoint 1" in low and "checkpoint 2" in low
+    assert "manual review" in low
+    assert low.index("checkpoint 1") < low.index("magi"), \
+        "Checkpoint 1 must precede MAGI within the plan-gate row"
+    assert "writing-plans" in row
+
+
 def test_routing_drift_mapping_is_not_off_by_one():
     t = (REF / "routing.md").read_text(encoding="utf-8")
     # the corrected mapping must pair test: -> green and feat:/fix: -> refactor
