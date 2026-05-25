@@ -63,8 +63,8 @@ def test_routing_plan_gate_orders_checkpoint1_before_magi():
     low = row.lower()
     assert "checkpoint 1" in low and "checkpoint 2" in low
     assert "manual review" in low
-    assert low.index("checkpoint 1") < low.index("magi"), \
-        "Checkpoint 1 must precede MAGI within the plan-gate row"
+    assert low.index("manual review") < low.index("magi"), \
+        "manual review (Checkpoint 1) must precede MAGI within the plan-gate row"
     assert "writing-plans" in row
 
 
@@ -102,5 +102,5 @@ def test_review_gates_describes_plan_gate_checkpoint1():
     assert "manual review" in low
     assert "writing-plans" in sec
     assert "§1" in sec
-    assert low.index("checkpoint 1") < low.index("magi"), \
-        "Checkpoint 1 must precede MAGI within the Plan Gate section"
+    assert low.index("manual review") < low.index("magi"), \
+        "manual review (Checkpoint 1) must precede MAGI within the Plan Gate section"
