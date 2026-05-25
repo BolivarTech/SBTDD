@@ -4,9 +4,32 @@ This reference covers the two pre-merge review loops, their sequencing,
 the MAGI verdict table, and the correction loop with its safety valve.
 For commit prefix conventions, see `CLAUDE.local.md` §5.
 
-> **Note:** this reference also serves the Plan gate (Checkpoint 2) described
-> in `references/routing.md` — the MAGI verdict table and the 3-iteration safety
-> valve apply identically to the plan-review loop at planning time.
+---
+
+## 0. Plan Gate (Checkpoint 1 → Checkpoint 2)
+
+This reference also serves the **Plan gate** at planning time (see
+`references/routing.md`). The plan gate is a strict ordered sequence of two
+checkpoints; the canonical flow is `CLAUDE.local.md` §1 (steps 4-7) — do not
+duplicate its prose here, only operationalize it.
+
+**Checkpoint 1 — manual review (human gate).** When `planning/claude-plan-tdd-org.md`
+exists and no approved `planning/claude-plan-tdd.md` exists yet, the orchestrator
+**stops** and presents the original plan to the user for explicit approval.
+
+- **Reject:** capture the user's feedback, re-enter the Planning phase, re-run
+  `superpowers:writing-plans` to regenerate `claude-plan-tdd-org.md` with that
+  feedback (regeneration overwrites the prior original plan), then re-present
+  Checkpoint 1. Repeat until approved.
+- **Approve:** proceed to Checkpoint 2. Never run `magi:magi` before Checkpoint 1
+  is approved.
+
+**Checkpoint 2 — MAGI review.** After Checkpoint 1 approval, run `magi:magi`
+against `sbtdd/spec-behavior.md` + `planning/claude-plan-tdd-org.md`, writing
+`planning/claude-plan-tdd.md` from the original plan with the improvements,
+iterating until the verdict is `>= GO WITH CAVEATS`. The MAGI verdict table
+(§5) and the 3-iteration safety valve (§6) apply identically to this
+plan-review loop.
 
 ---
 
