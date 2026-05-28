@@ -45,9 +45,9 @@ and invoke the listed skill(s) using their fully qualified names
 |---|---|---|
 | Spec refinement | routing.md | `superpowers:brainstorming` |
 | Planning | routing.md | `superpowers:writing-plans` |
-| Plan gate | review-gates.md | manual review (Checkpoint 1) → `magi:magi` (Checkpoint 2) |
+| Plan gate | review-gates.md | manual review (Checkpoint 1) → `magi:magi` (Checkpoint 2, interactive-only — see `review-gates.md` §7) |
 | Execution | tdd-cycle.md | `superpowers:test-driven-development`, `superpowers:verification-before-completion`, `superpowers:systematic-debugging`; mode `superpowers:subagent-driven-development` or `superpowers:executing-plans`; optional `superpowers:using-git-worktrees`, `superpowers:dispatching-parallel-agents` |
-| Pre-merge review | review-gates.md | `superpowers:requesting-code-review` → `superpowers:receiving-code-review` → `magi:magi` |
+| Pre-merge review | review-gates.md | `superpowers:requesting-code-review` → `superpowers:receiving-code-review` → `magi:magi` (interactive-only — see `review-gates.md` §7) |
 | Finalization | finalization.md | `superpowers:finishing-a-development-branch` |
 
 > **Execution default:** serial `superpowers:subagent-driven-development` with
@@ -68,6 +68,11 @@ Human stops are mandatory and ordered at the plan gate: **Checkpoint 1** (manual
 review of `claude-plan-tdd-org.md`) precedes **Checkpoint 2** (the `magi:magi`
 verdict); never run MAGI before Checkpoint 1 is approved. Never auto-approve any
 gate. Wait for explicit human confirmation before advancing to the next phase.
+
+> **Invocation contract:** `magi:magi` is interactive-only — see
+> `references/review-gates.md` §7 for the forbidden transports and the
+> supported alternatives. Headless runtimes/dispatchers MUST NOT invoke it
+> via `claude -p` subprocess.
 
 ### 5. Loop
 
