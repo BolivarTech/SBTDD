@@ -104,3 +104,17 @@ def test_review_gates_describes_plan_gate_checkpoint1():
     assert "§1" in sec
     assert low.index("manual review") < low.index("magi"), \
         "manual review (Checkpoint 1) must precede MAGI within the Plan Gate section"
+
+
+def test_review_gates_documents_magi_contract():
+    """§7. MAGI Invocation Contract must declare the interactive-only rule,
+    name the forbidden transport, and use normative MUST NOT language.
+    §7 is intentionally self-contained — no external doc reference is
+    asserted here."""
+    t = (REF / "review-gates.md").read_text(encoding="utf-8")
+    sec = _section(t, "MAGI Invocation Contract")
+    assert sec, "'## 7. MAGI Invocation Contract' section not found in review-gates.md"
+    low = sec.lower()
+    assert "interactive-only" in low, "contract must contain literal 'interactive-only'"
+    assert "claude -p" in low, "contract must name the forbidden transport"
+    assert "must not" in low, "contract must use normative 'MUST NOT' language"
