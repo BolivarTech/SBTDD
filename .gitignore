@@ -23,6 +23,8 @@ uv.lock
 
 # Internal planning/process docs — kept local, not published
 docs/superpowers/
+docs/MAGI-Hang*
+graphify-out/
 
 # OS / editor cruft
 Thumbs.db
