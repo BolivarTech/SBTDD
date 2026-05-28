@@ -31,6 +31,9 @@ iterating until the verdict is `>= GO WITH CAVEATS`. The MAGI verdict table
 (§5) and the 3-iteration safety valve (§6) apply identically to this
 plan-review loop.
 
+> **Invocation contract:** `magi:magi` is interactive-only — see §7. Headless
+> runtimes/dispatchers MUST NOT invoke it via `claude -p` subprocess.
+
 ---
 
 ## 1. Granularity: What Runs When
@@ -104,6 +107,9 @@ quality gate before merge / PR.
 
 MAGI evaluates what automated review cannot: design trade-offs, architectural
 risks, engineering decisions with genuine uncertainty.
+
+> **Invocation contract:** `magi:magi` is interactive-only — see §7. Headless
+> runtimes/dispatchers MUST NOT invoke it via `claude -p` subprocess.
 
 ---
 
