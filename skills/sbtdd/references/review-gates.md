@@ -151,3 +151,38 @@ stop and escalate to the user. Possible causes:
 - **MAGI detects concerns intrinsic to the approach** that are not visible in
   the plan — requires redefining `sbtdd/spec-behavior.md` and regenerating the
   plan.
+
+---
+
+## 7. MAGI Invocation Contract
+
+`magi:magi` is an **interactive-only** Claude Code skill. It is supported
+only when invoked from an interactive Claude Code session — the orchestrator
+agent calling the skill in-band.
+
+### Not supported
+
+Invocation as a captured-pipe subprocess from a headless dispatcher — e.g.
+`claude -p "/magi:magi …"` driven by an external script with stdout/stderr
+captured but not actively drained. On Windows this triggers stdio-chain
+failures (pipe-buffer deadlock, `asyncio.ProactorEventLoop` hangs on
+`create_subprocess_exec` under inherited non-TTY stdin, stdin reads against
+closed pipes) that block the runner before any review sub-agent is spawned.
+
+### What runtimes and dispatchers MUST do instead
+
+Any headless SBTDD runtime that needs to drive the Plan-gate Checkpoint 2
+or Pre-merge Loop 2 review **MUST NOT** invoke `magi:magi` via `claude -p`
+subprocess. Acceptable alternatives:
+
+- **Interactive handoff.** Stop the headless run at the gate, hand off to a
+  human-driven interactive Claude Code session that completes the MAGI
+  review, then resume the dispatcher with the verdict file as input.
+- **Direct runner invocation.** If a `magi-runner` CLI is available from
+  the MAGI plugin maintainer with an explicit headless contract, invoke it
+  directly as a regular Python subprocess (not through `claude -p`).
+
+This contract was added in v0.0.5 after a headless SBTDD-runtime
+dispatcher hit the failure modes above when driving `magi:magi` via
+`claude -p`. The runtime fix lands in a separate repo; the contract
+belongs here so future runtimes read it first.
