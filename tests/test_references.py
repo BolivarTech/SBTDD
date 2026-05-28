@@ -118,3 +118,13 @@ def test_review_gates_documents_magi_contract():
     assert "interactive-only" in low, "contract must contain literal 'interactive-only'"
     assert "claude -p" in low, "contract must name the forbidden transport"
     assert "must not" in low, "contract must use normative 'MUST NOT' language"
+
+
+def test_routing_plan_gate_points_to_magi_contract():
+    """routing.md plan-gate row must carry the 'interactive-only' pointer so
+    headless runtimes that read routing first encounter the contract."""
+    row = _plan_gate_row((REF / "routing.md").read_text(encoding="utf-8"))
+    assert row, "plan-gate row not found in routing.md"
+    low = row.lower()
+    assert "interactive-only" in low, \
+        "routing.md plan-gate row must contain 'interactive-only' pointer"
