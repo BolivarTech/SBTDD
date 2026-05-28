@@ -128,3 +128,18 @@ def test_routing_plan_gate_points_to_magi_contract():
     low = row.lower()
     assert "interactive-only" in low, \
         "routing.md plan-gate row must contain 'interactive-only' pointer"
+
+
+def test_review_gates_sections_point_to_magi_contract():
+    """review-gates.md §0 (Plan Gate) and §4 (Final Gate) must each carry
+    an 'interactive-only' pointer to §7, so a reader entering at either
+    gate description encounters the contract."""
+    t = (REF / "review-gates.md").read_text(encoding="utf-8")
+    sec0 = _section(t, "Plan Gate")
+    assert sec0, "Plan Gate section (§0) not found in review-gates.md"
+    assert "interactive-only" in sec0.lower(), \
+        "Plan Gate section must mention 'interactive-only'"
+    sec4 = _section(t, "Final Gate")
+    assert sec4, "Final Gate section (§4) not found in review-gates.md"
+    assert "interactive-only" in sec4.lower(), \
+        "Final Gate section must mention 'interactive-only'"
