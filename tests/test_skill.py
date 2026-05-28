@@ -61,3 +61,23 @@ def test_plan_gate_lists_manual_review_before_magi():
     assert "manual review" in low
     assert low.index("manual review") < low.index("magi"), \
         "manual review (Checkpoint 1) must be listed before magi in the plan-gate row"
+
+
+def test_skill_md_points_to_magi_contract():
+    """SKILL.md must carry the MAGI interactive-only contract pointer in
+    the delegation table (Plan gate AND Pre-merge review rows) AND in the
+    Gates section. The literal substring 'interactive-only' must appear
+    at least 3 times; review-gates.md must be referenced."""
+    t = _txt()
+    low = t.lower()
+    assert low.count("interactive-only") >= 3, (
+        f"expected ≥3 'interactive-only' pointers in SKILL.md, "
+        f"found {low.count('interactive-only')}"
+    )
+    assert "review-gates.md" in t, "SKILL.md must reference review-gates.md"
+    gates_start = low.find("### 4. gates")
+    assert gates_start >= 0, "'### 4. Gates' header not found in SKILL.md"
+    gates_end = low.find("### 5.", gates_start)
+    gates_section = low[gates_start:gates_end] if gates_end > 0 else low[gates_start:]
+    assert "interactive-only" in gates_section, \
+        "Gates section must mention 'interactive-only'"
