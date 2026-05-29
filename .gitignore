@@ -23,7 +23,11 @@ uv.lock
 
 # Internal planning/process docs — kept local, not published
 docs/superpowers/
-docs/MAGI-Hang*
+# MAGI-Hang incident — local working artifacts (raw notes + handoff to MAGI
+# maintainer). Listed explicitly so future doc/MAGI-Hang-* files (e.g. a
+# post-mortem someone DOES want to track) are not hidden silently.
+docs/MAGI-Hang.txt
+docs/MAGI-Hang-Handoff.md
 graphify-out/
 
 # OS / editor cruft
