@@ -108,9 +108,10 @@ def test_review_gates_describes_plan_gate_checkpoint1():
 
 def test_review_gates_documents_magi_contract():
     """§7. MAGI Invocation Contract must declare the interactive-only rule,
-    name the forbidden transport, and use normative MUST NOT language.
-    §7 is intentionally self-contained — no external doc reference is
-    asserted here."""
+    name the forbidden transport, use normative MUST NOT language, AND
+    list the two supported alternatives as bold bullets. The bullet-anchor
+    assertions guard against a polarity-inverted rewrite that satisfies
+    substring presence without preserving the prohibition's meaning."""
     t = (REF / "review-gates.md").read_text(encoding="utf-8")
     sec = _section(t, "MAGI Invocation Contract")
     assert sec, "'## 7. MAGI Invocation Contract' section not found in review-gates.md"
@@ -118,6 +119,10 @@ def test_review_gates_documents_magi_contract():
     assert "interactive-only" in low, "contract must contain literal 'interactive-only'"
     assert "claude -p" in low, "contract must name the forbidden transport"
     assert "must not" in low, "contract must use normative 'MUST NOT' language"
+    assert "- **interactive handoff.**" in low, \
+        "§7 must list 'Interactive handoff.' as a supported alternative"
+    assert "- **direct runner invocation.**" in low, \
+        "§7 must list 'Direct runner invocation.' as a supported alternative"
 
 
 def test_routing_plan_gate_points_to_magi_contract():
