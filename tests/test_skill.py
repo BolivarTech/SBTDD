@@ -64,20 +64,38 @@ def test_plan_gate_lists_manual_review_before_magi():
 
 
 def test_skill_md_points_to_magi_contract():
-    """SKILL.md must carry the MAGI interactive-only contract pointer in
-    the delegation table (Plan gate AND Pre-merge review rows) AND in the
-    Gates section. The literal substring 'interactive-only' must appear
-    at least 3 times; review-gates.md must be referenced."""
+    """SKILL.md must carry the MAGI interactive-only contract pointer at
+    three distinct surfaces: the Plan-gate delegation row, the Pre-merge
+    review delegation row, and the §4 Gates section. Each surface is
+    anchored independently so a future consolidation between two of the
+    delegation-table rows produces a precise failure (which surface lost
+    the pointer) rather than a count-off-by-one. The overall count
+    threshold is kept as a ≥2 robustness fallback."""
     t = _txt()
     low = t.lower()
-    assert low.count("interactive-only") >= 3, (
-        f"expected ≥3 'interactive-only' pointers in SKILL.md, "
-        f"found {low.count('interactive-only')}"
+    plan_row = next(
+        (l for l in low.splitlines() if l.startswith("| plan gate")), ""
     )
-    assert "review-gates.md" in t, "SKILL.md must reference review-gates.md"
+    assert plan_row, "plan-gate delegation row not found in SKILL.md"
+    assert "interactive-only" in plan_row, \
+        "Plan-gate row must contain 'interactive-only' pointer"
+    premerge_row = next(
+        (l for l in low.splitlines() if l.startswith("| pre-merge")), ""
+    )
+    assert premerge_row, "pre-merge review delegation row not found in SKILL.md"
+    assert "interactive-only" in premerge_row, \
+        "Pre-merge review row must contain 'interactive-only' pointer"
     gates_start = low.find("### 4. gates")
     assert gates_start >= 0, "'### 4. Gates' header not found in SKILL.md"
     gates_end = low.find("### 5.", gates_start)
     gates_section = low[gates_start:gates_end] if gates_end > 0 else low[gates_start:]
     assert "interactive-only" in gates_section, \
         "Gates section must mention 'interactive-only'"
+    # Lowered from ≥3 to ≥2 to give margin against legitimate
+    # consolidation of the two delegation-table rows. The
+    # location-anchored assertions above are the primary signal.
+    assert low.count("interactive-only") >= 2, (
+        f"expected ≥2 'interactive-only' pointers in SKILL.md, "
+        f"found {low.count('interactive-only')}"
+    )
+    assert "review-gates.md" in t, "SKILL.md must reference review-gates.md"
