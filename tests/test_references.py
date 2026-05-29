@@ -123,6 +123,23 @@ def test_review_gates_documents_magi_contract():
         "§7 must list 'Interactive handoff.' as a supported alternative"
     assert "- **direct runner invocation.**" in low, \
         "§7 must list 'Direct runner invocation.' as a supported alternative"
+    # Polarity guard: no §7 line may present `claude -p` co-located with
+    # any phrasing that flips the prohibition into a permission. Guards
+    # against future "historical note / now permitted" rewrites that
+    # would satisfy the bullet/substring anchors above while inverting
+    # the contract's meaning.
+    inverted_markers = (
+        "permitted", "acceptable", "now allowed", "is supported",
+        "no longer applies", "no longer required",
+    )
+    for line in low.splitlines():
+        if "claude -p" not in line:
+            continue
+        for marker in inverted_markers:
+            assert marker not in line, (
+                f"§7 polarity inverted: line contains both 'claude -p' and "
+                f"'{marker}': {line.strip()!r}"
+            )
 
 
 def test_routing_plan_gate_points_to_magi_contract():
