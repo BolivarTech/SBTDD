@@ -106,9 +106,9 @@ Changes are picked up with `/reload-plugins` without restarting.
 |----------------|-----------|--------------|
 | Spec refinement | `routing.md` | `superpowers:brainstorming` |
 | Planning | `routing.md` | `superpowers:writing-plans` |
-| Plan gate (Checkpoint 2) | `review-gates.md` | `magi:magi` (+ manual review) |
+| Plan gate (Checkpoint 2) | `review-gates.md` | `magi:magi` (+ manual review) — **interactive-only**, see `review-gates.md` §7 |
 | Execution | `tdd-cycle.md` | `superpowers:test-driven-development`, `…:verification-before-completion`, `…:systematic-debugging`; mode `…:subagent-driven-development` / `…:executing-plans` |
-| Pre-merge review | `review-gates.md` | `superpowers:requesting-code-review` → `…:receiving-code-review` → `magi:magi` |
+| Pre-merge review | `review-gates.md` | `superpowers:requesting-code-review` → `…:receiving-code-review` → `magi:magi` — **interactive-only**, see `review-gates.md` §7 |
 | Finalization | `finalization.md` | `superpowers:finishing-a-development-branch` |
 
 ### Multi-stack scaffolding
