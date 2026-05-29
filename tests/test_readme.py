@@ -11,3 +11,17 @@ def test_readme_documents_entrypoints():
     # documents runtime dependencies + the gitignore trade-off (MAGI caveats)
     assert "superpowers" in t.lower() and "magi" in t.lower()
     assert "gitignore" in t.lower()
+
+
+def test_readme_points_to_magi_interactive_only_contract():
+    """README.md must carry an 'interactive-only' pointer next to any MAGI
+    mention so a maintainer reading the entry-level README (not just
+    SKILL.md) encounters the invocation contract before building a
+    headless dispatcher. The pointer must reference review-gates.md so
+    the reader can locate §7."""
+    t = (ROOT / "README.md").read_text(encoding="utf-8")
+    low = t.lower()
+    assert "interactive-only" in low, \
+        "README.md must mention 'interactive-only'"
+    assert "review-gates.md" in t, \
+        "README.md must reference review-gates.md"
