@@ -193,6 +193,10 @@ The comment line `# SBTDD local-only files` is added once only if it is
 not already present. Check each of the five content entries individually
 and add only the missing ones. Do not duplicate existing entries.
 
+> **If invoked as `/sbtdd-init --ollama-init`:** before the final report, also
+> perform the **Optional flag: `--ollama-init`** section below (Ollama MAGI
+> backend setup).
+
 ---
 
 ## Optional flag: `--ollama-init`
