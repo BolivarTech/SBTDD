@@ -99,3 +99,13 @@ def test_skill_md_points_to_magi_contract():
         f"found {low.count('interactive-only')}"
     )
     assert "review-gates.md" in t, "SKILL.md must reference review-gates.md"
+
+
+def test_skill_points_to_backend_selection():
+    """SKILL.md must thread the --ollama backend and point to review-gates §8
+    (contiguous literal), without dropping the §7 interactive-only pointers
+    (guarded separately by test_skill_md_points_to_magi_contract)."""
+    t = _txt()
+    assert "--ollama" in t
+    assert "review-gates.md §8" in t
+    assert "magi-ollama.toml" in t
