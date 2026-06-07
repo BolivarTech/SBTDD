@@ -37,3 +37,17 @@ def test_sbtdd_check_covers_seven_items():
     assert "read-only" in t.lower() or "does not fix" in t.lower()
     assert "sbtdd-init" in t
     assert "description:" in frontmatter(t)
+
+
+def test_sbtdd_init_documents_ollama_init_flag():
+    """--ollama-init must be documented: delegate to MAGI's --ollama-init to
+    scaffold ./.claude/magi-ollama.toml (idempotent), point to review-gates §8
+    (contiguous literal), and state the MAGI 4.0.1 floor."""
+    t = (CMD / "sbtdd-init.md").read_text(encoding="utf-8")
+    assert "--ollama-init" in t
+    assert "magi-ollama.toml" in t
+    assert "/magi --ollama-init" in t
+    assert "review-gates.md §8" in t
+    assert "4.0.1" in t
+    low = t.lower()
+    assert "skip" in low or "do not overwrite" in low or "idempotent" in low
