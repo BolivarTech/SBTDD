@@ -195,6 +195,24 @@ and add only the missing ones. Do not duplicate existing entries.
 
 ---
 
+## Optional flag: `--ollama-init`
+
+When `/sbtdd-init` is invoked as `/sbtdd-init --ollama-init`, then after the
+steps above, delegate to MAGI's `--ollama-init` (`/magi --ollama-init`) to
+scaffold `./.claude/magi-ollama.toml`. Its presence selects the Ollama backend
+for every MAGI invocation in the SBTDD flow — see `review-gates.md §8` (MAGI
+Backend Selection).
+
+- **Idempotent:** if `./.claude/magi-ollama.toml` already exists, skip it and
+  report "skipped (already present)"; never overwrite.
+- `.claude/` is gitignored (Step 6), so the toml (and any API key) is not tracked.
+- Requires **MAGI 4.0.1 or newer**; if the installed MAGI is older, report that
+  the Ollama backend is unavailable and skip this step.
+- Without `--ollama-init`, `/sbtdd-init` does NOT create the toml and the flow
+  uses the default Claude backend.
+
+---
+
 ## Step 7 — Final report
 
 Print a summary table:
@@ -207,6 +225,7 @@ Print a summary table:
 | `sbtdd/`                      | created / skipped |
 | `planning/`                   | created / skipped |
 | `sbtdd/spec-behavior-base.md` | created / skipped |
+| `.claude/magi-ollama.toml` (with `--ollama-init`) | created / skipped / n/a |
 | `.gitignore` entries          | added N / all present |
 
 Then remind the user:
