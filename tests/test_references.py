@@ -171,3 +171,20 @@ def test_review_gates_sections_point_to_magi_contract():
         "extracted section header must still contain 'Final Gate'"
     assert "interactive-only" in sec4.lower(), \
         "Final Gate section must mention 'interactive-only'"
+
+
+def test_review_gates_documents_backend_selection():
+    """§8. MAGI Backend Selection must declare the toml-existence resolution,
+    the --ollama fail-closed rule (no silent Claude fallback), the MAGI version
+    floor, and consistency with §7 (interactive skill, not a claude -p
+    subprocess)."""
+    t = (REF / "review-gates.md").read_text(encoding="utf-8")
+    sec = _section(t, "MAGI Backend Selection")
+    assert sec, "'## 8. MAGI Backend Selection' section not found in review-gates.md"
+    low = sec.lower()
+    assert "--ollama" in low, "§8 must name the --ollama flag"
+    assert "magi-ollama.toml" in low, "§8 must name the persistence file"
+    assert "fail-closed" in low, "§8 must declare the fail-closed rule"
+    assert "must not" in low, "§8 must use normative 'MUST NOT' (no silent claude fallback)"
+    assert "4.0.1" in sec, "§8 must state the minimum MAGI version (4.0.1)"
+    assert "interactive-only" in low, "§8 must cross-reference the §7 interactive-only contract"
