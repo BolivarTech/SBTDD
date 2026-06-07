@@ -188,3 +188,12 @@ def test_review_gates_documents_backend_selection():
     assert "must not" in low, "§8 must use normative 'MUST NOT' (no silent claude fallback)"
     assert "4.0.1" in sec, "§8 must state the minimum MAGI version (4.0.1)"
     assert "interactive-only" in low, "§8 must cross-reference the §7 interactive-only contract"
+
+
+def test_routing_plan_gate_points_to_backend_selection():
+    """routing.md plan-gate row must point to review-gates §8 (contiguous
+    literal) so a reader at the plan gate finds the MAGI backend-selection
+    rule."""
+    row = _plan_gate_row((REF / "routing.md").read_text(encoding="utf-8"))
+    assert row, "plan-gate row not found in routing.md"
+    assert "review-gates.md §8" in row, "plan-gate row must point to review-gates.md §8"
