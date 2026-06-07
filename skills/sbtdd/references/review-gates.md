@@ -192,3 +192,59 @@ This contract was added in v0.0.5 after a headless SBTDD-runtime
 dispatcher hit the failure modes above when driving `magi:magi` via
 `claude -p`. The runtime fix lands in a separate repo; the contract
 belongs here so future runtimes read it first.
+
+---
+
+## 8. MAGI Backend Selection
+
+`magi:magi` runs on one of two backends: the default **Claude** backend, or the
+**Ollama** backend. This section is the single normative source for how the
+orchestrator selects between them; `SKILL.md`, `commands/sbtdd.md`,
+`commands/sbtdd-init.md`, and `references/routing.md` point here — they do not
+restate the rule.
+
+### Resolution rule (toml-existence)
+
+On **every** `magi:magi` invocation the orchestrator makes — Plan-gate
+Checkpoint 2 (§0) and Pre-merge Loop 2 (§4) — resolve the backend by the presence
+of `./.claude/magi-ollama.toml`:
+
+| `./.claude/magi-ollama.toml` | Backend | Invocation |
+|------------------------------|---------|------------|
+| exists | Ollama | `magi:magi --ollama …` |
+| absent | Claude (default) | `magi:magi …` |
+
+The file's existence is the persistent signal — it spans the whole
+multi-invocation flow (Checkpoint 2 runs before `.claude/session-state.json`
+exists; Loop 2 runs after), so a run started on Ollama stays on Ollama across
+resumes **without** a new state-file field. `/sbtdd` invoked **without**
+`--ollama` still resolves to Ollama when the toml exists.
+
+### Enabling the Ollama backend
+
+Run `/sbtdd-init --ollama-init`, which delegates to MAGI's `--ollama-init`
+(`/magi --ollama-init`) to scaffold `./.claude/magi-ollama.toml` (idempotent).
+`.claude/` is gitignored, so the toml (and any API key) is never tracked.
+
+### `/sbtdd --ollama` is fail-closed
+
+`/sbtdd --ollama` explicitly requests the Ollama backend. If
+`./.claude/magi-ollama.toml` does **not** exist, the orchestrator **MUST** stop
+and instruct the user to run `/sbtdd-init --ollama-init` first. It **MUST NOT**
+silently fall back to the Claude backend — failing closed surfaces a
+misconfiguration instead of running the wrong backend unnoticed.
+
+### Consistency with §7 (interactive-only)
+
+The `--ollama` backend changes only **which models** run the Melchior /
+Balthasar / Caspar trio (Ollama models from `magi-ollama.toml`). The invocation
+is still the **interactive** `magi:magi` skill — it is **not** a `claude -p`
+subprocess — so the interactive-only contract of §7 holds unchanged.
+`--ollama-init` only scaffolds a config file; it is not an interactive review.
+
+### Dependency: MAGI 4.0.1 or newer
+
+`--ollama` and `--ollama-init` are provided by the MAGI plugin and **require
+MAGI 4.0.1 or newer**. Building or modifying the MAGI plugin is out of scope for
+the SBTDD plugin; if the installed MAGI predates 4.0.1, the Ollama backend is
+unavailable and `/sbtdd-init --ollama-init` cannot produce a usable config.
