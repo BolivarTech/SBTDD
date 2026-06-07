@@ -60,4 +60,5 @@ def test_sbtdd_command_documents_ollama_flag():
     assert "--ollama" in t
     assert "review-gates.md §8" in t
     low = t.lower()
-    assert "fail-closed" in low or "magi-ollama.toml" in low
+    assert "fail-closed" in low
+    assert "magi-ollama.toml" in low
