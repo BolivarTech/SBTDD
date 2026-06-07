@@ -197,3 +197,18 @@ def test_routing_plan_gate_points_to_backend_selection():
     row = _plan_gate_row((REF / "routing.md").read_text(encoding="utf-8"))
     assert row, "plan-gate row not found in routing.md"
     assert "review-gates.md §8" in row, "plan-gate row must point to review-gates.md §8"
+
+
+def test_review_gates_documents_backend_unavailable_failmode():
+    """§8 must document fail-closed behavior when the toml exists but the Ollama
+    backend is unavailable at invocation (preflight fails), and how to switch
+    back to Claude (remove the toml)."""
+    sec = _section((REF / "review-gates.md").read_text(encoding="utf-8"),
+                   "MAGI Backend Selection")
+    assert sec, "§8 section not found"
+    low = sec.lower()
+    assert "preflight" in low, "§8 must reference the MAGI --ollama preflight"
+    assert "unavailable" in low or "unreachable" in low, \
+        "§8 must cover the backend-unavailable failure mode"
+    assert "remove" in low and "magi-ollama.toml" in low, \
+        "§8 must document switching back to Claude by removing the toml"
