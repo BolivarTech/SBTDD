@@ -51,3 +51,13 @@ def test_sbtdd_init_documents_ollama_init_flag():
     assert "4.0.1" in t
     low = t.lower()
     assert "skip" in low or "do not overwrite" in low or "idempotent" in low
+
+
+def test_sbtdd_command_documents_ollama_flag():
+    """/sbtdd --ollama must be documented as the explicit fail-closed Ollama
+    form, pointing to review-gates §8 (contiguous literal)."""
+    t = (CMD / "sbtdd.md").read_text(encoding="utf-8")
+    assert "--ollama" in t
+    assert "review-gates.md §8" in t
+    low = t.lower()
+    assert "fail-closed" in low or "magi-ollama.toml" in low
