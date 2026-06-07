@@ -62,6 +62,12 @@ and invoke the listed skill(s) using their fully qualified names
 > markdown/spec/plan/TodoWrite writes are not blocked; toggle `tdd-guard on`
 > when returning to Execution. See `references/tdd-cycle.md` §6 for details.
 
+> **MAGI backend:** the orchestrator resolves the MAGI backend per
+> `review-gates.md §8` — if `./.claude/magi-ollama.toml` exists, every `magi:magi`
+> invocation (Plan gate, Pre-merge review) is threaded with `--ollama`;
+> `/sbtdd --ollama` is the explicit fail-closed form. Enable it with
+> `/sbtdd-init --ollama-init`.
+
 ### 4. Gates
 
 Human stops are mandatory and ordered at the plan gate: **Checkpoint 1** (manual
