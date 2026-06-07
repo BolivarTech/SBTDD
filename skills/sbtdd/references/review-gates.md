@@ -248,3 +248,17 @@ subprocess — so the interactive-only contract of §7 holds unchanged.
 MAGI 4.0.1 or newer**. Building or modifying the MAGI plugin is out of scope for
 the SBTDD plugin; if the installed MAGI predates 4.0.1, the Ollama backend is
 unavailable and `/sbtdd-init --ollama-init` cannot produce a usable config.
+
+### Backend unavailable, and switching back
+
+If `./.claude/magi-ollama.toml` exists but the Ollama backend is **unavailable**
+when MAGI runs — the daemon is unreachable, `ollama signin` was not completed for
+`:cloud` models, or the configured trio is missing — MAGI's `--ollama`
+**preflight** fails. The orchestrator **MUST** stop and tell the user to verify
+the Ollama server (start the daemon / `ollama signin` / pull the configured
+models); it **MUST NOT** silently fall back to the Claude backend. The
+orchestrator only checks the toml's **presence** — validating the toml's contents
+and reaching the models is the MAGI plugin's responsibility (its preflight).
+
+To switch back to the Claude backend, **remove** `./.claude/magi-ollama.toml`;
+its absence resolves to Claude per the table above.
