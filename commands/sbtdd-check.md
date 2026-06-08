@@ -223,13 +223,17 @@ lives in `${CLAUDE_PLUGIN_ROOT}/skills/sbtdd/references/review-gates.md §8`
 ### Ollama smoke test (only when the toml exists)
 
 Verify the Ollama backend is operational by running the **real** MAGI pipeline
-once on a throwaway input. Invoke the **interactive** `magi:magi` skill with
-`--ollama` — `/magi --ollama` in `analysis` mode on a one-line trivial prompt
-(e.g. `Reply OK.`). This is the interactive skill, **not** a `claude -p`
-subprocess and **not** a direct `run_magi.py` subprocess — it satisfies the
-interactive-only contract (`review-gates.md §7`). It delegates all deep
-validation (daemon reachability, `ollama signin`, trio-model presence, and the
-MAGI ≥ 4.0.1 floor) to MAGI's own `--ollama` preflight.
+once on a throwaway input. Invoke the **interactive** `magi:magi` skill with the
+`--ollama` flag, the **positional** mode `analysis`, and a one-line trivial
+input — i.e. `/magi --ollama analysis "Reply OK."` (the mode is a positional
+argument, not a `--mode` flag). This is the interactive skill, **not** a
+`claude -p` subprocess and **not** a direct `run_magi.py` subprocess — it
+satisfies the interactive-only contract (`review-gates.md §7`). If `/sbtdd-check`
+runs in a non-interactive context where the skill cannot be invoked, Check 8
+reports the smoke test **cannot run** (the `magi:magi`-unavailable branch below)
+— it never falls back to a headless subprocess. It delegates all deep validation
+(daemon reachability, `ollama signin`, trio-model presence, and the MAGI ≥ 4.0.1
+floor) to MAGI's own `--ollama` preflight.
 
 **Time-bounded:** the smoke test cannot hang indefinitely — MAGI's preflight
 applies a short reachability timeout (~10s) and each mage runs under a per-agent
