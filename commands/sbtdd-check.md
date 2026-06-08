@@ -228,12 +228,17 @@ once on a throwaway input. Invoke the **interactive** `magi:magi` skill with the
 input — i.e. `/magi --ollama analysis "Reply OK."` (the mode is a positional
 argument, not a `--mode` flag). This is the interactive skill, **not** a
 `claude -p` subprocess and **not** a direct `run_magi.py` subprocess — it
-satisfies the interactive-only contract (`review-gates.md §7`). If `/sbtdd-check`
-runs in a non-interactive context where the skill cannot be invoked, Check 8
-reports the smoke test **cannot run** (the `magi:magi`-unavailable branch below)
-— it never falls back to a headless subprocess. It delegates all deep validation
-(daemon reachability, `ollama signin`, trio-model presence, and the MAGI ≥ 4.0.1
-floor) to MAGI's own `--ollama` preflight.
+satisfies the interactive-only contract (`review-gates.md §7`). It delegates all
+deep validation (daemon reachability, `ollama signin`, trio-model presence, and
+the MAGI ≥ 4.0.1 floor) to MAGI's own `--ollama` preflight.
+
+**Non-interactive contexts:** the smoke test needs an interactive session to
+invoke the `magi:magi` skill. In a headless / CI context where the skill cannot
+be invoked, Check 8 reports the smoke test **cannot run** (the
+`magi:magi`-unavailable branch below) — it never falls back to a headless
+`claude -p` or `run_magi.py` subprocess. To run the verifier there without that
+result, remove `./.claude/magi-ollama.toml` (Check 8 then reports the Claude
+backend and runs no smoke test).
 
 **Time-bounded:** the smoke test cannot hang indefinitely — MAGI's preflight
 applies a short reachability timeout (~10s) and each mage runs under a per-agent
