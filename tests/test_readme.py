@@ -25,3 +25,14 @@ def test_readme_points_to_magi_interactive_only_contract():
         "README.md must mention 'interactive-only'"
     assert "review-gates.md" in t, \
         "README.md must reference review-gates.md"
+
+
+def test_readme_documents_ollama_backend():
+    """README.md must document the Ollama MAGI backend feature: both flags,
+    the toml-presence selection signal, and the §8 contract pointer."""
+    t = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "--ollama-init" in t, "README must document /sbtdd-init --ollama-init"
+    assert "--ollama" in t, "README must document /sbtdd --ollama"
+    assert "magi-ollama.toml" in t, "README must name the backend-selection file"
+    low = t.lower()
+    assert "ollama" in low and "§8" in t, "README must point to review-gates §8 for the backend"
