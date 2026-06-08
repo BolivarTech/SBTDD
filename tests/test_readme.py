@@ -36,3 +36,13 @@ def test_readme_documents_ollama_backend():
     assert "magi-ollama.toml" in t, "README must name the backend-selection file"
     low = t.lower()
     assert "ollama" in low and "§8" in t, "README must point to review-gates §8 for the backend"
+
+
+def test_readme_documents_sbtdd_check_reports_backend():
+    """README.md must document that /sbtdd-check reports/verifies the active MAGI
+    backend (Check 8) — including the Ollama smoke test — so the verifier's new
+    capability is discoverable from the entry-level README."""
+    t = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "/sbtdd-check" in t
+    low = t.lower()
+    assert "smoke" in low, "README must mention the /sbtdd-check Ollama smoke test (Check 8)"
