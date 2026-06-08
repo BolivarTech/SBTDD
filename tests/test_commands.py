@@ -58,6 +58,7 @@ def test_sbtdd_check_reports_magi_backend():
     assert "ollama" in low and "claude" in low, "both backends must be named"
     assert "interactive" in low, "smoke test must be the interactive skill (not a subprocess)"
     assert "preflight" in low, "Check 8 must state preflight-based PASS/FAIL classification"
+    assert "privacy" in low, "Check 8 must carry a privacy note on what the smoke test transmits"
 
 
 def test_sbtdd_init_documents_ollama_init_flag():
