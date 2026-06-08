@@ -212,3 +212,14 @@ def test_review_gates_documents_backend_unavailable_failmode():
         "§8 must cover the backend-unavailable failure mode"
     assert "remove" in low and "magi-ollama.toml" in low, \
         "§8 must document switching back to Claude by removing the toml"
+
+
+def test_review_gates_section8_cross_references_sbtdd_check():
+    """§8 must cross-reference the /sbtdd-check Check 8 verifier (pointer for
+    discoverability), without restating the resolution rule."""
+    sec = _section((REF / "review-gates.md").read_text(encoding="utf-8"),
+                   "MAGI Backend Selection")
+    assert sec, "§8 section not found"
+    low = sec.lower()
+    assert "sbtdd-check" in low, "§8 must cross-reference the /sbtdd-check verifier"
+    assert "check 8" in low, "§8 must name Check 8"
