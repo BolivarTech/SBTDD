@@ -236,6 +236,10 @@ applies a short reachability timeout (~10s) and each mage runs under a per-agent
 timeout, so an unreachable or wedged backend surfaces as a **preflight FAIL**
 within seconds rather than blocking the verifier.
 
+**Privacy:** the smoke test transmits only the trivial throwaway prompt
+(e.g. `Reply OK.`) to the configured Ollama backend — which may be a **cloud**
+endpoint — never project files or repository data.
+
 **Classify the result (explicit, reviewable):**
 
 - **`magi:magi` unavailable** (Check 7 failed) → `FAIL` — "cannot smoke-test:
