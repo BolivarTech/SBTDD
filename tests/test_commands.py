@@ -59,6 +59,7 @@ def test_sbtdd_check_reports_magi_backend():
     assert "interactive" in low, "smoke test must be the interactive skill (not a subprocess)"
     assert "preflight" in low, "Check 8 must state preflight-based PASS/FAIL classification"
     assert "privacy" in low, "Check 8 must carry a privacy note on what the smoke test transmits"
+    assert "cost" in low, "Check 8 must warn that an always-on smoke test on a cloud backend incurs cost"
 
 
 def test_sbtdd_init_documents_ollama_init_flag():
