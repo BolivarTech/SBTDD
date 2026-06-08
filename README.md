@@ -1,7 +1,7 @@
 # SBTDD — Spec + Behavior + Test-Driven Development Orchestrator for Claude Code
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen.svg)](#running-tests)
+[![Tests](https://img.shields.io/badge/tests-58%20passing-brightgreen.svg)](#running-tests)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A Claude Code plugin that drives the **SBTDD** workflow — **S**pec + **B**ehavior + **T**est-**D**riven **D**evelopment — as a single, resumable, state-routed flow on top of the [`superpowers`](https://github.com/obra/superpowers) skill library and the [`magi`](https://github.com/BolivarTech/magi-claude) multi-perspective review gate.
@@ -33,8 +33,8 @@ The result is a flow where the *value* is the sequencing and the gates, not just
 
 | Command | Purpose |
 |---------|---------|
-| `/sbtdd` | Drive or **resume** the workflow. Detects the current phase from project artifacts + `.claude/session-state.json` and runs the next step, delegating to the right `superpowers` / `magi:magi` skill. |
-| `/sbtdd-init` | Scaffold a project for SBTDD. Detects the stack (Rust / Python / C-C++), writes `CLAUDE.local.md` (rules) and the TDD-Guard hooks, creates the `sbtdd/` and `planning/` directories, and updates `.gitignore`. Idempotent. |
+| `/sbtdd` | Drive or **resume** the workflow. Detects the current phase from project artifacts + `.claude/session-state.json` and runs the next step, delegating to the right `superpowers` / `magi:magi` skill. Pass `--ollama` to force the Ollama MAGI backend (see *MAGI backend* below). |
+| `/sbtdd-init` | Scaffold a project for SBTDD. Detects the stack (Rust / Python / C-C++), writes `CLAUDE.local.md` (rules) and the TDD-Guard hooks, creates the `sbtdd/` and `planning/` directories, and updates `.gitignore`. Idempotent. `/sbtdd-init --ollama-init` also scaffolds the Ollama MAGI config (`magi-ollama.toml`). |
 | `/sbtdd-check` | Read-only environment verifier. Confirms rules, hooks, directories, the `tdd-guard` binary, and the delegated `superpowers` / `magi:magi` skills are present. Diagnoses; never fixes. |
 
 ---
@@ -69,7 +69,7 @@ SBTDD is an **orchestrator** — it delegates to existing skills rather than rei
 | Dependency | Why |
 |------------|-----|
 | [`superpowers`](https://github.com/obra/superpowers) | The skills SBTDD delegates to (`brainstorming`, `writing-plans`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `finishing-a-development-branch`, …). |
-| [`magi`](https://github.com/BolivarTech/magi-claude) | The `magi:magi` multi-perspective gate, run **twice** across the lifecycle: at the plan checkpoint and at pre-merge. |
+| [`magi`](https://github.com/BolivarTech/magi-claude) | The `magi:magi` multi-perspective gate, run **twice** across the lifecycle: at the plan checkpoint and at pre-merge. The optional **Ollama** backend (`/sbtdd --ollama`) requires **magi 4.0.1+**. |
 | `tdd-guard` binary + per-stack reporter | Real-time Red-Green-Refactor enforcement. Install the binary **before** `/sbtdd-init` writes the hooks (a hook pointing at a missing binary fails closed). Optional reporters sync test output on demand: `tdd-guard-rust`, `tdd-guard-pytest`, etc. |
 
 `/sbtdd-check` verifies all of the above and fails loudly on anything missing.
@@ -127,6 +127,10 @@ If more than one manifest is detected — or none — `/sbtdd-init` pauses and a
 
 The skill **points to** the scaffolded `CLAUDE.local.md` for canonical rule values (commit prefixes, the state-file schema, verification commands) instead of duplicating them — change a rule in one place, no second copy drifts.
 
+### MAGI backend: Claude or Ollama
+
+`magi:magi` runs on the default **Claude** backend, or on a local/remote **Ollama** backend. To use Ollama, run `/sbtdd-init --ollama-init` once — it delegates to MAGI's `--ollama-init` to scaffold `./.claude/magi-ollama.toml` (gitignored). From then on the file's **presence selects the backend**: every MAGI invocation in the flow (plan gate + pre-merge) is threaded with `--ollama`, including a plain `/sbtdd` on resume. `/sbtdd --ollama` is the explicit, **fail-closed** form — if the config is missing, or the Ollama server is unavailable at invocation, it stops and points you to the setup instead of silently falling back to Claude. Remove the toml to switch back to Claude. Requires **MAGI 4.0.1+**. The full contract is `review-gates.md` §8.
+
 ---
 
 ## Project Structure
@@ -171,7 +175,7 @@ The entire SBTDD process is **developer-local**. `/sbtdd-init` adds these to a t
 The plugin is markdown/JSON/templates, so the test suite asserts **structure and content presence** (a green run is a presence/lint signal, not proof of agent runtime behavior). The real acceptance gate is `plugin-validator` plus manual behavioral evaluation.
 
 ```bash
-# All tests (43)
+# All tests (58)
 python -m pytest -q
 
 # Verbose
@@ -194,7 +198,7 @@ python -m pytest -v
 |-----------|----------|-------|
 | Claude Code | Yes | The plugin runs inside Claude Code. |
 | `superpowers` plugin | Yes | Delegated skills. |
-| `magi` plugin | Yes | `magi:magi` review gate. |
+| `magi` plugin | Yes | `magi:magi` review gate (**4.0.1+** for the Ollama backend). |
 | `tdd-guard` + reporter | For execution | Real-time TDD enforcement; install before `/sbtdd-init`. |
 | Python 3.9+ | For the test suite | The plugin itself ships no runtime Python. |
 
