@@ -7,7 +7,7 @@ description: Read-only SBTDD setup verifier — diagnoses the full configuration
 **This command is read-only. It diagnoses; it does not fix.**
 For any failing item, the remediation is to run `/sbtdd-init`.
 
-Run all seven checks below in order. For each check report `PASS`,
+Run all eight checks below in order. For each check report `PASS`,
 `FAIL <reason>`, or `N/A <reason>` (where applicable) with a one-line
 remediation hint. Check 6 may legitimately report `N/A` when no session
 state file exists yet.
@@ -207,6 +207,62 @@ plugin manager and restart the harness.
 
 ---
 
+## Check 8 — Active MAGI backend (and Ollama smoke test)
+
+Report which MAGI backend the SBTDD flow will use, and — when the Ollama
+backend is selected — verify it actually works end-to-end. The backend is
+resolved by the presence of `./.claude/magi-ollama.toml`; the normative rule
+lives in `${CLAUDE_PLUGIN_ROOT}/skills/sbtdd/references/review-gates.md §8`
+(MAGI Backend Selection). **This check points there; it does not restate the rule.**
+
+| `./.claude/magi-ollama.toml` | Active backend | Check 8 action |
+|------------------------------|----------------|----------------|
+| **absent** | **Claude** (default) | Report `PASS` — "Claude backend (default); no Ollama config to verify." No smoke test runs. (To use Ollama instead, run `/sbtdd-init --ollama-init`.) |
+| **present** | **Ollama** | Run the smoke test below. |
+
+### Ollama smoke test (only when the toml exists)
+
+Verify the Ollama backend is operational by running the **real** MAGI pipeline
+once on a throwaway input. Invoke the **interactive** `magi:magi` skill with
+`--ollama` — `/magi --ollama` in `analysis` mode on a one-line trivial prompt
+(e.g. `Reply OK.`). This is the interactive skill, **not** a `claude -p`
+subprocess and **not** a direct `run_magi.py` subprocess — it satisfies the
+interactive-only contract (`review-gates.md §7`). It delegates all deep
+validation (daemon reachability, `ollama signin`, trio-model presence, and the
+MAGI ≥ 4.0.1 floor) to MAGI's own `--ollama` preflight.
+
+**Time-bounded:** the smoke test cannot hang indefinitely — MAGI's preflight
+applies a short reachability timeout (~10s) and each mage runs under a per-agent
+timeout, so an unreachable or wedged backend surfaces as a **preflight FAIL**
+within seconds rather than blocking the verifier.
+
+**Classify the result (explicit, reviewable):**
+
+- **`magi:magi` unavailable** (Check 7 failed) → `FAIL` — "cannot smoke-test:
+  `magi:magi` unavailable (see Check 7)." The smoke test cannot run.
+- **The run aborts in MAGI's `--ollama` preflight** — the output names a
+  reachability / auth / model-presence failure (e.g. "Cannot reach Ollama",
+  "Auth failed", "Missing models", `OllamaPreflightError`), or `magi:magi`
+  reports `--ollama` is unknown (MAGI older than 4.0.1) → `FAIL`. Surface MAGI's
+  exact message plus the remediation hint: start the daemon / `ollama signin` /
+  `ollama pull <model>` / upgrade MAGI to 4.0.1+.
+- **MAGI renders its VERDICT banner / the trio completes** → `PASS` — "Ollama
+  backend active and operational." The GO/NO-GO verdict on the throwaway prompt
+  is irrelevant; Check 8 only cares that the pipeline ran (config resolved →
+  preflight passed → trio executed).
+
+The MAGI ≥ 4.0.1 floor is **subsumed** by the smoke test: an older MAGI has no
+`--ollama` flag, so the run fails with that error — no separate version probe.
+The smoke test **always runs** when the toml exists (no skip flag); the verifier
+authoritatively confirms the backend on every run.
+
+**FAIL remediation:** fix the Ollama backend per MAGI's reported error (start the
+daemon, `ollama signin`, pull the configured trio, or upgrade MAGI), then re-run
+`/sbtdd-check`. To switch to the Claude backend instead, remove
+`./.claude/magi-ollama.toml` (its absence resolves to Claude).
+
+---
+
 ## Summary output
 
 After all checks, print a summary table:
@@ -220,6 +276,7 @@ After all checks, print a summary table:
 | 5 | `tdd-guard` + stack reporter on PATH | PASS / FAIL |
 | 6 | State-file drift check             | PASS / FAIL / N/A |
 | 7 | superpowers + magi:magi available  | PASS / FAIL |
+| 8 | Active MAGI backend (Claude / Ollama + smoke test) | PASS / FAIL |
 
 If **any check fails**, end with:
 
