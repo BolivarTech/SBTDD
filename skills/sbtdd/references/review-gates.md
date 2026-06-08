@@ -203,6 +203,11 @@ orchestrator selects between them; `SKILL.md`, `commands/sbtdd.md`,
 `commands/sbtdd-init.md`, and `references/routing.md` point here — they do not
 restate the rule.
 
+> **Verifier:** `/sbtdd-check` Check 8 reports the active backend and, when
+> `./.claude/magi-ollama.toml` exists, smoke-tests the Ollama backend end-to-end
+> (interactive `magi:magi --ollama` on a throwaway input). See
+> `commands/sbtdd-check.md`.
+
 ### Resolution rule (toml-existence)
 
 On **every** `magi:magi` invocation the orchestrator makes — Plan-gate
