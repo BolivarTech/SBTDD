@@ -1,6 +1,6 @@
 {
   "name": "sbtdd",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "description": "SBTDD orchestrator: drives the Spec + Behavior + Test-Driven Development multi-agent workflow on top of superpowers — spec, plan, MAGI gate, TDD execution, dual-loop review, and finalization — behind a single state-routed /sbtdd entry.",
   "author": {
     "name": "Julian Bolivar",
