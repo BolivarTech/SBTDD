@@ -270,6 +270,9 @@ then reports the Claude backend and runs no smoke test.
   backend active and operational." The GO/NO-GO verdict on the throwaway prompt
   is irrelevant; Check 8 only cares that the pipeline ran (config resolved →
   preflight passed → trio executed).
+- **The skill runs but produces no VERDICT banner** (an error or crash after
+  preflight, or any other **incomplete** run) → `FAIL` — surface MAGI's output.
+  Absence of a verdict is a failure, never a PASS.
 
 The MAGI ≥ 4.0.1 floor is **subsumed** by the smoke test: an older MAGI has no
 `--ollama` flag, so the run fails with that error — no separate version probe.
