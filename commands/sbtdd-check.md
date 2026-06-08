@@ -245,6 +245,11 @@ within seconds rather than blocking the verifier.
 endpoint. Check 8 passes no project files or repository contents to the smoke
 test; the trio sees only that throwaway string.
 
+**Cost:** the smoke test runs the MAGI trio on every `/sbtdd-check`. If the
+configured Ollama backend is a **cloud-billed** endpoint, each run incurs that
+cost. To disable the smoke test, remove `./.claude/magi-ollama.toml` — Check 8
+then reports the Claude backend and runs no smoke test.
+
 **Classify the result (explicit, reviewable):**
 
 - **`magi:magi` unavailable** (Check 7 failed) → `FAIL` — "cannot smoke-test:
