@@ -240,10 +240,11 @@ applies a short reachability timeout (~10s) and each mage runs under a per-agent
 timeout, so an unreachable or wedged backend surfaces as a **preflight FAIL**
 within seconds rather than blocking the verifier.
 
-**Privacy:** the smoke test's input is the literal throwaway string (e.g.
-`Reply OK.`), sent to the configured Ollama backend — which may be a **cloud**
-endpoint. Check 8 passes no project files or repository contents to the smoke
-test; the trio sees only that throwaway string.
+**Privacy:** by design the smoke test's input is the literal throwaway string
+(e.g. `Reply OK.`), sent to the configured Ollama backend — which may be a
+**cloud** endpoint. Check 8 passes no project files or repository contents to the
+smoke test; the trio sees only that throwaway string. (MAGI's and Ollama's own
+logging of that request is outside this plugin's control.)
 
 **Cost:** the smoke test runs the MAGI trio on every `/sbtdd-check`. If the
 configured Ollama backend is a **cloud-billed** endpoint, each run incurs that
