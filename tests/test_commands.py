@@ -64,6 +64,7 @@ def test_sbtdd_check_reports_magi_backend():
     assert "preflight" in low, "Check 8 must state preflight-based PASS/FAIL classification"
     assert "privacy" in low, "Check 8 must carry a privacy note on what the smoke test transmits"
     assert "cost" in low, "Check 8 must warn that an always-on smoke test on a cloud backend incurs cost"
+    assert "incomplete" in low, "Check 8 classification must catch an incomplete run (no verdict) as FAIL"
 
 
 def test_sbtdd_init_documents_ollama_init_flag():
