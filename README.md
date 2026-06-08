@@ -35,7 +35,7 @@ The result is a flow where the *value* is the sequencing and the gates, not just
 |---------|---------|
 | `/sbtdd` | Drive or **resume** the workflow. Detects the current phase from project artifacts + `.claude/session-state.json` and runs the next step, delegating to the right `superpowers` / `magi:magi` skill. Pass `--ollama` to force the Ollama MAGI backend (see *MAGI backend* below). |
 | `/sbtdd-init` | Scaffold a project for SBTDD. Detects the stack (Rust / Python / C-C++), writes `CLAUDE.local.md` (rules) and the TDD-Guard hooks, creates the `sbtdd/` and `planning/` directories, and updates `.gitignore`. Idempotent. `/sbtdd-init --ollama-init` also scaffolds the Ollama MAGI config (`magi-ollama.toml`). |
-| `/sbtdd-check` | Read-only environment verifier. Confirms rules, hooks, directories, the `tdd-guard` binary, and the delegated `superpowers` / `magi:magi` skills are present. Diagnoses; never fixes. |
+| `/sbtdd-check` | Read-only environment verifier. Confirms rules, hooks, directories, the `tdd-guard` binary, the delegated `superpowers` / `magi:magi` skills, **and the active MAGI backend** — it reports Claude vs Ollama and **smoke-tests** the Ollama backend end-to-end (see *MAGI backend* below). Diagnoses; never fixes. |
 
 ---
 
@@ -129,7 +129,7 @@ The skill **points to** the scaffolded `CLAUDE.local.md` for canonical rule valu
 
 ### MAGI backend: Claude or Ollama
 
-`magi:magi` runs on the default **Claude** backend, or on a local/remote **Ollama** backend. To use Ollama, run `/sbtdd-init --ollama-init` once — it delegates to MAGI's `--ollama-init` to scaffold `./.claude/magi-ollama.toml` (gitignored). From then on the file's **presence selects the backend**: every MAGI invocation in the flow (plan gate + pre-merge) is threaded with `--ollama`, including a plain `/sbtdd` on resume. `/sbtdd --ollama` is the explicit, **fail-closed** form — if the config is missing, or the Ollama server is unavailable at invocation, it stops and points you to the setup instead of silently falling back to Claude. Remove the toml to switch back to Claude. Requires **MAGI 4.0.1+**. The full contract is `review-gates.md` §8.
+`magi:magi` runs on the default **Claude** backend, or on a local/remote **Ollama** backend. To use Ollama, run `/sbtdd-init --ollama-init` once — it delegates to MAGI's `--ollama-init` to scaffold `./.claude/magi-ollama.toml` (gitignored). From then on the file's **presence selects the backend**: every MAGI invocation in the flow (plan gate + pre-merge) is threaded with `--ollama`, including a plain `/sbtdd` on resume. `/sbtdd --ollama` is the explicit, **fail-closed** form — if the config is missing, or the Ollama server is unavailable at invocation, it stops and points you to the setup instead of silently falling back to Claude. Remove the toml to switch back to Claude. Requires **MAGI 4.0.1+**. The full contract is `review-gates.md` §8. `/sbtdd-check` (Check 8) reports which backend is active and, when Ollama, **smoke-tests** it end-to-end — invoking the interactive `magi:magi --ollama` on a throwaway input so a broken backend (daemon down, no `ollama signin`, missing trio) surfaces before a gate, not during one.
 
 ---
 
