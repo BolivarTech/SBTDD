@@ -48,6 +48,10 @@ def test_sbtdd_check_reports_magi_backend():
     interactive magi:magi --ollama skill — pointing to review-gates.md §8
     (contiguous literal) rather than restating the rule, with explicit
     preflight-based PASS/FAIL classification."""
+    # The substring assertions below are an intentional presence/lint invariant:
+    # the suite cannot execute Check 8's runtime behavior, so it guards that the
+    # feature's distinguishing content exists. Do NOT relax these to
+    # structural-only checks — that would weaken the guard (matches Checks 1-7).
     t = (CMD / "sbtdd-check.md").read_text(encoding="utf-8")
     assert "magi-ollama.toml" in t
     assert "--ollama" in t
