@@ -23,7 +23,7 @@ def test_sbtdd_init_covers_all_scaffolding_steps():
     assert "description:" in frontmatter(t)
 
 
-def test_sbtdd_check_covers_seven_items():
+def test_sbtdd_check_covers_eight_items():
     t = (CMD / "sbtdd-check.md").read_text(encoding="utf-8")
     assert "CLAUDE.local.md" in t
     assert "PreToolUse" in t and "SessionStart" in t and "UserPromptSubmit" in t
@@ -36,7 +36,28 @@ def test_sbtdd_check_covers_seven_items():
     assert "Get-Command" in t
     assert "read-only" in t.lower() or "does not fix" in t.lower()
     assert "sbtdd-init" in t
+    # Check 8 is present and the header/summary reflect eight checks.
+    assert "Check 8" in t
+    assert "eight" in t.lower()
     assert "description:" in frontmatter(t)
+
+
+def test_sbtdd_check_reports_magi_backend():
+    """Check 8 must report the active MAGI backend (Claude vs Ollama by
+    magi-ollama.toml presence) and, when Ollama, smoke-test it via the
+    interactive magi:magi --ollama skill — pointing to review-gates.md §8
+    (contiguous literal) rather than restating the rule, with explicit
+    preflight-based PASS/FAIL classification."""
+    t = (CMD / "sbtdd-check.md").read_text(encoding="utf-8")
+    assert "magi-ollama.toml" in t
+    assert "--ollama" in t
+    assert "review-gates.md §8" in t
+    low = t.lower()
+    assert "smoke" in low, "Check 8 must describe the smoke test"
+    assert "backend" in low
+    assert "ollama" in low and "claude" in low, "both backends must be named"
+    assert "interactive" in low, "smoke test must be the interactive skill (not a subprocess)"
+    assert "preflight" in low, "Check 8 must state preflight-based PASS/FAIL classification"
 
 
 def test_sbtdd_init_documents_ollama_init_flag():
